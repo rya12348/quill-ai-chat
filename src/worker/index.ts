@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 
 import { aiConfigured } from './ai'
-import { authMode, getAuth, requireUser } from './auth'
+import { appOrigin, authMode, getAuth, requireUser } from './auth'
 import { requireDb } from './db'
 import type { AppContext, Env } from './env'
 import { installPokiGameBridge, isPokiGameId, isPokiGameWrapperUrl, isPokiPage, pokiGameStartUrl, proxyPokiGameAsset } from './poki-game'
@@ -61,10 +61,11 @@ app.get('/api/web-proxy/:token', requireDb, async (c) => {
   }
   try {
     const page = await fetchSitePage(target, c.req.raw.signal)
-    const proxyUrl = new URL(webProxyPath(token), c.req.url).href
+    const proxyOrigin = appOrigin(c.env, c.req.raw)
+    const proxyUrl = new URL(webProxyPath(token), proxyOrigin).href
     let html = page.html
     if (isPokiPage(page.finalUrl)) {
-      html = installPokiGameBridge(html, token, new URL(proxyUrl).origin)
+      html = installPokiGameBridge(html, token, proxyOrigin)
     }
     return c.body(renderProxyPage(html, page.finalUrl, proxyUrl), 200, PROXY_HEADERS)
   } catch (error) {
@@ -91,7 +92,7 @@ app.get('/api/poki-game/start/:token', requireDb, async (c) => {
   }
   const row = await c.get('db').prepare(`SELECT token FROM build_embeds WHERE token = ?`).bind(token).first<{ token: string }>()
   if (!row) return c.body('Game preview not found.', 404, { 'content-type': 'text/plain; charset=utf-8' })
-  const start = await pokiGameStartUrl(wrapperUrl, token, new URL(c.req.url).origin, c.req.raw.signal)
+  const start = await pokiGameStartUrl(wrapperUrl, token, appOrigin(c.env, c.req.raw), c.req.raw.signal)
   if (!start) return c.body('Game unavailable.', 502, { 'content-type': 'text/plain; charset=utf-8' })
   c.header('cache-control', 'private, no-store')
   return c.redirect(start, 302)

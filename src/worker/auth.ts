@@ -5,6 +5,16 @@ import type { Context, MiddlewareHandler } from 'hono'
 import type { AppContext, Env } from './env'
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
+const CODESPACES_HOST = /\.github\.dev$/i
+
+/** Whether a configured origin points back at this machine. */
+function isLoopbackOrigin(value: string): boolean {
+  try {
+    return LOOPBACK.has(new URL(value).hostname)
+  } catch {
+    return false
+  }
+}
 
 // One development identity, honoured only on a loopback origin when no client
 // ID is configured. It lets the template run before auth is provisioned and
@@ -42,7 +52,7 @@ let cached: { key: string; auth: FreebuffAuth } | undefined
 /** One auth instance per isolate; recreated only if the config changes. */
 export function getAuth(env: Env, request: Request): FreebuffAuth | null {
   if (!env.FREEBUFF_CLIENT_ID) return null
-  const baseUrl = env.APP_ORIGIN ?? new URL(request.url).origin
+  const baseUrl = appOrigin(env, request)
   const key = `${env.FREEBUFF_CLIENT_ID}|${env.FREEBUFF_ISSUER ?? ''}|${baseUrl}`
   if (cached?.key !== key) {
     cached = {
@@ -64,8 +74,34 @@ export async function currentUser(env: Env, request: Request): Promise<FreebuffU
   return authMode(env, request) === 'development' ? DEV_USER : null
 }
 
+/**
+ * Codespaces terminates TLS at its proxy and forwards the request to the
+ * loopback dev server. Use the public host the browser actually visited so
+ * same-origin mutation checks and generated preview URLs do not point at
+ * 127.0.0.1. Only trust this for the unauthenticated development server on a
+ * Codespaces host; a configured public APP_ORIGIN stays authoritative.
+ */
+function forwardedDevelopmentOrigin(env: Env, request: Request): string | undefined {
+  if (env.FREEBUFF_CLIENT_ID) return undefined
+  const host = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
+  if (!host) return undefined
+  let url: URL
+  try {
+    url = new URL(`https://${host}`)
+  } catch {
+    return undefined
+  }
+  if (!CODESPACES_HOST.test(url.hostname)) return undefined
+  const proto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase()
+  if (proto && proto !== 'https') return undefined
+  return url.origin
+}
+
 export function appOrigin(env: Env, request: Request): string {
-  return env.APP_ORIGIN ?? new URL(request.url).origin
+  const configured = env.APP_ORIGIN?.trim()
+  const forwarded = forwardedDevelopmentOrigin(env, request)
+  if (forwarded && (!configured || isLoopbackOrigin(configured))) return forwarded
+  return configured || new URL(request.url).origin
 }
 
 /** Requires a signed-in user and, for mutations, a same-origin request. */
