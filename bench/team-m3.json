@@ -1,0 +1,167 @@
+{
+  "meta": {
+    "at": 1794163250661,
+    "startedAt": 1794163219836,
+    "finishedAt": 1794163250661,
+    "base": "http://127.0.0.1:5180",
+    "todayUtc": "2026-11-08",
+    "plus53": "2026-12-31",
+    "bestModel": "nvidia/nemotron-3-super-120b",
+    "baselineModel": "command-a-plus-05-2026",
+    "modes": [
+      "team"
+    ],
+    "tasks": [
+      "M3"
+    ]
+  },
+  "before": {
+    "conversations": 21,
+    "messages": 58,
+    "readErrors": 0,
+    "usage": 24,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "after": {
+    "conversations": 21,
+    "messages": 58,
+    "readErrors": 0,
+    "usage": 24,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "summary": {
+    "team": {
+      "label": "New Team",
+      "total": 1,
+      "autoScored": 1,
+      "passed": 1,
+      "failed": 0,
+      "manualPending": 0,
+      "passRate": 100,
+      "overallPassRate": 100,
+      "avgMs": 28716,
+      "slow": 0,
+      "errors": 0
+    }
+  },
+  "runs": [
+    {
+      "taskId": "M3",
+      "area": "math",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794163219837,
+      "latencyMs": 28716,
+      "firstDeltaMs": 26855,
+      "prompt": "A 180-mile trip: the first 120 miles at 60 mph, the last 60 miles at 20 mph. What is the average speed, and why isn't it 40 mph? Show the time.",
+      "answer": "**Times for each leg**\n\n| Leg | Distance (mi) | Speed (mph) | Time = Distance ÷ Speed (h) |\n|-----|---------------|-------------|-----------------------------|\n| 1   | 120           | 60          | 120 ÷ 60 = 2                |\n| 2   | 60            | 20          | 60 ÷ 20 = 3                 |\n\n- Total distance = 120 mi + 60 mi = **180 mi**  \n- Total time = 2 h + 3 h = **5 h**\n\n**Average speed**\n\n\\[\n\\text{Average speed} = \\frac{\\text{Total distance}}{\\text{Total time}} = \\frac{180\\ \\text{mi}}{5\\ \\text{h}} = \\mathbf{36\\ mph}\n\\]\n\n**Why it isn’t 40 mph**\n\nThe arithmetic mean \\((60 + 20) / 2 = 40\\) mph would be correct only if the car spent the same amount of time at each speed (or if the distances were equal). Here the car spends **more time** at the slower speed (3 h at 20 mph) than at the faster speed (2 h at 60 mph). Because average speed is total distance divided by total time, the longer duration at the lower speed pulls the overall average down to 36 mph, not 40 mph.",
+      "answerChars": 985,
+      "statuses": [
+        "The strongest free lane is planning the approach…",
+        "3 free models are drafting independently…",
+        "The independent reviewer is checking the drafts…",
+        "The strongest lane is writing the checked answer…",
+        "A second strong lane is checking the final answer…"
+      ],
+      "team": {
+        "models": [
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3.5 Bolt (BlockRun)",
+          "GPT-OSS 20B (Pollinations)",
+          "Command A+ (Cohere)",
+          "GPT-OSS 120B (Groq)"
+        ],
+        "drafts": 3,
+        "reviewed": true,
+        "drafters": [
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3.5 Bolt (BlockRun)",
+          "GPT-OSS 20B (Pollinations)"
+        ],
+        "referee": "Command A+ (Cohere)",
+        "verifier": "GPT-OSS 120B (Groq)",
+        "verified": true,
+        "repaired": false,
+        "confidence": "medium"
+      },
+      "teamEvents": [
+        {
+          "models": [
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "GPT-OSS 20B (Pollinations)",
+            "Command A+ (Cohere)",
+            "GPT-OSS 120B (Groq)"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "GPT-OSS 20B (Pollinations)"
+          ],
+          "referee": "Command A+ (Cohere)",
+          "verifier": "GPT-OSS 120B (Groq)",
+          "verified": false,
+          "repaired": false,
+          "confidence": "medium"
+        },
+        {
+          "models": [
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "GPT-OSS 20B (Pollinations)",
+            "Command A+ (Cohere)",
+            "GPT-OSS 120B (Groq)"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "GPT-OSS 20B (Pollinations)"
+          ],
+          "referee": "Command A+ (Cohere)",
+          "verifier": "GPT-OSS 120B (Groq)",
+          "verified": true,
+          "repaired": false,
+          "confidence": "medium"
+        }
+      ],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "36 mph=pass, 2 hours first leg=pass, 3 hours second leg=pass, 5 hours total=pass, not 40 mph=pass",
+      "checks": [
+        {
+          "label": "36 mph",
+          "pass": true
+        },
+        {
+          "label": "2 hours first leg",
+          "pass": true
+        },
+        {
+          "label": "3 hours second leg",
+          "pass": true
+        },
+        {
+          "label": "5 hours total",
+          "pass": true
+        },
+        {
+          "label": "not 40 mph",
+          "pass": true
+        }
+      ],
+      "mode": "team",
+      "modeLabel": "New Team"
+    }
+  ]
+}

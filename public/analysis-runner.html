@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; connect-src https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; worker-src blob:"
+    />
+    <title>Analyze runner</title>
+  </head>
+  <body>
+    <script>
+      // A fresh opaque-origin iframe per analysis. The CSV is copied into the
+      // sandbox's virtual filesystem, Python runs here, and only stdout plus an
+      // optional PNG crosses back to the app. The Worker never runs this code.
+      ;(() => {
+        const CDN = 'https://cdn.jsdelivr.net/pyodide/v0.28.0/full/'
+        let pyodidePromise = null
+        const getPyodide = () => {
+          pyodidePromise ??= (async () => {
+            const { loadPyodide } = await import(`${CDN}pyodide.mjs`)
+            const py = await loadPyodide({ indexURL: CDN })
+            await py.loadPackage(['pandas', 'matplotlib'])
+            return py
+          })()
+          return pyodidePromise
+        }
+        const post = (payload) => window.parent.postMessage(payload, '*')
+        window.addEventListener('message', async (event) => {
+          const data = event.data
+          if (!data || data.type !== 'run' || typeof data.id !== 'string') return
+          if (event.source !== window.parent) return
+          const code = String(data.job?.code || '')
+          const csv = String(data.job?.csv || '')
+          try {
+            const py = await getPyodide()
+            let stdout = ''
+            py.setStdout({
+              batched: (text) => {
+                if (stdout.length >= 13_000) return
+                // Pyodide's batched callback strips the trailing newline.
+                stdout += text.endsWith('\n') ? text : `${text}\n`
+              },
+            })
+            py.globals.set('__quill_csv', csv)
+            py.runPython(`
+import io
+import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+plt.close('all')
+df = pd.read_csv(io.StringIO(__quill_csv), sep=None, engine='python')
+`)
+            try {
+              await py.runPythonAsync(code)
+            } catch (error) {
+              post({
+                type: 'result',
+                id: data.id,
+                result: {
+                  ok: false,
+                  stdout: stdout.slice(0, 12_000),
+                  error: String((error && error.message) || error).slice(0, 900),
+                },
+              })
+              return
+            }
+            let chart = ''
+            try {
+              chart = String(py.runPython(`
+import base64
+import io
+__quill_chart = ''
+if plt.get_fignums():
+    __quill_buffer = io.BytesIO()
+    plt.savefig(__quill_buffer, format='png', bbox_inches='tight', dpi=110)
+    __quill_chart = 'data:image/png;base64,' + base64.b64encode(__quill_buffer.getvalue()).decode('ascii')
+__quill_chart
+`) || '')
+            } catch {
+              chart = ''
+            }
+            post({
+              type: 'result',
+              id: data.id,
+              result: {
+                ok: true,
+                ...(stdout ? { stdout: stdout.slice(0, 12_000) } : {}),
+                ...(chart && chart.length <= 180_000 ? { chart } : {}),
+              },
+            })
+          } catch (error) {
+            post({
+              type: 'result',
+              id: data.id,
+              result: {
+                ok: false,
+                loadError: String((error && error.message) || error).slice(0, 300),
+              },
+            })
+          }
+        })
+        post({ type: 'ready' })
+      })()
+    </script>
+  </body>
+</html>

@@ -1,0 +1,41 @@
+{
+  "gradedAt": "2026-11-08",
+  "rubric": {
+    "R1": "PASS only if it distinguishes the real-time public-space ban from narrow law-enforcement exceptions, is not a total-ban claim, cites two openable sources with dates, and gives the current stage/date.",
+    "R2": "PASS only if it names the iPhone 18 generation as current, compares it with iPhone 17, gives three concrete changes, and cites one real hands-on review; stale iPhone 17-as-latest or invented specs fail."
+  },
+  "R1": {
+    "team": {
+      "verdict": "PASS",
+      "evidence": "Distinguishes the Article 5(1)(h) real-time, law-enforcement, publicly accessible spaces prohibition from narrow exceptions; not a total-ban claim; two official EU sources; gives the applicability stage (six months after entry into force).",
+      "note": "Stage is current, but the exact 2 February 2025 date is not stated."
+    },
+    "best": {
+      "verdict": "PASS",
+      "evidence": "Same correct distinction and exceptions; two official EU sources; explicitly gives the 2 February 2025 applicability date.",
+      "note": "Complete against the rubric."
+    },
+    "legacy": {
+      "verdict": "PASS",
+      "evidence": "Same correct distinction and exceptions; two official EU sources; gives the applicability stage (within six months of entry into force).",
+      "note": "Stage is current, but the exact 2 February 2025 date is not stated."
+    }
+  },
+  "R2": {
+    "team": {
+      "verdict": "PASS",
+      "evidence": "Names iPhone 18 Pro/Pro Max as current, compares with iPhone 17 Pro, gives three concrete changes (variable aperture, camera controls, color-matched glass), and links The Verge hands-on.",
+      "note": "No stale iPhone-17-as-latest claim."
+    },
+    "best": {
+      "verdict": "PASS",
+      "evidence": "Names iPhone 18 Pro/Pro Max as current, compares with iPhone 17 Pro, gives three concrete changes, and links The Verge hands-on.",
+      "note": "No stale iPhone-17-as-latest claim."
+    },
+    "legacy": {
+      "verdict": "PASS",
+      "evidence": "Names iPhone 18 Pro/Pro Max as current, compares with iPhone 17 Pro, gives three concrete changes, and links The Verge and MacRumors hands-ons.",
+      "note": "No stale iPhone-17-as-latest claim."
+    }
+  }
+}

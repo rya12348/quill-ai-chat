@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; connect-src https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data:; worker-src blob:"
+    />
+    <title>Proof runner</title>
+  </head>
+  <body>
+    <script>
+      // A fresh, opaque-origin iframe per proof run. It has no app storage, no
+      // cookies and no same-origin access. Python is loaded from a pinned
+      // Pyodide build; generated code never reaches the Worker.
+      ;(() => {
+        const CDN = 'https://cdn.jsdelivr.net/pyodide/v0.28.0/full/'
+        let pyodidePromise = null
+        const getPyodide = () => {
+          pyodidePromise ??= (async () => {
+            const { loadPyodide } = await import(`${CDN}pyodide.mjs`)
+            return loadPyodide({ indexURL: CDN })
+          })()
+          return pyodidePromise
+        }
+        const post = (payload) => window.parent.postMessage(payload, '*')
+        async function runOne(py, source) {
+          const globals = py.toPy({})
+          try {
+            await py.runPythonAsync(source, { globals })
+            return { ok: true }
+          } catch (error) {
+            return { ok: false, error: String((error && error.message) || error).slice(0, 400) }
+          } finally {
+            try {
+              globals.destroy()
+            } catch {
+              /* already released */
+            }
+          }
+        }
+        window.addEventListener('message', async (event) => {
+          const data = event.data
+          if (!data || data.type !== 'run' || typeof data.id !== 'string') return
+          if (event.source !== window.parent) return
+          const job = data.job || {}
+          try {
+            const py = await getPyodide()
+            const tests = String(job.tests || '')
+            const candidates = Array.isArray(job.candidates) ? job.candidates.slice(0, 4) : []
+            const mutants = Array.isArray(job.mutants) ? job.mutants.slice(0, 6) : []
+            const combine = (source) => `${String(source || '')}\n\n${tests}\n\n__proof_check()`
+            const runs = []
+            for (let index = 0; index < candidates.length; index += 1) {
+              runs.push({ target: 'candidate', index, ...(await runOne(py, combine(candidates[index] && candidates[index].code))) })
+            }
+            for (let index = 0; index < mutants.length; index += 1) {
+              runs.push({ target: 'mutant', index, ...(await runOne(py, combine(mutants[index]))) })
+            }
+            post({ type: 'result', id: data.id, report: { runs } })
+          } catch (error) {
+            post({ type: 'result', id: data.id, report: { runs: [], loadError: String((error && error.message) || error).slice(0, 300) } })
+          }
+        })
+        post({ type: 'ready' })
+      })()
+    </script>
+  </body>
+</html>

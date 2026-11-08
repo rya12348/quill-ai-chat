@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "at": 1794163905870,
+    "startedAt": 1794163876455,
+    "finishedAt": 1794163905870,
+    "base": "http://127.0.0.1:5180",
+    "todayUtc": "2026-11-08",
+    "plus53": "2026-12-31",
+    "bestModel": "nvidia/nemotron-3-super-120b",
+    "baselineModel": "command-a-plus-05-2026",
+    "modes": [
+      "team"
+    ],
+    "tasks": [
+      "R2"
+    ]
+  },
+  "before": {
+    "conversations": 21,
+    "messages": 58,
+    "readErrors": 0,
+    "usage": 24,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "after": {
+    "conversations": 21,
+    "messages": 58,
+    "readErrors": 0,
+    "usage": 24,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "summary": {
+    "team": {
+      "label": "New Team",
+      "total": 1,
+      "autoScored": 0,
+      "passed": 0,
+      "failed": 0,
+      "manualPending": 1,
+      "passRate": null,
+      "overallPassRate": 0,
+      "avgMs": 28025,
+      "slow": 0,
+      "errors": 0
+    }
+  },
+  "runs": [
+    {
+      "taskId": "R2",
+      "area": "research",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794163876455,
+      "latencyMs": 28025,
+      "firstDeltaMs": 26938,
+      "prompt": "What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on review.",
+      "answer": "The iPhone 18 Pro keeps the iPhone 17 Pro’s basic design, aluminum body, and screen sizes, but three changes matter:\n\n- **Variable-aperture main camera** — the main lens now has a variable aperture. [The Verge](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event)\n- **New “pro” camera controls** — added controls give more options when taking photos. [The Verge](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event)\n- **Color-matched glass back** — the back glass now blends with the aluminum frame for a uniform look, replacing the two-tone appearance of the iPhone 17 Pro. [The Verge](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event)\n\nAll three are from The Verge’s hands-on impressions at Apple’s September 2026 event.",
+      "answerChars": 878,
+      "statuses": [
+        "Planning a search…",
+        "Plan: What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on",
+        "Searching: What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on",
+        "2 free models are drafting…",
+        "Merging the drafts into one answer…"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": null,
+      "manual": true,
+      "detail": "manual rubric required; automatic checks: current iPhone 18=pass, previous iPhone 17=pass, one link=pass, three changes (manual)=pass",
+      "autoChecks": [
+        {
+          "label": "current iPhone 18",
+          "pass": true
+        },
+        {
+          "label": "previous iPhone 17",
+          "pass": true
+        },
+        {
+          "label": "one link",
+          "pass": true
+        },
+        {
+          "label": "three changes (manual)",
+          "pass": true
+        }
+      ],
+      "rubric": "PASS only if it names the iPhone 18 generation as current, compares it with iPhone 17, gives three concrete changes, and cites one real hands-on review; stale iPhone 17-as-latest or invented specs fail.",
+      "mode": "team",
+      "modeLabel": "New Team"
+    }
+  ]
+}

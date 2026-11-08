@@ -1,0 +1,467 @@
+{
+  "at": 1794162494635,
+  "tasks": [
+    {
+      "id": "C1",
+      "area": "coding",
+      "limitMs": 480000,
+      "prompt": "Write a short Python program with a function two_largest(nums) that returns the two largest numbers in a list, including duplicates. For example, two_largest([5, 5, 1]) must return 5 and 5. Return None when the list has fewer than two numbers. Do not mutate the input. Include three examples. Put the final solution in one Python code block."
+    },
+    {
+      "id": "M1",
+      "area": "math",
+      "limitMs": 480000,
+      "prompt": "An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show the working."
+    },
+    {
+      "id": "I1",
+      "area": "instruction",
+      "limitMs": 480000,
+      "prompt": "A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, containing exactly these keys: \"vendor\" (string), \"risk\" (one of \"low\", \"medium\", \"high\", \"critical\"), \"score\" (integer 0-100), and \"actions\" (an array of exactly three non-empty strings). Use \"Northstar\" as the vendor and set risk to \"high\" or \"critical\"."
+    }
+  ],
+  "models": [
+    "nvidia/nemotron-3-super-120b",
+    "command-a-plus-05-2026",
+    "mistral-large-4",
+    "openai/gpt-oss-120b"
+  ],
+  "ranking": [
+    {
+      "model": "nvidia/nemotron-3-super-120b",
+      "passed": 3,
+      "scored": 3,
+      "passRate": 100,
+      "avgMs": 6634
+    },
+    {
+      "model": "command-a-plus-05-2026",
+      "passed": 3,
+      "scored": 3,
+      "passRate": 100,
+      "avgMs": 7936
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "passed": 2,
+      "scored": 3,
+      "passRate": 66.7,
+      "avgMs": 2384
+    },
+    {
+      "model": "mistral-large-4",
+      "passed": 2,
+      "scored": 3,
+      "passRate": 66.7,
+      "avgMs": 11532
+    }
+  ],
+  "runs": [
+    {
+      "taskId": "C1",
+      "area": "coding",
+      "strategy": "fast",
+      "model": "nvidia/nemotron-3-super-120b",
+      "startedAt": 1794162408348,
+      "latencyMs": 5613,
+      "firstDeltaMs": 4808,
+      "prompt": "Write a short Python program with a function two_largest(nums) that returns the two largest numbers in a list, including duplicates. For example, two_largest([5, 5, 1]) must return 5 and 5. Return None when the list has fewer than two numbers. Do not mutate the input. Include three examples. Put the final solution in one Python code block.",
+      "answer": "```python\ndef two_largest(nums):\n    \"\"\"Return the two largest numbers from nums, including duplicates.\n\n    Returns None if nums has fewer than two elements. The input list is\n    not mutated.\n    \"\"\"\n    if len(nums) < 2:\n        return None\n    return tuple(sorted(nums, reverse=True)[:2])\n\n\n# Examples\nprint(two_largest([5, 5, 1]))          # (5, 5)\nprint(two_largest([10, -1, 3, 7]))     # (10, 7)\nprint(two_largest([42]))               # None\n```",
+      "answerChars": 452,
+      "statuses": [],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "hidden Python tests passed",
+      "evidence": {
+        "status": 0,
+        "stderr": "",
+        "stdout": "(5, 5)\r\n(10, 7)\r\nNone\r\nHIDDEN_OK\r\n",
+        "error": null
+      },
+      "mode": "calibration",
+      "modeLabel": "nvidia/nemotron-3-super-120b"
+    },
+    {
+      "taskId": "M1",
+      "area": "math",
+      "strategy": "fast",
+      "model": "nvidia/nemotron-3-super-120b",
+      "startedAt": 1794162414095,
+      "latencyMs": 8363,
+      "firstDeltaMs": 5804,
+      "prompt": "An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show the working.",
+      "answer": "The shirt costs **$80**.\n\n**Step 1 – Apply the 25 % discount**  \n\\(80 \\times (1 - 0.25) = 80 \\times 0.75 = \\$60\\)  \n\n**Step 2 – Apply the extra 10 % discount to the new price**  \n\\(60 \\times (1 - 0.10) = 60 \\times 0.90 = \\$54\\)\n\n**Final price:** **$54**\n\n### Why it isn’t a 35 % discount\nIf the discounts were simply added (25 % + 10 % = 35 %), the price would be  \n\n\\(80 \\times (1 - 0.35) = 80 \\times 0.65 = \\$52\\).\n\nBut the second discount is taken **off the already‑reduced price**, not the original.  \nThe combined effect is:\n\n\\[\n\\text{Effective discount} = 100 - \\bigl(1 - \\tfrac{25}{100}\\bigr)\\bigl(1 - \\tfrac{10}{100}\\bigr)\\times 100\n= 100 - (0.75 \\times 0.90)\\times 100\n= 100 - 67.5 = 32.5\\%\n\\]\n\nSo the true discount is **32.5 %**, not 35 % [2].\n\n**Answer:** The shirt ends up costing **$54**, because the 10 % discount applies only to the $60 sale price, yielding an effective discount of 32.5 % rather than the naive 35 % [2].",
+      "answerChars": 936,
+      "statuses": [
+        "Planning a search…",
+        "Plan: An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show t",
+        "Searching: An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show t"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "$54 final=pass, $60 after first discount=pass, $52 comparison=pass, explains sequential discounts=pass",
+      "checks": [
+        {
+          "label": "$54 final",
+          "pass": true
+        },
+        {
+          "label": "$60 after first discount",
+          "pass": true
+        },
+        {
+          "label": "$52 comparison",
+          "pass": true
+        },
+        {
+          "label": "explains sequential discounts",
+          "pass": true
+        }
+      ],
+      "mode": "calibration",
+      "modeLabel": "nvidia/nemotron-3-super-120b"
+    },
+    {
+      "taskId": "I1",
+      "area": "instruction",
+      "strategy": "fast",
+      "model": "nvidia/nemotron-3-super-120b",
+      "startedAt": 1794162422527,
+      "latencyMs": 5927,
+      "firstDeltaMs": 5428,
+      "prompt": "A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, containing exactly these keys: \"vendor\" (string), \"risk\" (one of \"low\", \"medium\", \"high\", \"critical\"), \"score\" (integer 0-100), and \"actions\" (an array of exactly three non-empty strings). Use \"Northstar\" as the vendor and set risk to \"high\" or \"critical\".",
+      "answer": "{\n  \"vendor\": \"Northstar\",\n  \"risk\": \"critical\",\n  \"score\": 85,\n  \"actions\": [\n    \"Issue a formal security remediation notice with a revised deadline\",\n    \"Require an independent third-party security audit before the next contract milestone\",\n    \"Suspend new system integrations until all outstanding patches are verified\"\n  ]\n}",
+      "answerChars": 331,
+      "statuses": [
+        "Planning a search…",
+        "Plan: A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, contain",
+        "Searching: A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, contain"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "strict JSON and schema passed",
+      "mode": "calibration",
+      "modeLabel": "nvidia/nemotron-3-super-120b"
+    },
+    {
+      "taskId": "C1",
+      "area": "coding",
+      "strategy": "fast",
+      "model": "command-a-plus-05-2026",
+      "startedAt": 1794162428524,
+      "latencyMs": 6665,
+      "firstDeltaMs": 6009,
+      "prompt": "Write a short Python program with a function two_largest(nums) that returns the two largest numbers in a list, including duplicates. For example, two_largest([5, 5, 1]) must return 5 and 5. Return None when the list has fewer than two numbers. Do not mutate the input. Include three examples. Put the final solution in one Python code block.",
+      "answer": "```python\ndef two_largest(nums):\n    \"\"\"\n    Return a tuple containing the two largest numbers from the list `nums`,\n    including duplicates. If the list has fewer than two elements, return None.\n    The input list is not mutated.\n    \"\"\"\n    if len(nums) < 2:\n        return None\n    # Sort a copy of the list to avoid modifying the original\n    sorted_nums = sorted(nums)\n    # The last two elements are the largest (including duplicates)\n    return (sorted_nums[-1], sorted_nums[-2])\n\nif __name__ == \"__main__\":\n    # Example 1\n    print(two_largest([1, 2, 3, 4]))   # (4, 3)\n    # Example 2\n    print(two_largest([5, 5, 1]))      # (5, 5)\n    # Example 3\n    print(two_largest([7]))            # None\n```",
+      "answerChars": 709,
+      "statuses": [],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "hidden Python tests passed",
+      "evidence": {
+        "status": 0,
+        "stderr": "",
+        "stdout": "(4, 3)\r\n(5, 5)\r\nNone\r\nHIDDEN_OK\r\n",
+        "error": null
+      },
+      "mode": "calibration",
+      "modeLabel": "command-a-plus-05-2026"
+    },
+    {
+      "taskId": "M1",
+      "area": "math",
+      "strategy": "fast",
+      "model": "command-a-plus-05-2026",
+      "startedAt": 1794162435287,
+      "latencyMs": 12623,
+      "firstDeltaMs": 10511,
+      "prompt": "An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show the working.",
+      "answer": "**Final price:** $54  \n\n---\n\n### Working\n\n1. **First discount (25 % off)**  \n   \\[\n   \\text{Price after first discount}= \\$80 \\times (1-0.25)=\\$80 \\times 0.75=\\$60\n   \\]  \n   This uses the factor \\((1-\\frac{25}{100}) = 0.75\\) [4](https://www.lizecheng.net/finance/guides/calculate-discount-in-python-formula-and-stacking-trap/).\n\n2. **Second discount (10 % off the sale price)**  \n   \\[\n   \\text{Final price}= \\$60 \\times (1-0.10)=\\$60 \\times 0.90=\\$54\n   \\]  \n   The second discount multiplies by \\((1-\\frac{10}{100}) = 0.90\\) [4](https://www.lizecheng.net/finance/guides/calculate-discount-in-python-formula-and-stacking-trap/).\n\n3. **Combined calculation**  \n   \\[\n   \\text{Final price}= \\$80 \\times 0.75 \\times 0.90 = \\$54\n   \\]  \n\n4. **Effective total discount**  \n   The overall factor is \\(0.75 \\times 0.90 = 0.675\\), meaning the price is 67.5 % of the original.  \n   \\[\n   \\text{Total discount}=1-0.675=0.325\\;(\\text{or }32.5\\%)\n   \\]  \n   The combined discount formula is \\(100-(1-\\frac{A}{100})\\times(1-\\frac{B}{100})\\times100\\) [2](https://www.percentify.org/compound-percentage-calculator/).\n\n---\n\n### Why it isn’t 35 % off\n\n- Adding the percentages (25 % + 10 % = 35 %) assumes **both discounts apply to the original price**. In reality, the second discount is applied to the already‑reduced amount, so the true effect is **multiplicative**, not additive [2](https://www.percentify.org/compound-percentage-calculator/) “Why stacked percentages don't add up”.\n\n- If you incorrectly treated it as a single 35 % discount:  \n  \\[\n  \\$80 \\times (1-0.35)=\\$80 \\times 0.65=\\$52\n  \\]  \n  This gives $52, which is lower than the actual $54. The correct total discount is **32.5 %**, not 35 % [2](https://www.percentify.org/compound-percentage-calculator/).\n\n- A similar illustration: 20 % off followed by 10 % off results in a 28 % effective discount, not 30 % [2](https://www.percentify.org/compound-percentage-calculator/). The same principle applies here.\n\nThus, the final price after successive discounts is **$54**, and the overall reduction is **32.5 %**, not the naïve 35 % that would result from simply adding the two percentages.",
+      "answerChars": 2142,
+      "statuses": [
+        "Planning a search…",
+        "Plan: An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show t",
+        "Searching: An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show t"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "$54 final=pass, $60 after first discount=pass, $52 comparison=pass, explains sequential discounts=pass",
+      "checks": [
+        {
+          "label": "$54 final",
+          "pass": true
+        },
+        {
+          "label": "$60 after first discount",
+          "pass": true
+        },
+        {
+          "label": "$52 comparison",
+          "pass": true
+        },
+        {
+          "label": "explains sequential discounts",
+          "pass": true
+        }
+      ],
+      "mode": "calibration",
+      "modeLabel": "command-a-plus-05-2026"
+    },
+    {
+      "taskId": "I1",
+      "area": "instruction",
+      "strategy": "fast",
+      "model": "command-a-plus-05-2026",
+      "startedAt": 1794162447957,
+      "latencyMs": 4519,
+      "firstDeltaMs": 4355,
+      "prompt": "A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, containing exactly these keys: \"vendor\" (string), \"risk\" (one of \"low\", \"medium\", \"high\", \"critical\"), \"score\" (integer 0-100), and \"actions\" (an array of exactly three non-empty strings). Use \"Northstar\" as the vendor and set risk to \"high\" or \"critical\".",
+      "answer": "{\n  \"vendor\": \"Northstar\",\n  \"risk\": \"critical\",\n  \"score\": 85,\n  \"actions\": [\n    \"Conduct immediate security audit\",\n    \"Implement remediation plan\",\n    \"Schedule follow-up review\"\n  ]\n}",
+      "answerChars": 190,
+      "statuses": [
+        "Planning a search…",
+        "Plan: A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, contain",
+        "Searching: A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, contain"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "strict JSON and schema passed",
+      "mode": "calibration",
+      "modeLabel": "command-a-plus-05-2026"
+    },
+    {
+      "taskId": "C1",
+      "area": "coding",
+      "strategy": "fast",
+      "model": "mistral-large-4",
+      "startedAt": 1794162452525,
+      "latencyMs": 21670,
+      "firstDeltaMs": 18591,
+      "prompt": "Write a short Python program with a function two_largest(nums) that returns the two largest numbers in a list, including duplicates. For example, two_largest([5, 5, 1]) must return 5 and 5. Return None when the list has fewer than two numbers. Do not mutate the input. Include three examples. Put the final solution in one Python code block.",
+      "answer": "```python\ndef two_largest(nums):\n    \"\"\"Return (largest, second_largest), keeping duplicates; None if len(nums) < 2.\"\"\"\n    if len(nums) < 2:\n        return None\n\n    first = second = None\n    for n in nums:\n        if first is None or n > first:\n            second = first\n            first = n\n        elif second is None or n > second:\n            second = n\n    return first, second\n\n\nprint(two_largest([5, 5, 1]))   # (5, 5)\nprint(two_largest([10, 2, 7]))  # (10, 7)\nprint(two_largest([42]))        # None\n```",
+      "answerChars": 514,
+      "statuses": [],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "hidden Python tests passed",
+      "evidence": {
+        "status": 0,
+        "stderr": "",
+        "stdout": "(5, 5)\r\n(10, 7)\r\nNone\r\nHIDDEN_OK\r\n",
+        "error": null
+      },
+      "mode": "calibration",
+      "modeLabel": "mistral-large-4"
+    },
+    {
+      "taskId": "M1",
+      "area": "math",
+      "strategy": "fast",
+      "model": "mistral-large-4",
+      "startedAt": 1794162474297,
+      "latencyMs": 6870,
+      "firstDeltaMs": 6646,
+      "prompt": "An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show the working.",
+      "answer": "Final price: **$54**\n\nWorking:\n\n1. First discount: 25% off $80  \n   \\[\n   80 \\times (1 - 0.25)=80 \\times 0.75=60\n   \\]  \n   Sale price = **$60**\n\n2. Extra 10% off the **sale price**, not the original $80:  \n   \\[\n   60 \\times (1 - 0.10)=60 \\times 0.90=54\n   \\]  \n   Final price = **$54**\n\nIt’s **not 35% off** because the second 10% applies to the already-reduced $60, not to the original $80. Percentages in sequence multiply as factors:\n\n\\[\n(1-0.25)(1-0.10)=0.75 \\times 0.90=0.675\n\\]\n\nSo you pay **67.5%** of the original price, meaning the true total discount is:\n\n\\[\n100\\%-67.5\\%=32.5\\%\n\\]\n\nCheck: \\(80 \\times 0.675 = 54\\). A naive 35% off would be \\(80 \\times 0.65 = \\$52\\), which is **$2 too low**.",
+      "answerChars": 704,
+      "statuses": [
+        "Planning a search…",
+        "Plan: An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show t",
+        "Searching: An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show t"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": false,
+      "detail": "$54 final=pass, $60 after first discount=pass, $52 comparison=pass, explains sequential discounts=fail",
+      "checks": [
+        {
+          "label": "$54 final",
+          "pass": true
+        },
+        {
+          "label": "$60 after first discount",
+          "pass": true
+        },
+        {
+          "label": "$52 comparison",
+          "pass": true
+        },
+        {
+          "label": "explains sequential discounts",
+          "pass": false
+        }
+      ],
+      "mode": "calibration",
+      "modeLabel": "mistral-large-4"
+    },
+    {
+      "taskId": "I1",
+      "area": "instruction",
+      "strategy": "fast",
+      "model": "mistral-large-4",
+      "startedAt": 1794162481209,
+      "latencyMs": 6055,
+      "firstDeltaMs": 5816,
+      "prompt": "A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, containing exactly these keys: \"vendor\" (string), \"risk\" (one of \"low\", \"medium\", \"high\", \"critical\"), \"score\" (integer 0-100), and \"actions\" (an array of exactly three non-empty strings). Use \"Northstar\" as the vendor and set risk to \"high\" or \"critical\".",
+      "answer": "{\"vendor\":\"Northstar\",\"risk\":\"critical\",\"score\":92,\"actions\":[\"Suspend new deployments until a remediation plan is approved\",\"Require weekly security status reports with evidence of fixes\",\"Escalate to an executive sponsor with a 14-day cure period\"]}",
+      "answerChars": 251,
+      "statuses": [
+        "Planning a search…",
+        "Plan: first query · second query",
+        "Searching: first query (1 of 2)",
+        "Searching: second query (2 of 2)"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "strict JSON and schema passed",
+      "mode": "calibration",
+      "modeLabel": "mistral-large-4"
+    },
+    {
+      "taskId": "C1",
+      "area": "coding",
+      "strategy": "fast",
+      "model": "openai/gpt-oss-120b",
+      "startedAt": 1794162487304,
+      "latencyMs": 959,
+      "firstDeltaMs": 508,
+      "prompt": "Write a short Python program with a function two_largest(nums) that returns the two largest numbers in a list, including duplicates. For example, two_largest([5, 5, 1]) must return 5 and 5. Return None when the list has fewer than two numbers. Do not mutate the input. Include three examples. Put the final solution in one Python code block.",
+      "answer": "```python\ndef two_largest(nums):\n    \"\"\"\n    Return the two largest numbers from *nums* as a tuple (first, second).\n    Duplicates are kept, e.g. [5,5,1] → (5, 5).\n    If the list has fewer than two elements, return None.\n    The input list is never modified.\n    \"\"\"\n    if len(nums) < 2:\n        return None\n\n    # Keep a copy so the original list is untouched\n    a, b = float('-inf'), float('-inf')\n    for x in nums:\n        if x > a:\n            b, a = a, x\n        elif x > b:\n            b = x\n    return a, b\n\n\n# Examples\nprint(two_largest([5, 5, 1]))        # → (5, 5)\nprint(two_largest([3, 1, 4, 2]))     # → (4, 3)\nprint(two_largest([7]))              # → None\n```",
+      "answerChars": 676,
+      "statuses": [],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "hidden Python tests passed",
+      "evidence": {
+        "status": 0,
+        "stderr": "",
+        "stdout": "(5, 5)\r\n(4, 3)\r\nNone\r\nHIDDEN_OK\r\n",
+        "error": null
+      },
+      "mode": "calibration",
+      "modeLabel": "openai/gpt-oss-120b"
+    },
+    {
+      "taskId": "M1",
+      "area": "math",
+      "strategy": "fast",
+      "model": "openai/gpt-oss-120b",
+      "startedAt": 1794162488354,
+      "latencyMs": 3862,
+      "firstDeltaMs": 2819,
+      "prompt": "An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show the working.",
+      "answer": "**Final price:** **\\$54**\n\n**Why it isn’t a 35 % discount**\n\nWhen percentages are applied one after another, each percentage works on the **new** amount, not on the original price.  \nThe effective discount is therefore the product of the two “remaining‑price” factors, not the sum of the two percentages.\n\n---\n\n### Working step‑by‑step  \n\n1. **Original price:** \\$80  \n\n2. **First discount – 25 % off**  \n   \\[\n   \\text{price after 1st discount}=80 \\times (1-0.25)=80 \\times 0.75 = \\$60\n   \\]\n\n3. **Second discount – 10 % off the sale price**  \n   \\[\n   \\text{price after 2nd discount}=60 \\times (1-0.10)=60 \\times 0.90 = \\$54\n   \\]\n\n4. **Effective overall discount**  \n   \\[\n   \\text{discount fraction}=1-\\frac{54}{80}=1-0.675=0.325\n   \\]\n   \\[\n   \\text{effective discount}=0.325 \\times 100\\% = 32.5\\%\n   \\]\n\nSo the shirt ends up **\\$54**, which corresponds to a **32.5 %** total discount, not 35 %.\n\n---\n\n### Why the naive “35 % off” is wrong  \n\nAdding the percentages (25 % + 10 % = 35 %) assumes both discounts are taken from the *original* price. In reality the second discount is taken from the already‑reduced price, so it affects a smaller amount. This “stacking” behavior is described in standard percentage‑stacking formulas, e.g., the combined discount =  \n\\[\n100 - (1-\\frac{A}{100})(1-\\frac{B}{100})\\times100\n\\]  \n[percentify.org – Compound Percentage Calculator](https://www.percentify.org/compound-percentage-calculator/) and the same principle is illustrated in the Lizely article, which notes that 20 % followed by 10 % yields a 28 % effective discount, not 30 %【4†L1-L4】. The same math gives 32.5 % for 25 % then 10 %.",
+      "answerChars": 1635,
+      "statuses": [
+        "Planning a search…",
+        "Plan: An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show t",
+        "Searching: An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show t"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": false,
+      "detail": "$54 final=pass, $60 after first discount=pass, $52 comparison=fail, explains sequential discounts=pass",
+      "checks": [
+        {
+          "label": "$54 final",
+          "pass": true
+        },
+        {
+          "label": "$60 after first discount",
+          "pass": true
+        },
+        {
+          "label": "$52 comparison",
+          "pass": false
+        },
+        {
+          "label": "explains sequential discounts",
+          "pass": true
+        }
+      ],
+      "mode": "calibration",
+      "modeLabel": "openai/gpt-oss-120b"
+    },
+    {
+      "taskId": "I1",
+      "area": "instruction",
+      "strategy": "fast",
+      "model": "openai/gpt-oss-120b",
+      "startedAt": 1794162492259,
+      "latencyMs": 2332,
+      "firstDeltaMs": 2235,
+      "prompt": "A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, containing exactly these keys: \"vendor\" (string), \"risk\" (one of \"low\", \"medium\", \"high\", \"critical\"), \"score\" (integer 0-100), and \"actions\" (an array of exactly three non-empty strings). Use \"Northstar\" as the vendor and set risk to \"high\" or \"critical\".",
+      "answer": "{\"vendor\":\"Northstar\",\"risk\":\"critical\",\"score\":85,\"actions\":[\"Conduct a full security audit\",\"Implement remedial controls\",\"Schedule a follow‑up review\"]}",
+      "answerChars": 155,
+      "statuses": [
+        "Planning a search…",
+        "Plan: first query · second query",
+        "Searching: first query (1 of 2)",
+        "Searching: second query (2 of 2)"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "strict JSON and schema passed",
+      "mode": "calibration",
+      "modeLabel": "openai/gpt-oss-120b"
+    }
+  ]
+}

@@ -1,0 +1,182 @@
+{
+  "meta": {
+    "at": 1794163628708,
+    "startedAt": 1794163543604,
+    "finishedAt": 1794163628708,
+    "base": "http://127.0.0.1:5180",
+    "todayUtc": "2026-11-08",
+    "plus53": "2026-12-31",
+    "bestModel": "nvidia/nemotron-3-super-120b",
+    "baselineModel": "command-a-plus-05-2026",
+    "modes": [
+      "team"
+    ],
+    "tasks": [
+      "F1",
+      "R1",
+      "R2"
+    ]
+  },
+  "before": {
+    "conversations": 21,
+    "messages": 0,
+    "readErrors": 21,
+    "usage": 24,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "after": {
+    "conversations": 21,
+    "messages": 0,
+    "readErrors": 21,
+    "usage": 24,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "summary": {
+    "team": {
+      "label": "New Team",
+      "total": 3,
+      "autoScored": 1,
+      "passed": 1,
+      "failed": 0,
+      "manualPending": 2,
+      "passRate": 100,
+      "overallPassRate": 33.3,
+      "avgMs": 27526,
+      "slow": 0,
+      "errors": 0
+    }
+  },
+  "runs": [
+    {
+      "taskId": "F1",
+      "area": "freshness",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794163543605,
+      "latencyMs": 9912,
+      "firstDeltaMs": 9731,
+      "prompt": "Using today's date (UTC), answer with exactly two lines and no other text:\nTODAY: YYYY-MM-DD\nPLUS53: YYYY-MM-DD",
+      "answer": "TODAY: 2026-11-08\nPLUS53: 2026-12-31",
+      "answerChars": 36,
+      "statuses": [
+        "Planning a search…",
+        "Plan: Using today's date (UTC), answer with exactly two lines and no other text: TODAY: YYYY-MM-DD PLUS53: YYYY-MM-DD",
+        "Searching: Using today's date (UTC), answer with exactly two lines and no other text: TODAY: YYYY-MM-DD PLUS53: YYYY-MM-DD",
+        "2 free models are drafting…",
+        "Merging the drafts into one answer…"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "both dates exact (2026-11-08, 2026-12-31)",
+      "mode": "team",
+      "modeLabel": "New Team"
+    },
+    {
+      "taskId": "R1",
+      "area": "research",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794163553698,
+      "latencyMs": 42062,
+      "firstDeltaMs": 40462,
+      "prompt": "Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an official EU source.",
+      "answer": "The EU AI Act does **not** ban all facial‑recognition use in public places. It bans specific practices that involve real‑time monitoring or the creation of biometric databases from public‑space footage.\n\n**What the Act actually prohibits**\n\n- **Real‑time remote biometric identification (RBI) in publicly accessible spaces for law‑enforcement purposes** – Article 5(1)(h) makes this illegal, but allows three narrow exceptions:\n  1. searching for missing persons or crime victims,\n  2. protecting the physical safety of individuals,\n  3. preventing a serious threat to public security.  \n  Any use under an exception must obtain prior national authorisation and pass a risk/impact assessment【2†https://op.europa.eu/en/publication-detail/-/publication/24b979fc-4829-11f1-8095-01aa75ed71a1/language-en】.\n\n- **Scraping CCTV or internet material to build or expand facial‑recognition databases** – Article 5(1)(f) explicitly forbids this practice, which would otherwise enable widespread facial‑recognition capabilities from public footage【3†https://artificialintelligenceact.eu/article/5/】.\n\nOther facial‑recognition applications (e.g., offline identification, non‑real‑time processing, or use in controlled environments) are not prohibited outright but are classified as high‑risk AI systems under Annex III(1)(a) and must meet strict conformity‑assessment requirements.\n\n**Official EU sources**\n\n- The official text of the AI Act, Article 5, lists the prohibited practices and the three exceptions for real‑time RBI【3†https://artificialintelligenceact.eu/article/5/】.\n- The European Commission’s Guidance Study on Article 5(1)(h) explains the prohibition, the exceptions, and the prior‑authorisation requirement in detail【2†https://op.europa.eu/en/publication-detail/-/publication/24b979fc-4829-11f1-8095-01aa75ed71a1/language-en】.",
+      "answerChars": 1830,
+      "statuses": [
+        "Planning a search…",
+        "Plan: Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an",
+        "Searching: Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an",
+        "2 free models are drafting…",
+        "Merging the drafts into one answer…"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": null,
+      "manual": true,
+      "detail": "manual rubric required; automatic checks: mentions facial recognition/biometrics=pass, mentions public spaces=pass, mentions exceptions/limits=pass, two links=pass",
+      "autoChecks": [
+        {
+          "label": "mentions facial recognition/biometrics",
+          "pass": true
+        },
+        {
+          "label": "mentions public spaces",
+          "pass": true
+        },
+        {
+          "label": "mentions exceptions/limits",
+          "pass": true
+        },
+        {
+          "label": "two links",
+          "pass": true
+        }
+      ],
+      "rubric": "PASS only if it distinguishes the real-time public-space ban from narrow law-enforcement exceptions, is not a total-ban claim, cites two openable sources with dates, and gives the current stage/date.",
+      "mode": "team",
+      "modeLabel": "New Team"
+    },
+    {
+      "taskId": "R2",
+      "area": "research",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794163595903,
+      "latencyMs": 30603,
+      "firstDeltaMs": 29850,
+      "prompt": "What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on review.",
+      "answer": "**Three notable changes in the iPhone 17 compared with the previous iPhone 16**\n\n- **Display upgrade to ProMotion 120 Hz** – the new model adds a 120 Hz refresh rate for smoother scrolling and more responsive interaction. [Engadget](https://www.engadget.com/mobile/smartphones/apple-iphone-17-hands-on-no-plus-no-problem-192747122.html)\n- **Longer battery life and faster charging** – Apple reports eight additional hours of usage and improved charging speeds. [Engadget](https://www.engadget.com/mobile/smartphones/apple-iphone-17-hands-on-no-plus-no-problem-192747122.html)\n- **Camera enhancements with Center Stage** – the camera system receives updates, including the Center Stage feature for better video framing. [Engadget](https://www.engadget.com/mobile/smartphones/apple-iphone-17-hands-on-no-plus-no-problem-192747122.html)",
+      "answerChars": 833,
+      "statuses": [
+        "Planning a search…",
+        "Plan: What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on",
+        "Searching: What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on",
+        "2 free models are drafting…",
+        "Merging the drafts into one answer…"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": null,
+      "manual": true,
+      "detail": "manual rubric required; automatic checks: current iPhone 18=fail, previous iPhone 17=pass, one link=pass, three changes (manual)=pass",
+      "autoChecks": [
+        {
+          "label": "current iPhone 18",
+          "pass": false
+        },
+        {
+          "label": "previous iPhone 17",
+          "pass": true
+        },
+        {
+          "label": "one link",
+          "pass": true
+        },
+        {
+          "label": "three changes (manual)",
+          "pass": true
+        }
+      ],
+      "rubric": "PASS only if it names the iPhone 18 generation as current, compares it with iPhone 17, gives three concrete changes, and cites one real hands-on review; stale iPhone 17-as-latest or invented specs fail.",
+      "mode": "team",
+      "modeLabel": "New Team"
+    }
+  ]
+}

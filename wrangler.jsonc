@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ai-chat",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-09-29",
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // Only API and auth routes enter the Worker; pages and assets are served
+    // directly. Keeping static page loads out of Miniflare's ASSETS binding
+    // avoids stale worker environments after config edits.
+    "run_worker_first": ["/api/*", "/auth/*"]
+  },
+  // Local development bindings. Freebuff Sites attaches the real DB binding on
+  // deploy (sites_add_storage) and injects the FREEBUFF_* vars.
+  //
+  // Local secrets come from `.env` (see .env.example): OPENAI_API_KEY is the
+  // Freebuff API key. Do not add a `.dev.vars` file; its presence stops
+  // Wrangler from reading `.env` and `.env.local`.
+  "d1_databases": [
+    { "binding": "DB", "database_name": "ai-chat", "database_id": "00000000-0000-0000-0000-000000000000" }
+  ],
+  "observability": { "enabled": true }
+}

@@ -1,0 +1,256 @@
+{
+  "meta": {
+    "at": 1794164899703,
+    "startedAt": 1794164806441,
+    "finishedAt": 1794164899703,
+    "base": "http://127.0.0.1:5180",
+    "todayUtc": "2026-11-08",
+    "plus53": "2026-12-31",
+    "bestModel": "nvidia/nemotron-3-super-120b",
+    "baselineModel": "command-a-plus-05-2026",
+    "modes": [
+      "best",
+      "baseline"
+    ],
+    "tasks": [
+      "R1",
+      "R2"
+    ]
+  },
+  "before": {
+    "conversations": 24,
+    "messages": 65,
+    "readErrors": 0,
+    "usage": 27,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "after": {
+    "conversations": 25,
+    "messages": 66,
+    "readErrors": 0,
+    "usage": 27,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "summary": {
+    "best": {
+      "label": "Best single (nvidia/nemotron-3-super-120b)",
+      "total": 2,
+      "autoScored": 0,
+      "passed": 0,
+      "failed": 0,
+      "manualPending": 2,
+      "passRate": null,
+      "overallPassRate": 0,
+      "avgMs": 15259,
+      "slow": 0,
+      "errors": 0
+    },
+    "baseline": {
+      "label": "Legacy single (command-a-plus-05-2026)",
+      "total": 2,
+      "autoScored": 0,
+      "passed": 0,
+      "failed": 0,
+      "manualPending": 2,
+      "passRate": null,
+      "overallPassRate": 0,
+      "avgMs": 30000,
+      "slow": 0,
+      "errors": 0
+    }
+  },
+  "runs": [
+    {
+      "taskId": "R1",
+      "area": "research",
+      "strategy": "fast",
+      "model": "nvidia/nemotron-3-super-120b",
+      "startedAt": 1794164806441,
+      "latencyMs": 14508,
+      "firstDeltaMs": 10019,
+      "prompt": "Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an official EU source.",
+      "answer": "No — not a blanket ban. The EU AI Act prohibits **real-time remote biometric identification** (e.g., live facial recognition) in publicly accessible spaces **for law enforcement purposes**, subject to narrow exceptions and strict procedural safeguards. Other facial-recognition uses may be regulated as high-risk rather than prohibited.\n\n**The actual rule (Article 5(1)(h))**\n- The prohibition covers AI systems used for real-time remote biometric identification in publicly accessible spaces for law enforcement.[1]\n- It applies from 2 February 2025, when the Article 5 prohibited-practices rules took effect (six months after the AI Act entered into force).[2]\n\n**Exceptions and conditions**\n- Limited exceptions exist under Article 5(1)(h)(i)–(iii), such as targeted searches for victims of trafficking or missing children, prevention of a specific terrorist threat, or identification of suspects of certain serious crimes.[1]\n- These uses are not automatic: Article 5(2) requires prior authorization, fundamental-rights impact assessments, notification, and other safeguards.[2]\n\n**Related prohibitions**\n- Article 5 also bans scraping the internet or CCTV material to build or expand facial-recognition databases, as well as emotion recognition in workplaces/education and certain biometric categorization practices.[1]\n\nSo the rule is a targeted ban on live, law-enforcement facial recognition in public spaces — not on all facial recognition everywhere.\n\nSources:\n[1] AI Act Service Desk, European Commission: “What systems are prohibited under Article 5 of the AI Act?” https://ai-act-service-desk.ec.europa.eu/en/ai-act/faq/what-systems-are-prohibited-under-article-5-ai-act-eg-social-scoring-emotion-recognition  \n[2] Publications Office of the EU: Guidance Study on Article 5(1)(h) of the AI Act https://op.europa.eu/en/publication-detail/-/publication/24b979fc-4829-11f1-8095-01aa75ed71a1/language-en",
+      "answerChars": 1912,
+      "statuses": [
+        "Planning a search…",
+        "Plan: Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an",
+        "Searching: Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 28,
+      "cleanup": "deleted",
+      "pass": null,
+      "manual": true,
+      "detail": "manual rubric required; automatic checks: mentions facial recognition/biometrics=pass, mentions public spaces=pass, mentions exceptions/limits=pass, two links=pass",
+      "autoChecks": [
+        {
+          "label": "mentions facial recognition/biometrics",
+          "pass": true
+        },
+        {
+          "label": "mentions public spaces",
+          "pass": true
+        },
+        {
+          "label": "mentions exceptions/limits",
+          "pass": true
+        },
+        {
+          "label": "two links",
+          "pass": true
+        }
+      ],
+      "rubric": "PASS only if it distinguishes the real-time public-space ban from narrow law-enforcement exceptions, is not a total-ban claim, cites two openable sources with dates, and gives the current stage/date.",
+      "mode": "best",
+      "modeLabel": "Best single (nvidia/nemotron-3-super-120b)"
+    },
+    {
+      "taskId": "R2",
+      "area": "research",
+      "strategy": "fast",
+      "model": "nvidia/nemotron-3-super-120b",
+      "startedAt": 1794164821886,
+      "latencyMs": 16009,
+      "firstDeltaMs": 14225,
+      "prompt": "What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on review.",
+      "answer": "Compared with the iPhone 17 Pro lineup, the iPhone 18 Pro/Pro Max changes in three meaningful ways, per The Verge’s hands-on:\n\n- **Variable-aperture main camera:** The main lens now has a variable aperture, with new “pro” controls for more shooting options. [The Verge](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event)\n- **More uniform design:** The glass back is color-matched to the aluminum frame, replacing the two-tone look of the iPhone 17 Pro. [The Verge](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event)\n- **New colors:** Four finishes—black, silver, glacier (blue), and burgundy. [The Verge](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event)\n\nScreen sizes and the overall aluminum design are otherwise largely unchanged.",
+      "answerChars": 893,
+      "statuses": [
+        "Planning a search…",
+        "Plan: What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on",
+        "Searching: What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 27,
+      "cleanup": "deleted",
+      "pass": null,
+      "manual": true,
+      "detail": "manual rubric required; automatic checks: current iPhone 18=pass, previous iPhone 17=pass, one link=pass, three changes (manual)=pass",
+      "autoChecks": [
+        {
+          "label": "current iPhone 18",
+          "pass": true
+        },
+        {
+          "label": "previous iPhone 17",
+          "pass": true
+        },
+        {
+          "label": "one link",
+          "pass": true
+        },
+        {
+          "label": "three changes (manual)",
+          "pass": true
+        }
+      ],
+      "rubric": "PASS only if it names the iPhone 18 generation as current, compares it with iPhone 17, gives three concrete changes, and cites one real hands-on review; stale iPhone 17-as-latest or invented specs fail.",
+      "mode": "best",
+      "modeLabel": "Best single (nvidia/nemotron-3-super-120b)"
+    },
+    {
+      "taskId": "R1",
+      "area": "research",
+      "strategy": "fast",
+      "model": "command-a-plus-05-2026",
+      "startedAt": 1794164837981,
+      "latencyMs": 43398,
+      "firstDeltaMs": 39283,
+      "prompt": "Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an official EU source.",
+      "answer": "No — not a blanket ban. The EU AI Act prohibits only **real-time remote biometric identification in publicly accessible spaces for law enforcement purposes**, and even that is subject to narrow exceptions and procedural safeguards. Other facial-recognition uses may instead be regulated as “high-risk” rather than banned.\n\n**The actual rule**\n- Under **Article 5(1)(h)** of the AI Act, real-time remote biometric identification in publicly accessible spaces for law enforcement is a prohibited practice [1][2].\n- There are limited exceptions listed in Article 5(1)(h)(i)–(iii) — for example, to find victims of certain crimes, prevent a specific and imminent terrorist threat, or identify suspects of specified serious crimes — and these require prior authorization and the procedural requirements in **Article 5(2)** [1][2].\n- The prohibitions in Article 5 apply within six months of the AI Act’s entry into force [1].\n- Broader biometric identification uses not covered by the ban are classified as high-risk under Annex III rather than prohibited outright [3].\n\n**Sources**\n- EU Publications Office, *Guidance Study on Article 5(1)(h) … of the AI Act* — covers the prohibition, its exceptions, and Article 5(2) procedural requirements [op.europa.eu](https://op.europa.eu/en/publication-detail/-/publication/24b979fc-4829-11f1-8095-01aa75ed71a1/language-en)\n- European Commission AI Act Service Desk, FAQ on prohibited systems — lists real-time remote biometric identification for law enforcement in publicly accessible spaces as prohibited, with limited exceptions [ai-act-service-desk.ec.europa.eu](https://ai-act-service-desk.ec.europa.eu/en/ai-act/faq/what-systems-are-prohibited-under-article-5-ai-act-eg-social-scoring-emotion-recognition)\n\nIf you want, I can also explain the difference between “real-time” identification and post-event identification, which the law treats differently.",
+      "answerChars": 1895,
+      "statuses": [
+        "Planning a search…",
+        "Plan: Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an",
+        "Searching: Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 27,
+      "cleanup": "deleted",
+      "pass": null,
+      "manual": true,
+      "detail": "manual rubric required; automatic checks: mentions facial recognition/biometrics=pass, mentions public spaces=pass, mentions exceptions/limits=pass, two links=pass",
+      "autoChecks": [
+        {
+          "label": "mentions facial recognition/biometrics",
+          "pass": true
+        },
+        {
+          "label": "mentions public spaces",
+          "pass": true
+        },
+        {
+          "label": "mentions exceptions/limits",
+          "pass": true
+        },
+        {
+          "label": "two links",
+          "pass": true
+        }
+      ],
+      "rubric": "PASS only if it distinguishes the real-time public-space ban from narrow law-enforcement exceptions, is not a total-ban claim, cites two openable sources with dates, and gives the current stage/date.",
+      "mode": "baseline",
+      "modeLabel": "Legacy single (command-a-plus-05-2026)"
+    },
+    {
+      "taskId": "R2",
+      "area": "research",
+      "strategy": "fast",
+      "model": "command-a-plus-05-2026",
+      "startedAt": 1794164881433,
+      "latencyMs": 16601,
+      "firstDeltaMs": 14779,
+      "prompt": "What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on review.",
+      "answer": "The latest model is the iPhone 18 Pro/Pro Max, compared with the iPhone 17 Pro. Three changes that matter:\n\n1. **Variable-aperture main camera** — the main lens now has a variable aperture with new “pro” controls for more photographic flexibility. [The Verge hands-on](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event)\n2. **Longer battery life** — Apple pitched this as a performance/camera/battery-focused “S”-style year rather than a redesign. [MacRumors hands-on](https://www.macrumors.com/2026/09/11/iphone-18-pro-hands-on/)\n3. **New, more uniform look** — four colors (black, silver, glacier blue, burgundy) with color-matched glass that blends into the frame, reducing the two-tone look of the iPhone 17 Pro. [The Verge hands-on](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event)\n\nScreen sizes and the overall design are largely unchanged.",
+      "answerChars": 953,
+      "statuses": [
+        "Planning a search…",
+        "Plan: What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on",
+        "Searching: What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 27,
+      "cleanup": "deleted",
+      "pass": null,
+      "manual": true,
+      "detail": "manual rubric required; automatic checks: current iPhone 18=pass, previous iPhone 17=pass, one link=pass, three changes (manual)=pass",
+      "autoChecks": [
+        {
+          "label": "current iPhone 18",
+          "pass": true
+        },
+        {
+          "label": "previous iPhone 17",
+          "pass": true
+        },
+        {
+          "label": "one link",
+          "pass": true
+        },
+        {
+          "label": "three changes (manual)",
+          "pass": true
+        }
+      ],
+      "rubric": "PASS only if it names the iPhone 18 generation as current, compares it with iPhone 17, gives three concrete changes, and cites one real hands-on review; stale iPhone 17-as-latest or invented specs fail.",
+      "mode": "baseline",
+      "modeLabel": "Legacy single (command-a-plus-05-2026)"
+    }
+  ]
+}

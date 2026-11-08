@@ -1,0 +1,266 @@
+{
+  "meta": {
+    "at": 1794162851356,
+    "startedAt": 1794162780024,
+    "finishedAt": 1794162851356,
+    "base": "http://127.0.0.1:5180",
+    "todayUtc": "2026-11-08",
+    "plus53": "2026-12-31",
+    "bestModel": "nvidia/nemotron-3-super-120b",
+    "baselineModel": "command-a-plus-05-2026",
+    "modes": [
+      "team"
+    ],
+    "tasks": [
+      "C2",
+      "M1"
+    ]
+  },
+  "before": {
+    "conversations": 20,
+    "messages": 57,
+    "usage": 24,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "after": {
+    "conversations": 20,
+    "messages": 53,
+    "usage": 24,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "summary": {
+    "team": {
+      "label": "New Team",
+      "total": 2,
+      "autoScored": 2,
+      "passed": 2,
+      "failed": 0,
+      "manualPending": 0,
+      "passRate": 100,
+      "overallPassRate": 100,
+      "avgMs": 34388,
+      "slow": 0,
+      "errors": 0
+    }
+  },
+  "runs": [
+    {
+      "taskId": "C2",
+      "area": "coding",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794162780024,
+      "latencyMs": 30652,
+      "firstDeltaMs": 30130,
+      "prompt": "Write a short Python program with a function average(nums) that returns None for an empty list and the arithmetic mean otherwise. Do not mutate the input. Include two tests that run. Put the final solution in one Python code block.",
+      "answer": "```python\ndef average(nums):\n    \"\"\"Return the arithmetic mean of nums, or None if nums is empty.\"\"\"\n    if len(nums) == 0:\n        return None\n    return sum(nums) / len(nums)\n\n\ndef test_average_empty():\n    assert average([]) is None\n\n\ndef test_average_mean():\n    assert average([2, 4, 6]) == 4.0\n\n\nif __name__ == \"__main__\":\n    test_average_empty()\n    test_average_mean()\n    print(\"All tests passed.\")\n```",
+      "answerChars": 412,
+      "statuses": [
+        "The strongest free lane is planning the approach…",
+        "3 free models are drafting independently…",
+        "The independent reviewer is checking the drafts…",
+        "The strongest lane is writing the checked answer…",
+        "A second strong lane is checking the final answer…",
+        "The check found an issue; the referee is repairing it…"
+      ],
+      "team": {
+        "models": [
+          "Mistral Large 4",
+          "GPT-OSS 120B (Groq)",
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3 Super 120B (BlockRun)",
+          "Command A+ (Cohere)"
+        ],
+        "drafts": 3,
+        "reviewed": true,
+        "drafters": [
+          "Mistral Large 4",
+          "GPT-OSS 120B (Groq)",
+          "GPT-OSS 120B (Workers AI)"
+        ],
+        "referee": "Nemotron 3 Super 120B (BlockRun)",
+        "verifier": "Command A+ (Cohere)",
+        "verified": true,
+        "repaired": true,
+        "confidence": "medium"
+      },
+      "teamEvents": [
+        {
+          "models": [
+            "Mistral Large 4",
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3 Super 120B (BlockRun)",
+            "Command A+ (Cohere)"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "Mistral Large 4",
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)"
+          ],
+          "referee": "Nemotron 3 Super 120B (BlockRun)",
+          "verifier": "Command A+ (Cohere)",
+          "verified": false,
+          "repaired": false,
+          "confidence": "medium"
+        },
+        {
+          "models": [
+            "Mistral Large 4",
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3 Super 120B (BlockRun)",
+            "Command A+ (Cohere)"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "Mistral Large 4",
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)"
+          ],
+          "referee": "Nemotron 3 Super 120B (BlockRun)",
+          "verifier": "Command A+ (Cohere)",
+          "verified": true,
+          "repaired": true,
+          "confidence": "medium"
+        }
+      ],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "hidden Python tests passed with a clean final answer",
+      "evidence": {
+        "status": 0,
+        "stderr": "",
+        "stdout": "All tests passed.\r\nHIDDEN_OK\r\n",
+        "error": null,
+        "outsideChars": 0,
+        "meta": false
+      },
+      "mode": "team",
+      "modeLabel": "New Team"
+    },
+    {
+      "taskId": "M1",
+      "area": "math",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794162811115,
+      "latencyMs": 38124,
+      "firstDeltaMs": 36160,
+      "prompt": "An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show the working. Also state what a flat 35% discount would have been, and compare it with the correct final price.",
+      "answer": "**Final price: $54**\n\nWorking:\n\n- Original price: **$80**\n- After 25% off:  \n  \\(80 \\times (1 - 0.25) = 80 \\times 0.75 = \\$60\\)\n- Extra 10% off the sale price:  \n  \\(60 \\times (1 - 0.10) = 60 \\times 0.90 = \\$54\\)\n\nEquivalently:  \n\\[\n80 \\times 0.75 \\times 0.90 = 80 \\times 0.675 = \\$54\n\\]\n\n**Why it isn’t 35% off**\n\nThe second discount is applied to the already-reduced price ($60), not the original price ($80). Stacked discounts multiply as factors rather than add:\n\n\\[\n(1 - 0.25)(1 - 0.10) = 0.75 \\times 0.90 = 0.675\n\\]\n\nSo the effective discount is:\n\n\\[\n1 - 0.675 = 0.325 = 32.5\\%\n\\]\n\nnot \\(25\\% + 10\\% = 35\\%\\).\n\n**Flat 35% discount**\n\n\\[\n80 \\times (1 - 0.35) = 80 \\times 0.65 = \\$52\n\\]\n\n**Comparison**\n\n| Method | Final price | Effective discount |\n|--------|-------------|--------------------|\n| 25% then 10% (successive) | **$54** | **32.5%** |\n| Flat 35% off | **$52** | **35%** |\n\nThe correct final price of **$54** is **$2 more** than the flat 35% price of **$52**, because the second 10% discount is taken on a smaller base.",
+      "answerChars": 1035,
+      "statuses": [
+        "Planning a search…",
+        "Plan: An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show t",
+        "Searching: An $80 shirt is 25% off, then an extra 10% off the sale price. What is the final price, and why isn't it 35% off? Show t",
+        "The strongest free lane is planning the approach…",
+        "3 free models are drafting independently…",
+        "The independent reviewer is checking the drafts…",
+        "The strongest lane is writing the checked answer…",
+        "A second strong lane is checking the final answer…"
+      ],
+      "team": {
+        "models": [
+          "Mistral Large 4",
+          "GPT-OSS 120B (Groq)",
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3 Super 120B (BlockRun)",
+          "Command A+ (Cohere)"
+        ],
+        "drafts": 3,
+        "reviewed": true,
+        "drafters": [
+          "Mistral Large 4",
+          "GPT-OSS 120B (Groq)",
+          "GPT-OSS 120B (Workers AI)"
+        ],
+        "referee": "Nemotron 3 Super 120B (BlockRun)",
+        "verifier": "Command A+ (Cohere)",
+        "verified": true,
+        "repaired": false,
+        "confidence": "medium"
+      },
+      "teamEvents": [
+        {
+          "models": [
+            "Mistral Large 4",
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3 Super 120B (BlockRun)",
+            "Command A+ (Cohere)"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "Mistral Large 4",
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)"
+          ],
+          "referee": "Nemotron 3 Super 120B (BlockRun)",
+          "verifier": "Command A+ (Cohere)",
+          "verified": false,
+          "repaired": false,
+          "confidence": "medium"
+        },
+        {
+          "models": [
+            "Mistral Large 4",
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3 Super 120B (BlockRun)",
+            "Command A+ (Cohere)"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "Mistral Large 4",
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)"
+          ],
+          "referee": "Nemotron 3 Super 120B (BlockRun)",
+          "verifier": "Command A+ (Cohere)",
+          "verified": true,
+          "repaired": false,
+          "confidence": "medium"
+        }
+      ],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "$54 final=pass, $60 after first discount=pass, $52 comparison=pass, explains sequential discounts=pass",
+      "checks": [
+        {
+          "label": "$54 final",
+          "pass": true
+        },
+        {
+          "label": "$60 after first discount",
+          "pass": true
+        },
+        {
+          "label": "$52 comparison",
+          "pass": true
+        },
+        {
+          "label": "explains sequential discounts",
+          "pass": true
+        }
+      ],
+      "mode": "team",
+      "modeLabel": "New Team"
+    }
+  ]
+}

@@ -1,0 +1,361 @@
+{
+  "meta": {
+    "at": 1794164554901,
+    "startedAt": 1794164399661,
+    "finishedAt": 1794164554901,
+    "base": "http://127.0.0.1:5180",
+    "todayUtc": "2026-11-08",
+    "plus53": "2026-12-31",
+    "bestModel": "nvidia/nemotron-3-super-120b",
+    "baselineModel": "command-a-plus-05-2026",
+    "modes": [
+      "team"
+    ],
+    "tasks": [
+      "F1",
+      "R1",
+      "R2"
+    ]
+  },
+  "before": {
+    "conversations": 23,
+    "messages": 62,
+    "readErrors": 0,
+    "usage": 26,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "after": {
+    "conversations": 23,
+    "messages": 63,
+    "readErrors": 0,
+    "usage": 26,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "summary": {
+    "team": {
+      "label": "New Team",
+      "total": 3,
+      "autoScored": 1,
+      "passed": 1,
+      "failed": 0,
+      "manualPending": 2,
+      "passRate": 100,
+      "overallPassRate": 33.3,
+      "avgMs": 51151,
+      "slow": 0,
+      "errors": 0
+    }
+  },
+  "runs": [
+    {
+      "taskId": "F1",
+      "area": "freshness",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794164399662,
+      "latencyMs": 28180,
+      "firstDeltaMs": 28147,
+      "prompt": "Using today's date (UTC), answer with exactly two lines and no other text:\nTODAY: YYYY-MM-DD\nPLUS53: YYYY-MM-DD",
+      "answer": "TODAY: 2026-11-08\nPLUS53: 2026-12-31",
+      "answerChars": 36,
+      "statuses": [
+        "Planning a search…",
+        "Plan: Using today's date (UTC), answer with exactly two lines and no other text: TODAY: YYYY-MM-DD PLUS53: YYYY-MM-DD",
+        "Searching: Using today's date (UTC), answer with exactly two lines and no other text: TODAY: YYYY-MM-DD PLUS53: YYYY-MM-DD",
+        "The strongest free lane is planning the approach…",
+        "3 free models are drafting independently…",
+        "The independent reviewer is checking the drafts…",
+        "The strongest lane is writing the checked answer…",
+        "A second strong lane is checking the final answer…",
+        "The check found an issue; the referee is repairing it…"
+      ],
+      "team": {
+        "models": [
+          "GPT-OSS 120B (Groq)",
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3.5 Bolt (BlockRun)",
+          "Nemotron 3 Super 120B (BlockRun)",
+          "Command A+ (Cohere)"
+        ],
+        "drafts": 3,
+        "reviewed": true,
+        "drafters": [
+          "GPT-OSS 120B (Groq)",
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3.5 Bolt (BlockRun)"
+        ],
+        "referee": "Nemotron 3 Super 120B (BlockRun)",
+        "verifier": "Command A+ (Cohere)",
+        "verified": true,
+        "repaired": true,
+        "confidence": "medium"
+      },
+      "teamEvents": [
+        {
+          "models": [
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "Nemotron 3 Super 120B (BlockRun)",
+            "Command A+ (Cohere)"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)"
+          ],
+          "referee": "Nemotron 3 Super 120B (BlockRun)",
+          "verifier": "Command A+ (Cohere)",
+          "verified": false,
+          "repaired": false,
+          "confidence": "medium"
+        },
+        {
+          "models": [
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "Nemotron 3 Super 120B (BlockRun)",
+            "Command A+ (Cohere)"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)"
+          ],
+          "referee": "Nemotron 3 Super 120B (BlockRun)",
+          "verifier": "Command A+ (Cohere)",
+          "verified": true,
+          "repaired": true,
+          "confidence": "medium"
+        }
+      ],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 26,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "both dates exact (2026-11-08, 2026-12-31)",
+      "mode": "team",
+      "modeLabel": "New Team"
+    },
+    {
+      "taskId": "R1",
+      "area": "research",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794164427914,
+      "latencyMs": 54847,
+      "firstDeltaMs": 52067,
+      "prompt": "Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an official EU source.",
+      "answer": "No. The EU AI Act does not ban all facial recognition in public places. It prohibits **real-time remote biometric identification (RBI)**—live capture and matching of people against a database—when used by **law enforcement** in **publicly accessible spaces**. Other uses, such as offline analysis or private security, are not banned by this rule, though they may still be regulated as high-risk AI.\n\n**The actual rule (Article 5(1)(h))**\n\nThe placing on the market, putting into service, or use of AI systems for real-time remote biometric identification of natural persons in publicly accessible spaces for law-enforcement purposes is prohibited, unless an exception applies [1](https://op.europa.eu/en/publication-detail/-/publication/24b979fc-4829-11f1-8095-01aa75ed71a1/language-en). The European Commission’s AI Act Service Desk confirms this covers live facial recognition in streets, transport hubs, parks, and similar areas, and that it does not extend to non-real-time or non-law-enforcement uses [2](https://ai-act-service-desk.ec.europa.eu/en/ai-act/faq/what-systems-are-prohibited-under-article-5-ai-act-eg-social-scoring-emotion-recognition).\n\n**Exceptions**\n\nArticle 5(1)(h)(i)–(iii) provides narrow exceptions, including locating victims of crime, preventing a serious threat to public security, and certain substantial public-interest tasks. Any use under an exception requires prior authorization under Article 5(2) [1](https://op.europa.eu/en/publication-detail/-/publication/24b979fc-4829-11f1-8095-01aa75ed71a1/language-en).\n\n**What remains allowed**\n\nFacial recognition that is not real-time, not remote biometric identification, or not deployed by law enforcement in publicly accessible spaces is not prohibited by Article 5. It may still fall under the Act’s high-risk requirements [2](https://ai-act-service-desk.ec.europa.eu/en/ai-act/faq/what-systems-are-prohibited-under-article-5-ai-act-eg-social-scoring-emotion-recognition).\n\n**Timing**\n\nThe Article 5 prohibitions became applicable six months after the AI Act entered into force [1](https://op.europa.eu/en/publication-detail/-/publication/24b979fc-4829-11f1-8095-01aa75ed71a1/language-en).\n\n**Sources**\n\n1. [Guidance Study on Article 5(1)(h) prohibition and its three exceptions](https://op.europa.eu/en/publication-detail/-/publication/24b979fc-4829-11f1-8095-01aa75ed71a1/language-en) — Publications Office of the EU (official EU source).\n2. [What systems are prohibited under Article 5 of the AI Act?](https://ai-act-service-desk.ec.europa.eu/en/ai-act/faq/what-systems-are-prohibited-under-article-5-ai-act-eg-social-scoring-emotion-recognition) — AI Act Service Desk, European Commission (official EU source).",
+      "answerChars": 2696,
+      "statuses": [
+        "Planning a search…",
+        "Plan: Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an",
+        "Searching: Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an",
+        "The strongest free lane is planning the approach…",
+        "3 free models are drafting independently…",
+        "The independent reviewer is checking the drafts…",
+        "The strongest lane is writing the checked answer…",
+        "A second strong lane is checking the final answer…"
+      ],
+      "team": {
+        "models": [
+          "GPT-OSS 120B (Groq)",
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3.5 Bolt (BlockRun)",
+          "Nemotron 3 Super 120B (BlockRun)",
+          "Command A+ (Cohere)"
+        ],
+        "drafts": 3,
+        "reviewed": true,
+        "drafters": [
+          "GPT-OSS 120B (Groq)",
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3.5 Bolt (BlockRun)"
+        ],
+        "referee": "Nemotron 3 Super 120B (BlockRun)",
+        "verifier": "Command A+ (Cohere)",
+        "verified": false,
+        "repaired": false,
+        "confidence": "medium"
+      },
+      "teamEvents": [
+        {
+          "models": [
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "Nemotron 3 Super 120B (BlockRun)",
+            "Command A+ (Cohere)"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)"
+          ],
+          "referee": "Nemotron 3 Super 120B (BlockRun)",
+          "verifier": "Command A+ (Cohere)",
+          "verified": false,
+          "repaired": false,
+          "confidence": "medium"
+        }
+      ],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 26,
+      "cleanup": "deleted",
+      "pass": null,
+      "manual": true,
+      "detail": "manual rubric required; automatic checks: mentions facial recognition/biometrics=pass, mentions public spaces=pass, mentions exceptions/limits=pass, two links=pass",
+      "autoChecks": [
+        {
+          "label": "mentions facial recognition/biometrics",
+          "pass": true
+        },
+        {
+          "label": "mentions public spaces",
+          "pass": true
+        },
+        {
+          "label": "mentions exceptions/limits",
+          "pass": true
+        },
+        {
+          "label": "two links",
+          "pass": true
+        }
+      ],
+      "rubric": "PASS only if it distinguishes the real-time public-space ban from narrow law-enforcement exceptions, is not a total-ban claim, cites two openable sources with dates, and gives the current stage/date.",
+      "mode": "team",
+      "modeLabel": "New Team"
+    },
+    {
+      "taskId": "R2",
+      "area": "research",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794164482834,
+      "latencyMs": 70426,
+      "firstDeltaMs": 69478,
+      "prompt": "What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on review.",
+      "answer": "**iPhone 18 Pro vs. iPhone 17 Pro: three changes that matter**\n\n1. **Variable-aperture main camera** – the main lens can adjust its aperture, giving more control over depth of field and low-light shooting than the fixed lens on the 17 Pro [The Verge’s hands-on impressions](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event).\n2. **Color-matched glass back** – the rear glass now blends more seamlessly with the aluminum frame, reducing the two-tone contrast of the iPhone 17 Pro [The Verge’s hands-on impressions](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event).\n3. **New “Pro” camera controls** – additional on-device controls give photographers more shooting options [The Verge’s hands-on impressions](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event).",
+      "answerChars": 917,
+      "statuses": [
+        "Planning a search…",
+        "Plan: What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on",
+        "Searching: What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on",
+        "The strongest free lane is planning the approach…",
+        "3 free models are drafting independently…",
+        "The independent reviewer is checking the drafts…",
+        "The strongest lane is writing the checked answer…",
+        "A second strong lane is checking the final answer…",
+        "The check found an issue; the referee is repairing it…"
+      ],
+      "team": {
+        "models": [
+          "GPT-OSS 120B (Groq)",
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3.5 Bolt (BlockRun)",
+          "Nemotron 3 Super 120B (BlockRun)",
+          "Command A+ (Cohere)"
+        ],
+        "drafts": 3,
+        "reviewed": true,
+        "drafters": [
+          "GPT-OSS 120B (Groq)",
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3.5 Bolt (BlockRun)"
+        ],
+        "referee": "Nemotron 3 Super 120B (BlockRun)",
+        "verifier": "Command A+ (Cohere)",
+        "verified": true,
+        "repaired": true,
+        "confidence": "medium"
+      },
+      "teamEvents": [
+        {
+          "models": [
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "Nemotron 3 Super 120B (BlockRun)",
+            "Command A+ (Cohere)"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)"
+          ],
+          "referee": "Nemotron 3 Super 120B (BlockRun)",
+          "verifier": "Command A+ (Cohere)",
+          "verified": false,
+          "repaired": false,
+          "confidence": "medium"
+        },
+        {
+          "models": [
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "Nemotron 3 Super 120B (BlockRun)",
+            "Command A+ (Cohere)"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)"
+          ],
+          "referee": "Nemotron 3 Super 120B (BlockRun)",
+          "verifier": "Command A+ (Cohere)",
+          "verified": true,
+          "repaired": true,
+          "confidence": "medium"
+        }
+      ],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 26,
+      "cleanup": "deleted",
+      "pass": null,
+      "manual": true,
+      "detail": "manual rubric required; automatic checks: current iPhone 18=pass, previous iPhone 17=pass, one link=pass, three changes (manual)=pass",
+      "autoChecks": [
+        {
+          "label": "current iPhone 18",
+          "pass": true
+        },
+        {
+          "label": "previous iPhone 17",
+          "pass": true
+        },
+        {
+          "label": "one link",
+          "pass": true
+        },
+        {
+          "label": "three changes (manual)",
+          "pass": true
+        }
+      ],
+      "rubric": "PASS only if it names the iPhone 18 generation as current, compares it with iPhone 17, gives three concrete changes, and cites one real hands-on review; stale iPhone 17-as-latest or invented specs fail.",
+      "mode": "team",
+      "modeLabel": "New Team"
+    }
+  ]
+}

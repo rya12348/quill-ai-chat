@@ -1,0 +1,316 @@
+{
+  "meta": {
+    "at": 1794164024612,
+    "startedAt": 1794163982918,
+    "finishedAt": 1794164024612,
+    "base": "http://127.0.0.1:5180",
+    "todayUtc": "2026-11-08",
+    "plus53": "2026-12-31",
+    "bestModel": "nvidia/nemotron-3-super-120b",
+    "baselineModel": "command-a-plus-05-2026",
+    "modes": [
+      "best",
+      "baseline"
+    ],
+    "tasks": [
+      "M3",
+      "I1",
+      "L1",
+      "F1"
+    ]
+  },
+  "before": {
+    "conversations": 22,
+    "messages": 60,
+    "readErrors": 0,
+    "usage": 25,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "after": {
+    "conversations": 22,
+    "messages": 60,
+    "readErrors": 0,
+    "usage": 25,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "summary": {
+    "best": {
+      "label": "Best single (nvidia/nemotron-3-super-120b)",
+      "total": 4,
+      "autoScored": 4,
+      "passed": 4,
+      "failed": 0,
+      "manualPending": 0,
+      "passRate": 100,
+      "overallPassRate": 100,
+      "avgMs": 5383,
+      "slow": 0,
+      "errors": 0
+    },
+    "baseline": {
+      "label": "Legacy single (command-a-plus-05-2026)",
+      "total": 4,
+      "autoScored": 4,
+      "passed": 3,
+      "failed": 1,
+      "manualPending": 0,
+      "passRate": 75,
+      "overallPassRate": 75,
+      "avgMs": 4501,
+      "slow": 0,
+      "errors": 0
+    }
+  },
+  "runs": [
+    {
+      "taskId": "M3",
+      "area": "math",
+      "strategy": "fast",
+      "model": "nvidia/nemotron-3-super-120b",
+      "startedAt": 1794163982919,
+      "latencyMs": 4673,
+      "firstDeltaMs": 2542,
+      "prompt": "A 180-mile trip: the first 120 miles at 60 mph, the last 60 miles at 20 mph. What is the average speed, and why isn't it 40 mph? Show the time.",
+      "answer": "**Times for each leg**\n\n- First 120 miles at 60 mph:  \n  \\(120 \\div 60 = 2\\) hours\n\n- Last 60 miles at 20 mph:  \n  \\(60 \\div 20 = 3\\) hours\n\n**Totals**\n\n- Total distance: \\(120 + 60 = 180\\) miles  \n- Total time: \\(2 + 3 = 5\\) hours\n\n**Average speed**\n\n\\[\n\\text{Average speed} = \\frac{\\text{Total distance}}{\\text{Total time}} = \\frac{180}{5} = \\mathbf{36\\text{ mph}}\n\\]\n\n**Why it isn't 40 mph**\n\n40 mph is just the simple average of the two speeds: \\((60 + 20) \\div 2 = 40\\). But average speed is weighted by **time**, not by speed or distance alone. You spent 3 hours driving slowly and only 2 hours driving quickly, so the slower speed pulls the average down. Because more time was spent at 20 mph, the true average is 36 mph, not 40 mph.",
+      "answerChars": 740,
+      "statuses": [],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 25,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "36 mph=pass, 2 hours first leg=pass, 3 hours second leg=pass, 5 hours total=pass, not 40 mph=pass",
+      "checks": [
+        {
+          "label": "36 mph",
+          "pass": true
+        },
+        {
+          "label": "2 hours first leg",
+          "pass": true
+        },
+        {
+          "label": "3 hours second leg",
+          "pass": true
+        },
+        {
+          "label": "5 hours total",
+          "pass": true
+        },
+        {
+          "label": "not 40 mph",
+          "pass": true
+        }
+      ],
+      "mode": "best",
+      "modeLabel": "Best single (nvidia/nemotron-3-super-120b)"
+    },
+    {
+      "taskId": "I1",
+      "area": "instruction",
+      "strategy": "fast",
+      "model": "nvidia/nemotron-3-super-120b",
+      "startedAt": 1794163987731,
+      "latencyMs": 8601,
+      "firstDeltaMs": 8254,
+      "prompt": "A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, containing exactly these keys: \"vendor\" (string), \"risk\" (one of \"low\", \"medium\", \"high\", \"critical\"), \"score\" (integer 0-100), and \"actions\" (an array of exactly three non-empty strings). Use \"Northstar\" as the vendor and set risk to \"high\" or \"critical\".",
+      "answer": "{\"vendor\":\"Northstar\",\"risk\":\"high\",\"score\":74,\"actions\":[\"Issue a formal remediation plan with specific dates\",\"Require an independent third-party security audit\",\"Suspend new contract work until the deadline is met\"]}",
+      "answerChars": 219,
+      "statuses": [
+        "Planning a search…",
+        "Plan: first query · second query",
+        "Searching: first query (1 of 2)",
+        "Searching: second query (2 of 2)"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 25,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "strict JSON and schema passed",
+      "mode": "best",
+      "modeLabel": "Best single (nvidia/nemotron-3-super-120b)"
+    },
+    {
+      "taskId": "L1",
+      "area": "long-context",
+      "strategy": "fast",
+      "model": "nvidia/nemotron-3-super-120b",
+      "startedAt": 1794163996464,
+      "latencyMs": 790,
+      "firstDeltaMs": 738,
+      "prompt": "Read the entire operations manual below. The answer is inside it. Do not use outside knowledge.\n\nSection 1. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 2. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 3. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 4. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 5. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 6. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 7. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 8. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 9. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 10. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 11. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 12. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 13. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 14. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 15. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 16. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 17. Operations note. The vault access code is QX-7319-MINT. Keep it out of ordinary status reports; it is used only during a verified maintenance handoff. The surrounding sections describe routines that do not require the code.\n\nSection 18. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 19. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 20. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 21. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 22. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 23. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 24. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 25. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 26. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nQuestion: What is the vault access code? Answer with only the code, with no other words.",
+      "answer": "QX-7319-MINT",
+      "answerChars": 12,
+      "statuses": [],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 25,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "exact buried code QX-7319-MINT",
+      "mode": "best",
+      "modeLabel": "Best single (nvidia/nemotron-3-super-120b)"
+    },
+    {
+      "taskId": "F1",
+      "area": "freshness",
+      "strategy": "fast",
+      "model": "nvidia/nemotron-3-super-120b",
+      "startedAt": 1794163997396,
+      "latencyMs": 7469,
+      "firstDeltaMs": 7222,
+      "prompt": "Using today's date (UTC), answer with exactly two lines and no other text:\nTODAY: YYYY-MM-DD\nPLUS53: YYYY-MM-DD",
+      "answer": "TODAY: 2026-11-08\nPLUS53: 2026-12-31",
+      "answerChars": 36,
+      "statuses": [
+        "Planning a search…",
+        "Plan: Using today's date (UTC), answer with exactly two lines and no other text: TODAY: YYYY-MM-DD PLUS53: YYYY-MM-DD",
+        "Searching: Using today's date (UTC), answer with exactly two lines and no other text: TODAY: YYYY-MM-DD PLUS53: YYYY-MM-DD"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 25,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "both dates exact (2026-11-08, 2026-12-31)",
+      "mode": "best",
+      "modeLabel": "Best single (nvidia/nemotron-3-super-120b)"
+    },
+    {
+      "taskId": "M3",
+      "area": "math",
+      "strategy": "fast",
+      "model": "command-a-plus-05-2026",
+      "startedAt": 1794164004951,
+      "latencyMs": 4179,
+      "firstDeltaMs": 2911,
+      "prompt": "A 180-mile trip: the first 120 miles at 60 mph, the last 60 miles at 20 mph. What is the average speed, and why isn't it 40 mph? Show the time.",
+      "answer": "**Trip breakdown**\n\n| Segment | Distance | Speed | Time |\n|---------|----------|-------|------|\n| 1       | 120 mi   | 60 mph| \\(120 ÷ 60 = 2\\) h |\n| 2       | 60 mi    | 20 mph| \\(60 ÷ 20 = 3\\) h |\n| **Total**| **180 mi**| –     | **5 h** |\n\n**Average speed**\n\n\\[\n\\text{Average speed}= \\frac{\\text{total distance}}{\\text{total time}}\n= \\frac{180\\ \\text{mi}}{5\\ \\text{h}} = 36\\ \\text{mph}\n\\]\n\n**Why it isn’t 40 mph**\n\n- The *arithmetic mean* \\((60 + 20) ÷ 2 = 40\\) mph would be correct **only if each speed were maintained for the same amount of time** (or the same distance weight).  \n- Here the distances are different: you spend more miles at the higher speed (120 mi vs. 60 mi). The average speed must weight each speed by the **time** it actually covers, not by an equal share of the trip.\n\nMathematically, the correct formula is a **distance‑weighted harmonic mean**:\n\n\\[\nv_{\\text{avg}} = \\frac{d_1+d_2}{\\frac{d_1}{v_1}+\\frac{d_2}{v_2}}\n= \\frac{180}{\\frac{120}{60}+\\frac{60}{20}} = 36\\ \\text{mph}\n\\]\n\nSo the trip takes **5 hours** and the average speed is **36 mph**, not 40 mph.",
+      "answerChars": 1085,
+      "statuses": [],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 25,
+      "cleanup": "deleted",
+      "pass": false,
+      "detail": "36 mph=pass, 2 hours first leg=fail, 3 hours second leg=fail, 5 hours total=pass, not 40 mph=pass",
+      "checks": [
+        {
+          "label": "36 mph",
+          "pass": true
+        },
+        {
+          "label": "2 hours first leg",
+          "pass": false
+        },
+        {
+          "label": "3 hours second leg",
+          "pass": false
+        },
+        {
+          "label": "5 hours total",
+          "pass": true
+        },
+        {
+          "label": "not 40 mph",
+          "pass": true
+        }
+      ],
+      "mode": "baseline",
+      "modeLabel": "Legacy single (command-a-plus-05-2026)"
+    },
+    {
+      "taskId": "I1",
+      "area": "instruction",
+      "strategy": "fast",
+      "model": "command-a-plus-05-2026",
+      "startedAt": 1794164009187,
+      "latencyMs": 3192,
+      "firstDeltaMs": 3066,
+      "prompt": "A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, containing exactly these keys: \"vendor\" (string), \"risk\" (one of \"low\", \"medium\", \"high\", \"critical\"), \"score\" (integer 0-100), and \"actions\" (an array of exactly three non-empty strings). Use \"Northstar\" as the vendor and set risk to \"high\" or \"critical\".",
+      "answer": "{\"vendor\":\"Northstar\",\"risk\":\"critical\",\"score\":85,\"actions\":[\"Conduct immediate security audit\",\"Implement automated deadline tracking system\",\"Escalate to senior management for remediation\"]}",
+      "answerChars": 193,
+      "statuses": [
+        "Planning a search…",
+        "Plan: first query · second query",
+        "Searching: first query (1 of 2)",
+        "Searching: second query (2 of 2)"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 25,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "strict JSON and schema passed",
+      "mode": "baseline",
+      "modeLabel": "Legacy single (command-a-plus-05-2026)"
+    },
+    {
+      "taskId": "L1",
+      "area": "long-context",
+      "strategy": "fast",
+      "model": "command-a-plus-05-2026",
+      "startedAt": 1794164012433,
+      "latencyMs": 772,
+      "firstDeltaMs": 735,
+      "prompt": "Read the entire operations manual below. The answer is inside it. Do not use outside knowledge.\n\nSection 1. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 2. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 3. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 4. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 5. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 6. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 7. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 8. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 9. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 10. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 11. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 12. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 13. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 14. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 15. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 16. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 17. Operations note. The vault access code is QX-7319-MINT. Keep it out of ordinary status reports; it is used only during a verified maintenance handoff. The surrounding sections describe routines that do not require the code.\n\nSection 18. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 19. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 20. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 21. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 22. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 23. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 24. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 25. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 26. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nQuestion: What is the vault access code? Answer with only the code, with no other words.",
+      "answer": "QX-7319-MINT",
+      "answerChars": 12,
+      "statuses": [],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 25,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "exact buried code QX-7319-MINT",
+      "mode": "baseline",
+      "modeLabel": "Legacy single (command-a-plus-05-2026)"
+    },
+    {
+      "taskId": "F1",
+      "area": "freshness",
+      "strategy": "fast",
+      "model": "command-a-plus-05-2026",
+      "startedAt": 1794164013303,
+      "latencyMs": 9862,
+      "firstDeltaMs": 9779,
+      "prompt": "Using today's date (UTC), answer with exactly two lines and no other text:\nTODAY: YYYY-MM-DD\nPLUS53: YYYY-MM-DD",
+      "answer": "TODAY: 2026-11-08\nPLUS53: 2026-12-31",
+      "answerChars": 36,
+      "statuses": [
+        "Planning a search…",
+        "Plan: Using today's date (UTC), answer with exactly two lines and no other text: TODAY: YYYY-MM-DD PLUS53: YYYY-MM-DD",
+        "Searching: Using today's date (UTC), answer with exactly two lines and no other text: TODAY: YYYY-MM-DD PLUS53: YYYY-MM-DD"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 25,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "both dates exact (2026-11-08, 2026-12-31)",
+      "mode": "baseline",
+      "modeLabel": "Legacy single (command-a-plus-05-2026)"
+    }
+  ]
+}

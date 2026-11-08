@@ -1,0 +1,12 @@
+node_modules
+dist
+.wrangler
+.env
+.env.*
+.freebuff
+.tmp-dev*
+!.env.example
+.dev.vars
+.dev.vars.*
+.DS_Store
+*.log

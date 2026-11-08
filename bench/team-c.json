@@ -1,0 +1,304 @@
+{
+  "meta": {
+    "at": 1794163180697,
+    "startedAt": 1794163122979,
+    "finishedAt": 1794163180697,
+    "base": "http://127.0.0.1:5180",
+    "todayUtc": "2026-11-08",
+    "plus53": "2026-12-31",
+    "bestModel": "nvidia/nemotron-3-super-120b",
+    "baselineModel": "command-a-plus-05-2026",
+    "modes": [
+      "team"
+    ],
+    "tasks": [
+      "M3",
+      "I1",
+      "I2"
+    ]
+  },
+  "before": {
+    "conversations": 21,
+    "messages": 58,
+    "readErrors": 0,
+    "usage": 24,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "after": {
+    "conversations": 21,
+    "messages": 58,
+    "readErrors": 0,
+    "usage": 24,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "summary": {
+    "team": {
+      "label": "New Team",
+      "total": 3,
+      "autoScored": 3,
+      "passed": 2,
+      "failed": 1,
+      "manualPending": 0,
+      "passRate": 66.7,
+      "overallPassRate": 66.7,
+      "avgMs": 18626,
+      "slow": 0,
+      "errors": 0
+    }
+  },
+  "runs": [
+    {
+      "taskId": "M3",
+      "area": "math",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794163122980,
+      "latencyMs": 30412,
+      "firstDeltaMs": 28699,
+      "prompt": "A 180-mile trip: the first 120 miles at 60 mph, the last 60 miles at 20 mph. What is the average speed, and why isn't it 40 mph? Show the time.",
+      "answer": "**Times**\n\n- First 120 mi at 60 mph → \\(120 ÷ 60 = 2\\) h  \n- Last 60 mi at 20 mph → \\(60 ÷ 20 = 3\\) h  \n\n**Total**: 180 mi in \\(2 + 3 = 5\\) h  \n\n**Average speed**\n\n\\[\n\\text{Average speed} = \\frac{\\text{total distance}}{\\text{total time}} = \\frac{180\\ \\text{mi}}{5\\ \\text{h}} = 36\\ \\text{mph}\n\\]\n\n**Why it isn’t 40 mph**\n\nThe simple arithmetic mean \\((60 + 20) ÷ 2 = 40\\) mph assumes the car spends the same amount of time at each speed. Here the car spends 2 h at 60 mph and 3 h at 20 mph, so the slower segment dominates the total time. The correct average is the harmonic mean weighted by distance (or time):\n\n\\[\n\\text{Average speed} = \\frac{d_1 + d_2}{\\frac{d_1}{v_1} + \\frac{d_2}{v_2}} = \\frac{120 + 60}{\\frac{120}{60} + \\frac{60}{20}} = \\frac{180}{2 + 3} = 36\\ \\text{mph}\n\\]\n\nThus the average speed is **36 mph**, not 40 mph, because the longer duration at the lower speed pulls the overall average down.",
+      "answerChars": 909,
+      "statuses": [
+        "The strongest free lane is planning the approach…",
+        "3 free models are drafting independently…",
+        "The independent reviewer is checking the drafts…",
+        "The strongest lane is writing the checked answer…",
+        "A second strong lane is checking the final answer…"
+      ],
+      "team": {
+        "models": [
+          "GPT-OSS 120B (Groq)",
+          "GPT-OSS 120B (Workers AI)",
+          "OpenRouter Free Router",
+          "Command A+ (Cohere)",
+          "Mistral Large 4"
+        ],
+        "drafts": 3,
+        "reviewed": true,
+        "drafters": [
+          "GPT-OSS 120B (Groq)",
+          "GPT-OSS 120B (Workers AI)",
+          "OpenRouter Free Router"
+        ],
+        "referee": "Command A+ (Cohere)",
+        "verifier": "Mistral Large 4",
+        "verified": false,
+        "repaired": false,
+        "confidence": "medium"
+      },
+      "teamEvents": [
+        {
+          "models": [
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "OpenRouter Free Router",
+            "Command A+ (Cohere)",
+            "Mistral Large 4"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "GPT-OSS 120B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "OpenRouter Free Router"
+          ],
+          "referee": "Command A+ (Cohere)",
+          "verifier": "Mistral Large 4",
+          "verified": false,
+          "repaired": false,
+          "confidence": "medium"
+        }
+      ],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": false,
+      "detail": "36 mph=pass, 2 hours first leg=pass, 3 hours second leg=pass, 5 hours total=fail, not 40 mph=pass",
+      "checks": [
+        {
+          "label": "36 mph",
+          "pass": true
+        },
+        {
+          "label": "2 hours first leg",
+          "pass": true
+        },
+        {
+          "label": "3 hours second leg",
+          "pass": true
+        },
+        {
+          "label": "5 hours total",
+          "pass": false
+        },
+        {
+          "label": "not 40 mph",
+          "pass": true
+        }
+      ],
+      "mode": "team",
+      "modeLabel": "New Team"
+    },
+    {
+      "taskId": "I1",
+      "area": "instruction",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794163153478,
+      "latencyMs": 9742,
+      "firstDeltaMs": 9588,
+      "prompt": "A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, containing exactly these keys: \"vendor\" (string), \"risk\" (one of \"low\", \"medium\", \"high\", \"critical\"), \"score\" (integer 0-100), and \"actions\" (an array of exactly three non-empty strings). Use \"Northstar\" as the vendor and set risk to \"high\" or \"critical\".",
+      "answer": "{\"vendor\":\"Northstar\",\"risk\":\"critical\",\"score\":85,\"actions\":[\"Conduct a comprehensive security audit\",\"Implement immediate patching for identified vulnerabilities\",\"Establish stricter deadline monitoring and reporting\"]}",
+      "answerChars": 221,
+      "statuses": [
+        "Planning a search…",
+        "Plan: A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, contain",
+        "Searching: A vendor missed a security deadline twice. Return only a valid JSON object, with no Markdown fence and no prose, contain",
+        "The strongest free lane is planning the approach…",
+        "3 free models are drafting independently…",
+        "The independent reviewer is checking the drafts…",
+        "The strongest lane is writing the checked answer…",
+        "A second strong lane is checking the final answer…"
+      ],
+      "team": {
+        "models": [
+          "Qwen 3.8 27B (Groq)",
+          "GPT-OSS 120B (Workers AI)",
+          "Command A+ (Cohere)",
+          "GPT-OSS 120B (Groq)"
+        ],
+        "drafts": 2,
+        "reviewed": true,
+        "drafters": [
+          "Qwen 3.8 27B (Groq)",
+          "GPT-OSS 120B (Workers AI)"
+        ],
+        "referee": "Command A+ (Cohere)",
+        "verifier": "GPT-OSS 120B (Groq)",
+        "verified": true,
+        "repaired": false,
+        "confidence": "high"
+      },
+      "teamEvents": [
+        {
+          "models": [
+            "Qwen 3.8 27B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Command A+ (Cohere)",
+            "GPT-OSS 120B (Groq)"
+          ],
+          "drafts": 2,
+          "reviewed": true,
+          "drafters": [
+            "Qwen 3.8 27B (Groq)",
+            "GPT-OSS 120B (Workers AI)"
+          ],
+          "referee": "Command A+ (Cohere)",
+          "verifier": "GPT-OSS 120B (Groq)",
+          "verified": false,
+          "repaired": false,
+          "confidence": "high"
+        },
+        {
+          "models": [
+            "Qwen 3.8 27B (Groq)",
+            "GPT-OSS 120B (Workers AI)",
+            "Command A+ (Cohere)",
+            "GPT-OSS 120B (Groq)"
+          ],
+          "drafts": 2,
+          "reviewed": true,
+          "drafters": [
+            "Qwen 3.8 27B (Groq)",
+            "GPT-OSS 120B (Workers AI)"
+          ],
+          "referee": "Command A+ (Cohere)",
+          "verifier": "GPT-OSS 120B (Groq)",
+          "verified": true,
+          "repaired": false,
+          "confidence": "high"
+        }
+      ],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "strict JSON and schema passed",
+      "mode": "team",
+      "modeLabel": "New Team"
+    },
+    {
+      "taskId": "I2",
+      "area": "instruction",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794163163310,
+      "latencyMs": 15723,
+      "firstDeltaMs": 14885,
+      "prompt": "Give exactly five steps for safely restarting a home router. Output only five lines. Each line must be exactly in the form \"STEP n: <one sentence>.\" with n from 1 to 5. Do not include a title, bullets, blank lines, or any closing text.",
+      "answer": "STEP 1: Unplug the router's power cable from the wall outlet and wait at least 30 seconds for internal components to discharge.  \nSTEP 2: Ensure any connected devices are turned off or will automatically reconnect after the restart.  \nSTEP 3: Reconnect the power cable securely to the router and to the outlet.  \nSTEP 4: Wait until the router's status lights stabilize, indicating the boot sequence is complete.  \nSTEP 5: Verify internet access by loading a webpage on a device.",
+      "answerChars": 478,
+      "statuses": [
+        "The strongest free lane is planning the approach…",
+        "3 free models are drafting independently…",
+        "The independent reviewer is checking the drafts…",
+        "The strongest lane is writing the checked answer…",
+        "A second strong lane is checking the final answer…"
+      ],
+      "team": {
+        "models": [
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3.5 Bolt (BlockRun)",
+          "Command A+ (Cohere)",
+          "GPT-OSS 120B (Groq)"
+        ],
+        "drafts": 2,
+        "reviewed": true,
+        "drafters": [
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3.5 Bolt (BlockRun)"
+        ],
+        "referee": "Command A+ (Cohere)",
+        "verifier": "GPT-OSS 120B (Groq)",
+        "verified": false,
+        "repaired": false,
+        "confidence": "medium"
+      },
+      "teamEvents": [
+        {
+          "models": [
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "Command A+ (Cohere)",
+            "GPT-OSS 120B (Groq)"
+          ],
+          "drafts": 2,
+          "reviewed": true,
+          "drafters": [
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)"
+          ],
+          "referee": "Command A+ (Cohere)",
+          "verifier": "GPT-OSS 120B (Groq)",
+          "verified": false,
+          "repaired": false,
+          "confidence": "medium"
+        }
+      ],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "exactly five constrained lines passed",
+      "mode": "team",
+      "modeLabel": "New Team"
+    }
+  ]
+}

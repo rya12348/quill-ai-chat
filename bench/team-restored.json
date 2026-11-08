@@ -1,0 +1,191 @@
+{
+  "meta": {
+    "at": 1794164326504,
+    "startedAt": 1794164205697,
+    "finishedAt": 1794164326504,
+    "base": "http://127.0.0.1:5180",
+    "todayUtc": "2026-11-08",
+    "plus53": "2026-12-31",
+    "bestModel": "nvidia/nemotron-3-super-120b",
+    "baselineModel": "command-a-plus-05-2026",
+    "modes": [
+      "team"
+    ],
+    "tasks": [
+      "F1",
+      "R1",
+      "R2"
+    ]
+  },
+  "before": {
+    "conversations": 23,
+    "messages": 61,
+    "readErrors": 0,
+    "usage": 25,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "after": {
+    "conversations": 23,
+    "messages": 61,
+    "readErrors": 0,
+    "usage": 25,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "summary": {
+    "team": {
+      "label": "New Team",
+      "total": 3,
+      "autoScored": 1,
+      "passed": 1,
+      "failed": 0,
+      "manualPending": 2,
+      "passRate": 100,
+      "overallPassRate": 33.3,
+      "avgMs": 39557,
+      "slow": 0,
+      "errors": 0
+    }
+  },
+  "runs": [
+    {
+      "taskId": "F1",
+      "area": "freshness",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794164205697,
+      "latencyMs": 21612,
+      "firstDeltaMs": 21566,
+      "prompt": "Using today's date (UTC), answer with exactly two lines and no other text:\nTODAY: YYYY-MM-DD\nPLUS53: YYYY-MM-DD",
+      "answer": "TODAY: 2026-11-08\nPLUS53: 2026-12-31",
+      "answerChars": 36,
+      "statuses": [
+        "Planning a search…",
+        "Plan: Using today's date (UTC), answer with exactly two lines and no other text: TODAY: YYYY-MM-DD PLUS53: YYYY-MM-DD",
+        "Searching: Using today's date (UTC), answer with exactly two lines and no other text: TODAY: YYYY-MM-DD PLUS53: YYYY-MM-DD",
+        "The strongest free lane is planning the approach…",
+        "3 free models are drafting independently…",
+        "The independent reviewer is checking the drafts…",
+        "The strongest lane is writing the checked answer…",
+        "A second strong lane is checking the final answer…"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 25,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "both dates exact (2026-11-08, 2026-12-31)",
+      "mode": "team",
+      "modeLabel": "New Team"
+    },
+    {
+      "taskId": "R1",
+      "area": "research",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794164227391,
+      "latencyMs": 57505,
+      "firstDeltaMs": 54579,
+      "prompt": "Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an official EU source.",
+      "answer": "**Short answer:** Yes, but only for a specific category. The EU AI Act prohibits **real-time remote biometric identification (RBI)**—live facial recognition that identifies people as they move through publicly accessible spaces—when used for **law enforcement**. It is not a blanket ban on every camera or every private use of facial recognition in public.\n\n**The actual rule**\n\n- **Article 5(1)(h)** bans real-time RBI in publicly accessible spaces for law-enforcement purposes [AI Act Service Desk](https://ai-act-service-desk.ec.europa.eu/en/ai-act/faq/what-systems-are-prohibited-under-article-5-ai-act-eg-social-scoring-emotion-recognition).\n- The prohibition is not absolute. Under **Article 5(1)(h)(i)–(iii)**, it may be set aside only when strictly necessary for narrow objectives such as the targeted search for specific victims of crime (including missing children), the prevention of a specific, substantial and imminent threat to life or physical safety or of a terrorist attack, and the detection or prosecution of perpetrators of serious crimes [Guidance Study, Publications Office of the EU](https://op.europa.eu/en/publication-detail/-/publication/24b979fc-4829-11f1-8095-01aa75ed71a1/language-en).\n- **Article 5(2)** imposes procedural safeguards, including prior authorisation by a judicial or independent administrative authority and a documented procedural record before any exception is used [Guidance Study, Publications Office of the EU](https://op.europa.eu/en/publication-detail/-/publication/24b979fc-4829-11f1-8095-01aa75ed71a1/language-en).\n\n**Scope and limits**\n\n- Police cannot run live facial-recognition scanning of crowds in streets, stations or parks as general surveillance.\n- Uses outside law enforcement (for example, retail, stadiums or office access control) are not covered by this prohibition, though many fall under separate high-risk obligations in Annex III [AI Act Service Desk – Biometrics](https://ai-act-service-desk.ec.europa.eu/en/biometrics).\n- The rule concerns **real-time** identification; retrospective analysis of footage is treated differently under the Act.\n\n**Bottom line:** The EU AI Act bans live, police-operated facial recognition in publicly accessible spaces, subject to tightly controlled exceptions and prior authorisation. It does not ban all facial recognition in public places.",
+      "answerChars": 2347,
+      "statuses": [
+        "Planning a search…",
+        "Plan: Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an",
+        "Searching: Does the EU AI Act ban facial recognition in public places? Explain the actual rule and cite two real sources. Prefer an",
+        "The strongest free lane is planning the approach…",
+        "3 free models are drafting independently…",
+        "The independent reviewer is checking the drafts…",
+        "The strongest lane is writing the checked answer…",
+        "A second strong lane is checking the final answer…"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 25,
+      "cleanup": "deleted",
+      "pass": null,
+      "manual": true,
+      "detail": "manual rubric required; automatic checks: mentions facial recognition/biometrics=pass, mentions public spaces=pass, mentions exceptions/limits=pass, two links=pass",
+      "autoChecks": [
+        {
+          "label": "mentions facial recognition/biometrics",
+          "pass": true
+        },
+        {
+          "label": "mentions public spaces",
+          "pass": true
+        },
+        {
+          "label": "mentions exceptions/limits",
+          "pass": true
+        },
+        {
+          "label": "two links",
+          "pass": true
+        }
+      ],
+      "rubric": "PASS only if it distinguishes the real-time public-space ban from narrow law-enforcement exceptions, is not a total-ban claim, cites two openable sources with dates, and gives the current stage/date.",
+      "mode": "team",
+      "modeLabel": "New Team"
+    },
+    {
+      "taskId": "R2",
+      "area": "research",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794164284981,
+      "latencyMs": 39554,
+      "firstDeltaMs": 38732,
+      "prompt": "What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on review.",
+      "answer": "**iPhone 18 Pro / Pro Max vs. iPhone 17 Pro / Pro Max**\n\n1. **Variable-aperture main camera** — the main lens can switch apertures, giving more flexibility across lighting conditions and depth control than the 17 Pro’s fixed lens [The Verge](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event).\n2. **New “pro” camera controls** — added manual controls give photographers more shooting options [The Verge](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event).\n3. **Color-matched glass back** — the rear glass blends more seamlessly with the aluminum frame, replacing the previous two-tone look [The Verge](https://www.theverge.com/tech/986400/apple-iphone-18-pro-max-hands-on-impressions-september-2026-event).",
+      "answerChars": 812,
+      "statuses": [
+        "Planning a search…",
+        "Plan: What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on",
+        "Searching: What changed in the latest iPhone compared with the previous model? Give three changes that matter and cite one hands-on",
+        "The strongest free lane is planning the approach…",
+        "3 free models are drafting independently…",
+        "The independent reviewer is checking the drafts…",
+        "The strongest lane is writing the checked answer…",
+        "A second strong lane is checking the final answer…"
+      ],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 25,
+      "cleanup": "deleted",
+      "pass": null,
+      "manual": true,
+      "detail": "manual rubric required; automatic checks: current iPhone 18=pass, previous iPhone 17=pass, one link=pass, three changes (manual)=pass",
+      "autoChecks": [
+        {
+          "label": "current iPhone 18",
+          "pass": true
+        },
+        {
+          "label": "previous iPhone 17",
+          "pass": true
+        },
+        {
+          "label": "one link",
+          "pass": true
+        },
+        {
+          "label": "three changes (manual)",
+          "pass": true
+        }
+      ],
+      "rubric": "PASS only if it names the iPhone 18 generation as current, compares it with iPhone 17, gives three concrete changes, and cites one real hands-on review; stale iPhone 17-as-latest or invented specs fail.",
+      "mode": "team",
+      "modeLabel": "New Team"
+    }
+  ]
+}

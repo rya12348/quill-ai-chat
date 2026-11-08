@@ -1,0 +1,113 @@
+{
+  "meta": {
+    "at": 1794164336222,
+    "startedAt": 1794164328847,
+    "finishedAt": 1794164336222,
+    "base": "http://127.0.0.1:5180",
+    "todayUtc": "2026-11-08",
+    "plus53": "2026-12-31",
+    "bestModel": "nvidia/nemotron-3-super-120b",
+    "baselineModel": "command-a-plus-05-2026",
+    "modes": [
+      "best",
+      "baseline"
+    ],
+    "tasks": [
+      "I2"
+    ]
+  },
+  "before": {
+    "conversations": 23,
+    "messages": 61,
+    "readErrors": 0,
+    "usage": 25,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "after": {
+    "conversations": 23,
+    "messages": 61,
+    "readErrors": 0,
+    "usage": 25,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "summary": {
+    "best": {
+      "label": "Best single (nvidia/nemotron-3-super-120b)",
+      "total": 1,
+      "autoScored": 1,
+      "passed": 1,
+      "failed": 0,
+      "manualPending": 0,
+      "passRate": 100,
+      "overallPassRate": 100,
+      "avgMs": 2751,
+      "slow": 0,
+      "errors": 0
+    },
+    "baseline": {
+      "label": "Legacy single (command-a-plus-05-2026)",
+      "total": 1,
+      "autoScored": 1,
+      "passed": 1,
+      "failed": 0,
+      "manualPending": 0,
+      "passRate": 100,
+      "overallPassRate": 100,
+      "avgMs": 2689,
+      "slow": 0,
+      "errors": 0
+    }
+  },
+  "runs": [
+    {
+      "taskId": "I2",
+      "area": "instruction",
+      "strategy": "fast",
+      "model": "nvidia/nemotron-3-super-120b",
+      "startedAt": 1794164328847,
+      "latencyMs": 2751,
+      "firstDeltaMs": 2089,
+      "prompt": "Give exactly five steps for safely restarting a home router. Output only five lines. Each line must be exactly in the form \"STEP n: <one sentence>.\" with n from 1 to 5. Do not include a title, bullets, blank lines, or any closing text.",
+      "answer": "STEP 1: Unplug the router's power cable from the wall outlet or the device itself.\nSTEP 2: Wait at least 30 seconds to allow capacitors to drain and the device to fully power down.\nSTEP 3: Plug the power cable back in securely.\nSTEP 4: Wait for the indicator lights to stabilize, showing a solid connection.\nSTEP 5: Reconnect your devices and test the internet connection.",
+      "answerChars": 372,
+      "statuses": [],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 25,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "exactly five constrained lines passed",
+      "mode": "best",
+      "modeLabel": "Best single (nvidia/nemotron-3-super-120b)"
+    },
+    {
+      "taskId": "I2",
+      "area": "instruction",
+      "strategy": "fast",
+      "model": "command-a-plus-05-2026",
+      "startedAt": 1794164331685,
+      "latencyMs": 2689,
+      "firstDeltaMs": 2444,
+      "prompt": "Give exactly five steps for safely restarting a home router. Output only five lines. Each line must be exactly in the form \"STEP n: <one sentence>.\" with n from 1 to 5. Do not include a title, bullets, blank lines, or any closing text.",
+      "answer": "STEP 1: Unplug the router's power cable from the wall outlet.  \nSTEP 2: Wait at least 30 seconds to allow the device to fully discharge.  \nSTEP 3: Press and hold the router's reset button (if needed) for 10 seconds.  \nSTEP 4: Plug the power cable back into the outlet and wait for the indicator lights to stabilize.  \nSTEP 5: Verify internet connectivity by opening a web page on a connected device.",
+      "answerChars": 399,
+      "statuses": [],
+      "team": null,
+      "teamEvents": [],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 25,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "exactly five constrained lines passed",
+      "mode": "baseline",
+      "modeLabel": "Legacy single (command-a-plus-05-2026)"
+    }
+  ]
+}

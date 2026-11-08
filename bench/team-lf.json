@@ -1,0 +1,175 @@
+{
+  "meta": {
+    "at": 1794163291466,
+    "startedAt": 1794163266820,
+    "finishedAt": 1794163291466,
+    "base": "http://127.0.0.1:5180",
+    "todayUtc": "2026-11-08",
+    "plus53": "2026-12-31",
+    "bestModel": "nvidia/nemotron-3-super-120b",
+    "baselineModel": "command-a-plus-05-2026",
+    "modes": [
+      "team"
+    ],
+    "tasks": [
+      "L1",
+      "F1"
+    ]
+  },
+  "before": {
+    "conversations": 21,
+    "messages": 58,
+    "readErrors": 0,
+    "usage": 24,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "after": {
+    "conversations": 21,
+    "messages": 58,
+    "readErrors": 0,
+    "usage": 24,
+    "limit": 50,
+    "mode": "public",
+    "search": true
+  },
+  "summary": {
+    "team": {
+      "label": "New Team",
+      "total": 2,
+      "autoScored": 2,
+      "passed": 1,
+      "failed": 1,
+      "manualPending": 0,
+      "passRate": 50,
+      "overallPassRate": 50,
+      "avgMs": 11220,
+      "slow": 0,
+      "errors": 1
+    }
+  },
+  "runs": [
+    {
+      "taskId": "L1",
+      "area": "long-context",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794163266820,
+      "latencyMs": 29,
+      "firstDeltaMs": null,
+      "prompt": "Read the entire operations manual below. The answer is inside it. Do not use outside knowledge.\n\nSection 1. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 2. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 3. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 4. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 5. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 6. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 7. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 8. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 9. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 10. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 11. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 12. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 13. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 14. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 15. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 16. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 17. Operations note. The vault access code is QX-7319-MINT. Keep it out of ordinary status reports; it is used only during a verified maintenance handoff. The surrounding sections describe routines that do not require the code.\n\nSection 18. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 19. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 20. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 21. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 22. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 23. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 24. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 25. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 26. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 27. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 28. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 29. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nSection 30. Routine operations. The team records inventory, checks the backup log, and confirms that the previous shift completed its checklist. Nothing in this section changes the weekly schedule or grants access to the vault. The supervisor reviews exceptions the next business day.\n\nQuestion: What is the vault access code? Answer with only the code, with no other words.",
+      "answer": "",
+      "answerChars": 0,
+      "statuses": [],
+      "team": null,
+      "teamEvents": [],
+      "error": {
+        "code": "harness",
+        "message": "chat returned 400"
+      },
+      "interrupted": true,
+      "usageAfter": null,
+      "cleanup": "not_needed",
+      "pass": false,
+      "detail": "expected only QX-7319-MINT, got \"\"",
+      "mode": "team",
+      "modeLabel": "New Team"
+    },
+    {
+      "taskId": "F1",
+      "area": "freshness",
+      "strategy": "team",
+      "model": null,
+      "startedAt": 1794163266899,
+      "latencyMs": 22411,
+      "firstDeltaMs": 22372,
+      "prompt": "Using today's date (UTC), answer with exactly two lines and no other text:\nTODAY: YYYY-MM-DD\nPLUS53: YYYY-MM-DD",
+      "answer": "TODAY: 2026-11-08\nPLUS53: 2026-12-31",
+      "answerChars": 36,
+      "statuses": [
+        "Planning a search…",
+        "Plan: Using today's date (UTC), answer with exactly two lines and no other text: TODAY: YYYY-MM-DD PLUS53: YYYY-MM-DD",
+        "Searching: Using today's date (UTC), answer with exactly two lines and no other text: TODAY: YYYY-MM-DD PLUS53: YYYY-MM-DD",
+        "The strongest free lane is planning the approach…",
+        "3 free models are drafting independently…",
+        "The independent reviewer is checking the drafts…",
+        "The strongest lane is writing the checked answer…",
+        "A second strong lane is checking the final answer…"
+      ],
+      "team": {
+        "models": [
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3.5 Bolt (BlockRun)",
+          "GPT-OSS 20B (Pollinations)",
+          "Command A+ (Cohere)",
+          "GPT-OSS 120B (Groq)"
+        ],
+        "drafts": 3,
+        "reviewed": true,
+        "drafters": [
+          "GPT-OSS 120B (Workers AI)",
+          "Nemotron 3.5 Bolt (BlockRun)",
+          "GPT-OSS 20B (Pollinations)"
+        ],
+        "referee": "Command A+ (Cohere)",
+        "verifier": "GPT-OSS 120B (Groq)",
+        "verified": true,
+        "repaired": false,
+        "confidence": "high"
+      },
+      "teamEvents": [
+        {
+          "models": [
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "GPT-OSS 20B (Pollinations)",
+            "Command A+ (Cohere)",
+            "GPT-OSS 120B (Groq)"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "GPT-OSS 20B (Pollinations)"
+          ],
+          "referee": "Command A+ (Cohere)",
+          "verifier": "GPT-OSS 120B (Groq)",
+          "verified": false,
+          "repaired": false,
+          "confidence": "high"
+        },
+        {
+          "models": [
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "GPT-OSS 20B (Pollinations)",
+            "Command A+ (Cohere)",
+            "GPT-OSS 120B (Groq)"
+          ],
+          "drafts": 3,
+          "reviewed": true,
+          "drafters": [
+            "GPT-OSS 120B (Workers AI)",
+            "Nemotron 3.5 Bolt (BlockRun)",
+            "GPT-OSS 20B (Pollinations)"
+          ],
+          "referee": "Command A+ (Cohere)",
+          "verifier": "GPT-OSS 120B (Groq)",
+          "verified": true,
+          "repaired": false,
+          "confidence": "high"
+        }
+      ],
+      "error": null,
+      "interrupted": false,
+      "usageAfter": 24,
+      "cleanup": "deleted",
+      "pass": true,
+      "detail": "both dates exact (2026-11-08, 2026-12-31)",
+      "mode": "team",
+      "modeLabel": "New Team"
+    }
+  ]
+}
