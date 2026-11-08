@@ -43,7 +43,8 @@ the dataset remains in that browser profile.
 ## Build
 
 Build is a fifth free-only composer mode, enabled with `BUILD_ENABLED=1` (add
-it to `.env.local` locally). Describe a website, landing page, portfolio, tool,
+it to `.env.local` locally; Codespaces enables it automatically for the
+development user). Describe a website, landing page, portfolio, tool,
 game or demo and a free lane returns one self-contained HTML document. Generated
 pages are previewed in a sandboxed iframe with scripts but no same-origin access
 or cookies. They may load HTTPS images, but cannot use external scripts, fonts,
@@ -89,14 +90,29 @@ through free lanes rather than model memory alone.
 ## Run it
 
 ```sh
-bun install
-bun run dev        # http://127.0.0.1:5180 with local D1 (Miniflare)
-bun run build      # dist/client (assets) + dist/ai_chat/index.js (Worker)
+npm ci
+npm run dev        # http://127.0.0.1:5180 with local D1 (Miniflare)
+npm run build      # dist/client (assets) + dist/ai_chat/index.js (Worker)
 ```
 
-The development URL is always **http://127.0.0.1:5180**. Another local project
-owns `127.0.0.1:5173`, so Quill uses its own fixed port and `strictPort`
-refuses to start somewhere else silently.
+Bun also works: `bun install && bun run dev`.
+
+### GitHub Codespaces
+
+The repository includes a dev container. Create a Codespace from the repository,
+wait for `npm ci` to finish, run `npm run dev`, and open the forwarded **5180**
+port if the browser does not open it. No `.env` or API key is needed. The app
+signs in as the development user, uses a local D1 database, and accepts the
+`*.app.github.dev` host. Build is enabled automatically for that development
+origin. If you copied a local `.env.local`, remove `FREEBUFF_CLIENT_ID` and
+`APP_ORIGIN` so Codespaces can use the development identity and forwarded
+origin. Keep the forwarded port private if you add API keys.
+
+Local development uses **http://127.0.0.1:5180**. In a Codespace, the forwarded
+HTTPS URL replaces it; Vite binds to all interfaces and sends HMR over HTTPS
+port 443 automatically. Another local project owns `127.0.0.1:5173`, so Quill
+uses its own fixed port on the machine and `strictPort` refuses to start
+somewhere else silently.
 
 No API key is needed, by you or by anyone using the app. Without one, replies
 come from the free chain in `src/worker/public-ai.ts`: BlockRun's keyless
@@ -111,8 +127,9 @@ model picker in the composer lists every lane.
 Replies can be rated helpful or not helpful, and the rating is stored with the
 message. `OPENAI_API_KEY` still takes priority when present.
 
-On localhost without a `FREEBUFF_CLIENT_ID`, the app signs you in as a local
-development user and seeds one sample conversation.
+On localhost or a Codespaces forwarded origin without a `FREEBUFF_CLIENT_ID`,
+the app signs you in as a local development user and seeds one sample
+conversation.
 
 ## The free chain
 
@@ -454,7 +471,7 @@ chat, because every reply spends the owner's credits.
   `routes/conversations.ts` lists, renames, moves and deletes chats;
   `routes/projects.ts` owns project CRUD and assignment; `routes/account.ts`
   serves `/me` (capabilities and today's usage) and `/models`. `db.ts` owns the schema (created on first request), `auth.ts`
-  the Freebuff integration and the loopback-only development user, `seed.ts`
+  the Freebuff integration and the development-only user, `seed.ts`
   the sample conversation.
 - `src/app/` is the React app. `pages/Chat.tsx` is the thread and composer;
   `lib/turn.ts` holds the reply in flight so it survives the move from `/` to
@@ -475,6 +492,6 @@ not in `MODELS`, caps messages at `MAX_MESSAGE_CHARS`, sends at most
 `MAX_CONTEXT_MESSAGES` of history and `MAX_OUTPUT_TOKENS` per reply, and allows
 `DAILY_MESSAGE_LIMIT` replies per user per UTC day (counting stopped and
 regenerated ones; refused requests are free). Keep these when extending the
-app, and keep the development user loopback-only: on a deployed origin it must
-never activate. Personalised responses are `Cache-Control: private, no-store`. When web search
+app, and keep the development user limited to loopback and GitHub Codespaces
+preview hosts: on a normal deployed origin it must never activate. Personalised responses are `Cache-Control: private, no-store`. When web search
 is enabled, the user's question is sent to Exa; keys stay server-side.

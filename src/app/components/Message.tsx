@@ -1,7 +1,8 @@
-import { Brain, Check, ChevronDown, Copy, Download, ExternalLink, FileSpreadsheet, FileText, Globe2, Hammer, Layers, Link2, Maximize2, RefreshCw, Shield, ShieldAlert, ShieldCheck, ShieldX, ThumbsDown, ThumbsUp, Users, X } from 'lucide-react'
+import { Brain, Check, ChevronDown, Copy, Download, ExternalLink, FileSpreadsheet, FileText, Globe2, Hammer, Layers, Link2, Maximize2, Play, RefreshCw, Shield, ShieldAlert, ShieldCheck, ShieldX, ThumbsDown, ThumbsUp, Users, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
+import { repairDocument } from '../../shared/html'
 import type { AnalysisInfo, BuildInfo, CanvasInfo, FeedbackRating, MessageAttachment, ProofInfo, ResearchInfo, Source, TeamInfo } from '../../shared/types'
 import { cx } from '../lib/cx'
 import { Markdown } from './Markdown'
@@ -337,6 +338,10 @@ function ResearchNote({ research, sources, content }: { research: ResearchInfo; 
 function BuildNote({ build }: { build: BuildInfo }) {
   const [open, setOpen] = useState(true)
   const [expanded, setExpanded] = useState(false)
+  // A generated page can sit in an endless loop. The frame is sandboxed, but a
+  // runaway script still blocks the tab's main thread and paints nothing, so
+  // scripts start off and the reader opts in when the page needs them.
+  const [scripts, setScripts] = useState(false)
   const live = build.kind === 'embed' && Boolean(build.proxyUrl)
   const sourceHost = (() => {
     try {
@@ -378,8 +383,9 @@ function BuildNote({ build }: { build: BuildInfo }) {
       />
     ) : (
       <iframe
-        sandbox="allow-scripts"
-        srcDoc={build.html}
+        key={scripts ? 'scripts-on' : 'scripts-off'}
+        sandbox={scripts ? 'allow-scripts' : ''}
+        srcDoc={repairDocument(build.html)}
         title={`Preview of ${build.title}`}
         className={className}
       />
@@ -402,6 +408,17 @@ function BuildNote({ build }: { build: BuildInfo }) {
           <div className="border-t border-line p-2.5">
             {preview('h-72 w-full rounded-[8px] border border-line bg-white')}
             <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+              {!live && (
+                <button
+                  type="button"
+                  onClick={() => setScripts((value) => !value)}
+                  aria-pressed={scripts}
+                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-line bg-surface px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:text-fg"
+                >
+                  <Play className="size-3" />
+                  {scripts ? 'Scripts on' : 'Run scripts'}
+                </button>
+              )}
               {live ? (
                 build.sourceUrl ? (
                   <a
@@ -440,7 +457,7 @@ function BuildNote({ build }: { build: BuildInfo }) {
             <p className="mt-2 text-[10.5px] leading-relaxed text-faint">
               {live
                 ? "This is a live page fetched through Quill's proxy, not a screenshot. Sign-in, payments and some cross-origin features may not work."
-                : 'The preview runs with scripts but without access to this app or its cookies. Images may load from the web.'}
+                : 'The preview starts with scripts off so a slow page cannot freeze the chat. Turn scripts on for interactive pages; images may load from the web.'}
             </p>
           </div>
         )}
@@ -462,6 +479,17 @@ function BuildNote({ build }: { build: BuildInfo }) {
                   <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">
                     {live ? `Live site · ${sourceHost}` : `Build · ${build.title}`}
                   </span>
+                  {!live ? (
+                    <button
+                      type="button"
+                      onClick={() => setScripts((value) => !value)}
+                      aria-pressed={scripts}
+                      className="hidden items-center gap-1 text-[11px] text-muted hover:text-fg sm:inline-flex"
+                    >
+                      <Play className="size-3" />
+                      {scripts ? 'Scripts on' : 'Run scripts'}
+                    </button>
+                  ) : null}
                   {live && build.sourceUrl ? (
                     <a
                       href={build.sourceUrl}

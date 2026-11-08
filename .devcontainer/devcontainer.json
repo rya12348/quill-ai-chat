@@ -1,0 +1,13 @@
+{
+  "name": "Quill",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "postCreateCommand": "npm ci",
+  "forwardPorts": [5180],
+  "portsAttributes": {
+    "5180": {
+      "label": "Quill dev server",
+      "onAutoForward": "notify"
+    }
+  },
+  "remoteUser": "node"
+}

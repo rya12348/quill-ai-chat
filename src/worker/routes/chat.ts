@@ -9,7 +9,7 @@ import { ANALYZE_DAILY_LIMIT, BUILD_DAILY_LIMIT, DAILY_MESSAGE_LIMIT, DEFAULT_MO
 import type { AnalysisInfo, AnalysisJob, BuildInfo, CanvasInfo, ChatEvent, Message, ProofInfo, ProofJob, ResearchInfo } from '../../shared/types'
 import { AiError, aiConfigured, complete, isModelId, type ChatMessage } from '../ai'
 import { AttachmentValidationError, attachmentMeta, loadAttachmentsForMessages, messageWithAttachments, parseAttachments, type StoredAttachment } from '../attachments'
-import { isOwner } from '../auth'
+import { buildEnabledFor, isOwner } from '../auth'
 import { blendComplete } from '../blend'
 import { analysisComplete, parseDataset } from '../analysis'
 import { buildComplete, buildEmbed } from '../build'
@@ -18,7 +18,7 @@ import { kindFor, proofComplete, proofSignature, streamChunks } from '../proof'
 import { analysisToday, buildToday, id, mapConversation, mapMessage, now, repliesToday, researchToday, titleFrom, usageToday, utcDay } from '../db'
 import { refreshConversationSummary } from '../memory'
 import { laneKey, orderLanes, publicComplete, publicLanes, type LaneResult } from '../public-ai'
-import { recordProviderResult } from '../provider-health'
+import { healthRows, recordProviderResult } from '../provider-health'
 import { planAndRetrieve } from '../plan'
 import { researchComplete } from '../research'
 import { findSiteTarget, webProxyPath, webProxyToken } from '../site-proxy'
@@ -141,7 +141,7 @@ chat.post('/', async (c) => {
   const analyzeDataset = wantsAnalysis ? parseDataset(input.dataset) : undefined
   const researchEnabled = !usingApi && (c.env.RESEARCH_ENABLED === '1' || c.env.RESEARCH_ENABLED === 'true')
   const analyzeEnabled = !usingApi && (c.env.ANALYZE_ENABLED === '1' || c.env.ANALYZE_ENABLED === 'true')
-  const buildEnabled = !usingApi && (c.env.BUILD_ENABLED === '1' || c.env.BUILD_ENABLED === 'true')
+  const buildEnabled = !usingApi && buildEnabledFor(c.env, c.req.raw)
   if (wantsResearch && (usingApi || !researchEnabled)) {
     return c.json({ error: 'research_unavailable', message: 'Research is not enabled on this deployment.' }, 503)
   }
@@ -667,6 +667,7 @@ chat.post('/', async (c) => {
             })
           : await buildComplete({
               lanes: orderLanes(lanes, model),
+              health: new Map((await healthRows(db, owner)).map((row) => [row.provider_id, row.status])),
               question: userMessage.content,
               signal: controller.signal,
               onStatus: (status) => { void send({ type: 'status', text: status }) },

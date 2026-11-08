@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { ANALYZE_DAILY_LIMIT, BUILD_DAILY_LIMIT, DAILY_MESSAGE_LIMIT, MODELS, RESEARCH_DAILY_LIMIT } from '../../shared/config'
 import type { Me, ModelInfo } from '../../shared/types'
 import { aiConfigured, availableModels } from '../ai'
-import { authMode, isOwner, privateJson } from '../auth'
+import { authMode, buildEnabledFor, isOwner, privateJson } from '../auth'
 import { now, utcDay, usageToday } from '../db'
 import type { AppContext } from '../env'
 import { publicLanes } from '../public-ai'
@@ -20,7 +20,7 @@ account.get('/me', async (c) => {
   const known = await db.prepare(`SELECT 1 FROM users WHERE owner_sub = ?`).bind(user.sub).first()
   if (!known) {
     const statements = [db.prepare(`INSERT INTO users (owner_sub, created_at) VALUES (?, ?)`).bind(user.sub, now())]
-    // Only the loopback development user gets a sample conversation.
+    // Only the development identity gets a sample conversation.
     if (mode === 'development') statements.push(...seedStatements(db, user.sub))
     await db.batch(statements)
   }
@@ -37,7 +37,7 @@ account.get('/me', async (c) => {
       reasoning: lanes.length > 1,
       research: !aiConfigured(c.env) && (c.env.RESEARCH_ENABLED === '1' || c.env.RESEARCH_ENABLED === 'true'),
       analyze: !aiConfigured(c.env) && (c.env.ANALYZE_ENABLED === '1' || c.env.ANALYZE_ENABLED === 'true'),
-      build: !aiConfigured(c.env) && (c.env.BUILD_ENABLED === '1' || c.env.BUILD_ENABLED === 'true'),
+      build: !aiConfigured(c.env) && buildEnabledFor(c.env, c.req.raw),
       // Canvas uses one free-lane completion, so it needs no extra flag.
       canvas: !aiConfigured(c.env),
       database: true,

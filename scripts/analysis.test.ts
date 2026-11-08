@@ -7,6 +7,7 @@ import { ANALYZE_DAILY_LIMIT, BUILD_DAILY_LIMIT } from '../src/shared/config'
 import { profileCsv } from '../src/shared/csv'
 import { readDataFile } from '../src/app/lib/dataset'
 import { isUnsafeAnalysisCode, parseDataset } from '../src/worker/analysis'
+import { repairDocument } from '../src/shared/html'
 import { extractHtml } from '../src/worker/build'
 import { analysisToday, buildToday, parseAnalysis, parseBuild, parseCanvas } from '../src/worker/db'
 import { findSiteTarget } from '../src/worker/site-proxy'
@@ -129,13 +130,37 @@ test('parses a generated build and rejects an empty one', () => {
   assert.equal(parseBuild(JSON.stringify({ info: { ...build, html: '' } })), undefined)
 })
 
+test('closes an unclosed style tag so the page is not swallowed as CSS', () => {
+  const broken =
+    '<!doctype html><html><head><title>Coffee</title><style>body{background:#fff}<header><h1>Coffee</h1></header></body></html>'
+  const fixed = repairDocument(broken)
+  assert.match(fixed, /<\/style>\s*<header>/)
+  assert.equal((fixed.match(/<\/style>/gi) ?? []).length, 1)
+  const page = '<!doctype html><html><head><title>Coffee</title><style>body{color:#333}</style></head><body><h1>Coffee</h1></body></html>'
+  assert.equal(repairDocument(page), page)
+})
+
 test('ignores an echoed prompt and keeps the real build document', () => {
   const echo =
     'Return ONLY the document, starting with <!doctype html> and ending with </html>. Key requirements: - Semantic HTML - Responsive layouts'
   assert.equal(extractHtml(echo), undefined)
-  const page = '<!doctype html><html><head><title>Coffee</title></head><body><h1>Coffee</h1></body></html>'
+  const page =
+    '<!doctype html><html><head><title>Coffee</title></head><body><h1>Coffee</h1><p>Fresh coffee on Maple Street, open from seven every morning.</p></body></html>'
   assert.equal(extractHtml(`${echo}\n\n${page}`), page)
   assert.equal(extractHtml(`Here you go:\n\`\`\`html\n${page}\n\`\`\``), page)
+  // A page that omits head/body is still the page, and a trailing sentence
+  // mentioning the tags must not beat it.
+  const loose =
+    '<!doctype html><html><style>body{color:#333}</style><div><h1>Coffee</h1><p>Fresh coffee on Maple Street, open from seven every morning.</p></div></html>'
+  assert.equal(extractHtml(loose), loose)
+  assert.equal(extractHtml(`${page}\n\nThat is the complete <html> page.`), page)
+  // A CSS-only shell is a blank preview, not a page.
+  const shell = '<!doctype html><html><head><title>Shell</title><style>body{background:#fff}</style></head><body></body></html>'
+  assert.equal(extractHtml(shell), undefined)
+  // Neither is a heading followed by "..." placeholders.
+  const dots =
+    '<!doctype html><html><body><h1>Corner Roast</h1><p>...</p><p>...</p><p>...</p><p>...</p><p>...</p></body></html>'
+  assert.equal(extractHtml(dots), undefined)
 })
 
 test('parses a generated canvas set and rejects an empty one', () => {

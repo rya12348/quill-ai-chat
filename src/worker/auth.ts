@@ -16,11 +16,11 @@ function isLoopbackOrigin(value: string): boolean {
   }
 }
 
-// One development identity, honoured only on a loopback origin when no client
-// ID is configured. It lets the template run before auth is provisioned and
-// can never activate on a deployed site (its origin is never loopback). That
-// matters here: every message spends the owner's API credits, so a deployed
-// app without Sign in with Freebuff answers nobody.
+// One development identity, honoured only on loopback or a GitHub Codespaces
+// preview origin when no client ID is configured. It lets the template run
+// before auth is provisioned and can never activate on a normal deployed
+// origin. That matters here: every message spends the owner's API credits, so
+// a deployed app without Sign in with Freebuff answers nobody.
 export const DEV_USER: FreebuffUser = {
   sub: 'dev-user',
   name: 'Alex Morgan',
@@ -34,7 +34,9 @@ export function isLoopback(request: Request): boolean {
 
 export function authMode(env: Env, request: Request): 'freebuff' | 'development' | 'off' {
   if (env.FREEBUFF_CLIENT_ID) return 'freebuff'
-  return isLoopback(request) ? 'development' : 'off'
+  if (isLoopback(request)) return 'development'
+  if (CODESPACES_HOST.test(new URL(request.url).hostname)) return 'development'
+  return forwardedDevelopmentOrigin(env, request) ? 'development' : 'off'
 }
 
 /**
@@ -104,10 +106,38 @@ export function appOrigin(env: Env, request: Request): string {
   return configured || new URL(request.url).origin
 }
 
+/** True for the public or forwarded host of a GitHub Codespace. */
+export function isCodespacesRequest(env: Env, request: Request): boolean {
+  if (CODESPACES_HOST.test(new URL(request.url).hostname)) return true
+  try {
+    return CODESPACES_HOST.test(new URL(appOrigin(env, request)).hostname)
+  } catch {
+    return false
+  }
+}
+
+/** Build is opt-in, except on the Codespaces development preview. */
+export function buildEnabledFor(env: Env, request: Request): boolean {
+  if (env.BUILD_ENABLED === '1' || env.BUILD_ENABLED === 'true') return true
+  if (env.BUILD_ENABLED) return false
+  return isCodespacesRequest(env, request)
+}
+
+/**
+ * Browser-set Sec-Fetch-Site is a same-origin signal even when a local proxy
+ * rewrites the Host and the Origin header uses the public address. Keep this
+ * fallback to development only; authenticated deployments use the exact
+ * configured APP_ORIGIN.
+ */
+export function allowsMutation(env: Env, request: Request): boolean {
+  if (isSameOriginRequest(request, appOrigin(env, request))) return true
+  return authMode(env, request) === 'development' && request.headers.get('sec-fetch-site') === 'same-origin'
+}
+
 /** Requires a signed-in user and, for mutations, a same-origin request. */
 export const requireUser: MiddlewareHandler<AppContext> = async (c, next) => {
   const request = c.req.raw
-  if (request.method !== 'GET' && request.method !== 'HEAD' && !isSameOriginRequest(request, appOrigin(c.env, request))) {
+  if (request.method !== 'GET' && request.method !== 'HEAD' && !allowsMutation(c.env, request)) {
     return c.json({ error: 'Cross-origin request refused.' }, 403)
   }
   const user = await currentUser(c.env, request)

@@ -2,10 +2,11 @@
 // rendered only inside a sandboxed iframe; the Worker never opens it.
 
 import type { PublicLane } from './public-ai'
-import { activeLanes, laneStrength, laneText, type LaneResult } from './public-ai'
+import { activeLanes, laneKey, laneStrength, laneText, type LaneResult } from './public-ai'
 import type { BuildInfo } from '../shared/types'
 import { AiError } from './ai'
 import { MAX_BUILD_HTML_CHARS } from '../shared/config'
+import { repairDocument } from '../shared/html'
 import { escapeHtml, fetchSitePage, SiteError } from './site-proxy'
 
 export type BuildIntent = {
@@ -14,6 +15,8 @@ export type BuildIntent = {
   signal?: AbortSignal
   onStatus?: (text: string) => Promise<void> | void
   onLaneResult?: (result: LaneResult) => void
+  /** Persisted provider health by lane key, so healthy lanes are tried first. */
+  health?: Map<string, string>
 }
 
 export type BuildOutcome = {
@@ -24,30 +27,65 @@ export type BuildOutcome = {
 // Free lanes sometimes echo the instructions before writing the page, so the
 // prompt's own "<!doctype html> … </html>" mentions can look like a document.
 // Only complete markup with a body counts, and the last full document wins.
-const PROMPT_ECHO = /You are a senior product designer|Do not use Markdown fences|Keep it under 70 KB/i
+const PROMPT_ECHO =
+  /You are a senior product designer|Do not use Markdown fences|Keep it under 70 KB|No external scripts|No claims of testing|Key requirements/i
+
+const visibleText = (html: string) =>
+  html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+const elementCount = (html: string) =>
+  html.match(/<(?:head|body|title|style|div|main|section|h1|p|header|nav|form|canvas|svg|img|button|footer|ul|li|table|input|a)[\s>]/gi)?.length ?? 0
 
 export function extractHtml(raw: string): string | undefined {
   const fenced = /```(?:html|htm)?[ \t]*\r?\n([\s\S]*?)```/i.exec(raw)?.[1]
+  const valid = (html: string): boolean => {
+    if (html.length > MAX_BUILD_HTML_CHARS) return false
+    // Echoed instructions inside an HTML comment do not make the page prose.
+    const visible = html.replace(/<!--[\s\S]*?-->/g, '')
+    if (PROMPT_ECHO.test(visible)) return false
+    // Prose that merely mentions the tags has almost no real elements.
+    if (elementCount(visible) < 2) return false
+    // A page with no copy is a blank preview. The model sometimes returns a
+    // CSS-only shell, so treat it as a failed attempt and let a lane retry.
+    const text = visibleText(visible)
+    if (text.length < 40) return false
+    // A shell of headings and "..." placeholders is not a page: require enough
+    // actual letters and reject a body made mostly of ellipses.
+    if ((text.match(/[a-z]/gi) ?? []).length < 50) return false
+    if ((text.match(/\.{3,}/g) ?? []).length > 4) return false
+    if (!/<(?:h1|h2|h3|p|div|header|main|section|article|nav|footer|button|form|ul|li|table|img|a)[\s>]/i.test(visible)) return false
+    return /^\s*(?:<!doctype html|<html[\s>])/i.test(html)
+  }
   for (const source of fenced ? [fenced, raw] : [raw]) {
     const starts = [...source.matchAll(/<!doctype html\s*>|<html(?:\s[^>]*)?>/gi)]
     const ends = [...source.matchAll(/<\/html\s*>/gi)]
-    if (!starts.length || !ends.length) continue
-    const docEnd = ends[ends.length - 1].index ?? -1
-    // Walk backwards: a model that planned first and wrote the page last puts
-    // the real document at the end, while the echoed instructions are earlier.
+    const lastEnd = ends[ends.length - 1]?.index ?? -1
+    // Later starts win: the page a model writes last is the answer, while an
+    // echoed instruction comes earlier. Taking the longest slice instead would
+    // glue the echoed prompt onto the front of the real page.
     for (let i = starts.length - 1; i >= 0; i -= 1) {
       const start = starts[i].index ?? -1
-      if (start < 0 || docEnd <= start) continue
+      if (start < 0) continue
       // Keep a doctype that sits immediately before the chosen <html> tag.
       const doctype = /<!doctype html\s*>\s*$/i.exec(source.slice(Math.max(0, start - 40), start))
       const begin = doctype ? start - doctype[0].length : start
-      const html = source.slice(begin, docEnd + 7).trim()
-      if (html.length > MAX_BUILD_HTML_CHARS) continue
-      // Prose that merely mentions the tags has no head, body or real elements.
-      if (!/<(?:head|body)[\s>]/i.test(html)) continue
-      if (!/<(?:title|style|div|main|section|h1|p|header|nav|form|canvas|svg)[\s>]/i.test(html)) continue
-      if (PROMPT_ECHO.test(html)) continue
-      return html
+      if (lastEnd > start) {
+        const html = source.slice(begin, lastEnd + 7).trim()
+        if (valid(html)) return html
+        continue
+      }
+      // A reply cut off by the token limit has no closing </html>. Browsers
+      // tolerate missing closing tags, so close the page instead of dropping it.
+      const rest = source.slice(begin).trim()
+      if (!/<(?:head|body)[\s>]/i.test(rest)) continue
+      const closed = /<\/body\s*>\s*$/i.test(rest) ? `${rest}\n</html>` : `${rest}\n</body>\n</html>`
+      if (valid(closed)) return closed
     }
   }
   return undefined
@@ -66,8 +104,15 @@ function titleOf(html: string): string {
 }
 
 export async function buildComplete(input: BuildIntent): Promise<BuildOutcome> {
+  // Prefer lanes the health table says are working, then the strongest model.
+  // A lane that returns junk is recorded as a failure below, so it moves down
+  // on the next attempt instead of being trusted again.
+  const healthRank = (lane: PublicLane) => {
+    const status = input.health?.get(laneKey(lane))
+    return status === 'healthy' ? 0 : status === 'down' ? 2 : 1
+  }
   const ranked = [...activeLanes(input.lanes)].sort(
-    (a, b) => laneStrength(b.model, b.url) - laneStrength(a.model, a.url),
+    (a, b) => healthRank(a) - healthRank(b) || laneStrength(b.model, b.url) - laneStrength(a.model, a.url),
   )
   const system = `You are a senior product designer and front-end engineer. Build one complete, polished, self-contained HTML website.
 
@@ -80,13 +125,27 @@ Rules:
 - Write specific, useful copy. Never use lorem ipsum or placeholder headings.
 - Make the controls actually work in the browser. A form may show a success message; there is no backend.
 - Use inline SVG, CSS gradients or HTTPS images for artwork. Do not use external scripts, stylesheets, fonts, fetch, XHR, WebSocket, storage or API calls.
-- Keep it under 70 KB and include a descriptive <title>.
+- Fill the body with the real page: headings, copy and controls. Never return an empty shell or a CSS-only document.
+- Keep it compact: one page of roughly 8–15 KB with at most three sections, and include a descriptive <title>.
 - Do not claim to have tested it, and do not invent testimonials, statistics or customers.`
 
-  for (const lane of ranked.slice(0, 3)) {
+  // A page takes tens of seconds on a free lane. Cap the whole attempt so a
+  // busy model cannot leave the reply spinning for minutes, and report the
+  // wait while a lane writes, since there is no partial HTML to show yet.
+  const deadline = Date.now() + 110_000
+  for (const lane of ranked.slice(0, 5)) {
+    const remaining = deadline - Date.now()
+    if (remaining < 12_000) break
+    const startedAt = Date.now()
+    const timeout = AbortSignal.timeout(Math.min(40_000, remaining))
+    let heartbeat: ReturnType<typeof setInterval> | undefined
     try {
-      await input.onStatus?.('Building a self-contained page…')
-      const signal = AbortSignal.any([input.signal ?? new AbortController().signal, AbortSignal.timeout(60_000)])
+      await input.onStatus?.(`Building a self-contained page with ${lane.label}…`)
+      heartbeat = setInterval(() => {
+        const seconds = Math.round((Date.now() - startedAt) / 1_000)
+        void input.onStatus?.(`Still writing the page… ${seconds}s`)
+      }, 15_000)
+      const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout
       const raw = await laneText(lane, {
         messages: [
           { role: 'system', content: system },
@@ -95,14 +154,34 @@ Rules:
         signal,
         temperature: 0.2,
         maxTokens: 4_000,
-        onLaneResult: input.onLaneResult,
+        // laneText reports its own failures; a success only counts once the
+        // page passes validation, so junk output cannot mark a lane healthy.
+        onLaneResult: (result) => {
+          if (!result.ok) input.onLaneResult?.(result)
+        },
       })
       const html = extractHtml(raw)
       if (!html) {
-        console.log('build.rejected', { lane: lane.label, chars: raw.length })
+        console.log('build.rejected', {
+          lane: lane.label,
+          chars: raw.length,
+          echo: PROMPT_ECHO.test(raw),
+          head: raw.slice(0, 90).replace(/\s+/g, ' '),
+          tail: raw.slice(-70).replace(/\s+/g, ' '),
+        })
+        // The model answered but not with a page: count it as a lane failure
+        // so the health table stops putting it first on the next build.
+        input.onLaneResult?.({
+          lane,
+          ok: false,
+          code: 'empty',
+          message: 'The model did not return a usable page.',
+          latencyMs: Date.now() - startedAt,
+        })
         continue
       }
-      const safe = secure(html)
+      input.onLaneResult?.({ lane, ok: true, latencyMs: Date.now() - startedAt })
+      const safe = secure(repairDocument(html))
       return {
         text: 'Here is your page. Preview it below, then download it when it looks right.',
         build: {
@@ -114,12 +193,22 @@ Rules:
           asOf: Date.now(),
         },
       }
-    } catch {
+    } catch (error) {
       if (input.signal?.aborted) break
-      // Try another free lane.
+      console.log('build.lane_failed', {
+        lane: lane.label,
+        error: timeout.aborted
+          ? 'timeout: the lane was too slow.'
+          : error instanceof AiError
+            ? `${error.code}: ${error.message}`
+            : String(error).slice(0, 200),
+      })
+      // Try another free lane within the remaining budget.
+    } finally {
+      if (heartbeat) clearInterval(heartbeat)
     }
   }
-  throw new AiError('unavailable', 'Build could not get a valid HTML page from a free model. Try a smaller, more specific request.', 503)
+  throw new AiError('unavailable', 'Build could not finish a page from a free model. Free models may be busy right now — try again, or ask for something smaller.', 503)
 }
 
 export type EmbedIntent = {
