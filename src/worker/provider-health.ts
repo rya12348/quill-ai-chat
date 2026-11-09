@@ -11,7 +11,7 @@ import { FREEBUFF_API_URL } from '../shared/config'
 import type { ProviderHealth, ProviderStatus } from '../shared/types'
 import { AiError, aiConfigured } from './ai'
 import type { Env } from './env'
-import { laneKey, laneText, publicLanes, type PublicLane } from './public-ai'
+import { familyForLane, laneKey, laneText, publicLanes, type PublicLane } from './public-ai'
 
 /** How long a healthy result is trusted before an automatic probe may run. */
 export const HEALTH_TTL = 10 * 60_000
@@ -35,6 +35,8 @@ export type ProviderDescriptor = {
   description: string
   /** The model id this provider serves, when it is one free lane. */
   model?: string
+  /** The model family this provider belongs to, when it is one free lane. */
+  family?: string
   lane?: PublicLane
 }
 
@@ -64,7 +66,7 @@ export function providerDescriptors(env: Env): ProviderDescriptor[] {
     const id = laneKey(lane)
     if (seen.has(id)) continue
     seen.add(id)
-    items.push({ id, name: lane.label, description: lane.description, model: lane.model, lane })
+    items.push({ id, name: lane.label, description: lane.description, model: lane.model, family: familyForLane(lane), lane })
   }
   return items
 }
@@ -78,6 +80,7 @@ export function mergeHealth(descriptors: ProviderDescriptor[], rows: HealthRow[]
       name: descriptor.name,
       description: descriptor.description,
       ...(descriptor.model ? { model: descriptor.model } : {}),
+      ...(descriptor.family ? { family: descriptor.family } : {}),
       status: normaliseStatus(row?.status),
       lastSuccessAt: row?.last_success_at ?? null,
       lastFailureAt: row?.last_failure_at ?? null,

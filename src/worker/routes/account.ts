@@ -6,7 +6,8 @@ import { aiConfigured, availableModels } from '../ai'
 import { authMode, buildEnabledFor, isOwner, privateJson } from '../auth'
 import { now, utcDay, usageToday } from '../db'
 import type { AppContext } from '../env'
-import { publicLanes } from '../public-ai'
+import { pickModelFamilies, publicLanes } from '../public-ai'
+import { healthRows } from '../provider-health'
 import { searchConfigured } from '../search'
 import { seedStatements } from '../seed'
 
@@ -69,16 +70,23 @@ account.get('/models', async (c) => {
     c.header('Cache-Control', 'private, max-age=60')
     return c.json({ items })
   }
-  // No key: the free lanes, named as they really are. The first is the default.
-  // One model can exist on several providers (Codestral is on LLM7 and Mistral);
-  // the picker shows the strongest lane once instead of duplicating the id.
-  const seen = new Set<string>()
-  const items: ModelInfo[] = []
-  for (const lane of publicLanes(c.env)) {
-    if (seen.has(lane.model)) continue
-    seen.add(lane.model)
-    items.push({ id: lane.model, name: lane.label, description: lane.description, available: true })
+  // No key: one row per model family, named just "Nemotron", "GPT" and so on.
+  // Each family is represented by its best currently working lane — healthy
+  // before merely strong — so the picker stays short and the site chooses the
+  // variant instead of making people compare provider suffixes.
+  let statuses = new Map<string, string>()
+  try {
+    statuses = new Map((await healthRows(c.get('db'), c.get('user').sub)).map((row) => [row.provider_id, row.status]))
+  } catch {
+    // A fresh deployment has no health rows yet; strength alone still works.
   }
+  const items: ModelInfo[] = pickModelFamilies(publicLanes(c.env), statuses).map(({ family, lane }) => ({
+    id: lane.model,
+    name: family,
+    description: lane.description,
+    available: true,
+    family,
+  }))
   c.header('Cache-Control', 'private, no-store')
   return c.json({ items })
 })

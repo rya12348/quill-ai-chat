@@ -222,6 +222,66 @@ function labelFor(id: string): string {
  * Optional providers that have been observed returning auth errors are nudged
  * down; the persisted health check also removes them from the referee chair.
  */
+/**
+ * The brand a lane belongs to. The picker offers one row per family, so a
+ * provider adding another Nemotron or GPT-OSS variant does not lengthen the
+ * list; the site chooses the best lane of that family instead.
+ */
+const FAMILY_RULES: [RegExp, string][] = [
+  [/qwen/i, 'Qwen'],
+  [/ministral/i, 'Ministral'],
+  [/codestral/i, 'Codestral'],
+  [/mistral/i, 'Mistral'],
+  [/nemotron/i, 'Nemotron'],
+  [/deepseek/i, 'DeepSeek'],
+  [/glm/i, 'GLM'],
+  [/gpt|openai/i, 'GPT'],
+  [/gemma/i, 'Gemma'],
+  [/llama/i, 'Llama'],
+  [/command/i, 'Command'],
+  [/north/i, 'North'],
+  [/flint/i, 'Flint'],
+  [/xing/i, 'Xing'],
+  [/openrouter/i, 'OpenRouter'],
+  [/kimi/i, 'Kimi'],
+  [/claude/i, 'Claude'],
+  [/gemini/i, 'Gemini'],
+  [/minimax/i, 'MiniMax'],
+  [/muse/i, 'Muse'],
+  [/laguna/i, 'Laguna'],
+]
+
+export function familyForLane(lane: Pick<PublicLane, 'model' | 'label'>): string {
+  const text = `${lane.label} ${lane.model}`
+  const known = FAMILY_RULES.find(([pattern]) => pattern.test(text))?.[1]
+  if (known) return known
+  return lane.label.replace(/\s*\([^)]*\)\s*$/, '').trim().split(/\s+/)[0] || lane.model
+}
+
+/** Status outranks raw strength: a family should be represented by a lane that answers. */
+const STATUS_RANK: Record<string, number> = { healthy: 3, unknown: 2, degraded: 1, down: 0 }
+
+/**
+ * One entry per family. Within a family, the best currently working lane wins
+ * (status first, then strength); the order of the families follows those reps.
+ */
+export function pickModelFamilies(
+  lanes: PublicLane[],
+  statusById: ReadonlyMap<string, string> = new Map(),
+): { family: string; lane: PublicLane }[] {
+  const best = new Map<string, { family: string; lane: PublicLane; score: number }>()
+  for (const lane of lanes) {
+    const family = familyForLane(lane)
+    const rank = STATUS_RANK[statusById.get(laneKey(lane)) ?? 'unknown'] ?? 2
+    const score = rank * 1_000 + laneStrength(lane.model, lane.url)
+    const current = best.get(family)
+    if (!current || score > current.score) best.set(family, { family, lane, score })
+  }
+  return [...best.values()]
+    .sort((a, b) => laneStrength(b.lane.model, b.lane.url) - laneStrength(a.lane.model, a.lane.url))
+    .map(({ family, lane }) => ({ family, lane }))
+}
+
 export function laneStrength(model: string, url?: string): number {
   const id = model.toLowerCase()
   let host = ''

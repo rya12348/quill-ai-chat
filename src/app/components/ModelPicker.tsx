@@ -76,11 +76,12 @@ export function ModelPicker({
   const ref = useRef<HTMLDivElement>(null)
   const models = data?.items ?? MODELS.map((m) => ({ ...m, available: true }))
   // Free lanes report their own health; the keyed API is one provider behind
-  // every model, so its status applies to all of them. One model can also be
-  // served by several providers, so the best working duplicate wins.
-  const lanesFor = (modelId: string) => health?.items.filter((item) => item.model === modelId) ?? []
-  const statusFor = (modelId: string): ProviderStatus => {
-    const lanes = lanesFor(modelId)
+  // every model, so its status applies to all of them. The list is one row per
+  // family, and any working lane of that family makes the family usable.
+  const lanesFor = (model: { id: string; family?: string }) =>
+    health?.items.filter((item) => (model.family ? item.family === model.family : item.model === model.id)) ?? []
+  const statusFor = (model: { id: string; family?: string }): ProviderStatus => {
+    const lanes = lanesFor(model)
     if (lanes.length) {
       if (lanes.some((lane) => lane.status === 'healthy')) return 'healthy'
       if (lanes.some((lane) => lane.status === 'degraded')) return 'degraded'
@@ -92,20 +93,20 @@ export function ModelPicker({
   }
   // A confirmed dead lane and a lane with a permanently bad key/model are not
   // worth putting in the list. Temporary busy or timeout states stay selectable.
-  const unusable = (modelId: string): boolean => {
-    const lanes = lanesFor(modelId)
+  const unusable = (model: { id: string; family?: string }): boolean => {
+    const lanes = lanesFor(model)
     if (!lanes.length) return false
     return lanes.every((lane) => lane.status === 'down' || lane.lastErrorCode === 'invalid_key' || lane.lastErrorCode === 'unavailable')
   }
   const available = models.filter((model) => model.available)
-  const healthy = available.filter((model) => statusFor(model.id) === 'healthy')
-  const usable = available.filter((model) => !unusable(model.id))
+  const healthy = available.filter((model) => statusFor(model) === 'healthy')
+  const usable = available.filter((model) => !unusable(model))
   // Once health is known, only offer models with a successful check. If nothing
   // has succeeded yet, fall back to usable lanes so the chat is not stranded.
   const options = healthy.length ? healthy : usable.length ? usable : available
   const hiddenCount = models.length - options.length
   const current = options.find((m) => m.id === value) ?? options[0] ?? models[0]
-  const currentStatus = current ? statusFor(current.id) : 'unknown'
+  const currentStatus = current ? statusFor(current) : 'unknown'
   const presets = onPreset ? MODEL_PRESET_OPTIONS : []
   const presetLabel = preset === 'auto' ? 'Auto' : preset === 'fast' ? 'Fast' : preset === 'best' ? 'Best' : null
   const correctedFor = useRef<string | null>(null)
@@ -190,7 +191,7 @@ export function ModelPicker({
               </>
             )}
             {options.map((model) => {
-              const status = statusFor(model.id)
+              const status = statusFor(model)
               return (
                 <li key={model.id}>
                   <button
@@ -215,7 +216,7 @@ export function ModelPicker({
             })}
             {hiddenCount > 0 && (
               <li className="px-2.5 pb-1.5 pt-1 text-[11px] leading-relaxed text-faint">
-                {hiddenCount} {hiddenCount === 1 ? 'model' : 'models'} hidden — not working right now
+                {hiddenCount} {hiddenCount === 1 ? 'family' : 'families'} hidden — no working model right now
               </li>
             )}
           </motion.ul>

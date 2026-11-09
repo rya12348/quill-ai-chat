@@ -401,6 +401,8 @@ export interface ProviderHealth {
   description: string
   /** The model id this provider serves, when it is one free lane. */
   model?: string
+  /** The model family this lane belongs to, e.g. "Nemotron" or "GPT". */
+  family?: string
   status: ProviderStatus
   lastSuccessAt: number | null
   lastFailureAt: number | null
@@ -419,6 +421,8 @@ export interface ModelInfo {
   description: string
   /** Whether the Freebuff API currently offers this model. */
   available: boolean
+  /** One row per family in the picker: every provider of it shares this name. */
+  family?: string
 }
 
 /** One free mode's daily allowance, as GET /api/me reports it. */
