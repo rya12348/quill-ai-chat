@@ -67,11 +67,11 @@ address (for example “run poki.com” or “show poki.com live”),
 Build fetches the real HTML and serves it through a token-scoped, read-only
 preview proxy. This is a live page, not a screenshot or emulator: the page's own
 scripts and assets load in a sandboxed iframe without app cookies or same-origin
-access. Links and GET forms stay inside the preview. Google Search needs JavaScript
-and its own cookies, so submitting a Google search opens the real Google results
-in a new browser tab instead of replacing them with another search engine. The
-proxy blocks private hosts, non-public redirects, non-HTML responses and form
-submission. Sign-in, payments, service
+access. Links and GET forms stay inside the preview. Google's full results page needs its
+own cookies and JavaScript, so a Google query resolves to Google's top result and
+shows it as a sandboxed result card; opening that result stays inside the
+preview. The proxy blocks private hosts, non-public redirects, non-HTML responses
+and form submission. Sign-in, payments, service
 workers and some cross-origin APIs may not work, and the original site should be
 used for those. A live preview is reachable by anyone with its capability URL
 and is included in a shared chat. The full-screen **Expand** button opens either

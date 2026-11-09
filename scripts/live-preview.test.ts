@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { installPokiGameBridge, isPokiGameWrapperUrl } from '../src/worker/poki-game'
-import { findSiteTarget, renderProxyPage, renderSearchResults, resolveProxyTarget, searchQueryFor } from '../src/worker/site-proxy'
+import { findSiteTarget, googleSearchQuery, parseGoogleLuckyRedirect, renderProxyPage, renderSearchResults, resolveProxyTarget, searchQueryFor } from '../src/worker/site-proxy'
 
 const TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef'
 const ORIGIN = 'https://quill-5180.app.github.dev'
@@ -57,10 +57,28 @@ test('show google.com is detected as a live site', () => {
   assert.equal(findSiteTarget('show google.com'), 'https://google.com/')
 })
 
-test('Google searches open in a new tab instead of the proxy', () => {
+test('Google searches stay inside the live preview', () => {
   const html = renderProxyPage(PAGE, 'https://www.google.com/', PROXY_URL)
-  assert.match(html, /nativeOpen\(target\.href,'_blank','noopener,noreferrer'\)/)
-  assert.match(html, /pathname==='\/search'/)
+  assert.doesNotMatch(html, /nativeOpen\(target\.href,'_blank','noopener,noreferrer'\)/)
+  assert.doesNotMatch(html, /isGoogleSearch/)
+  assert.doesNotMatch(html, /markGoogleSearchForms/)
+  assert.doesNotMatch(html, /target="_blank"/)
+  assert.match(html, /go\(proxy\+'\?url='\+encodeURIComponent\(target\.href\)\)/)
+})
+
+test('Google search and lucky-redirect detection stays specific', () => {
+  assert.equal(googleSearchQuery('https://www.google.com/search?q=poki'), 'poki')
+  assert.equal(googleSearchQuery('https://www.google.co.uk/search?q=quill'), 'quill')
+  assert.equal(googleSearchQuery('https://www.bing.com/search?q=poki'), undefined)
+  assert.equal(googleSearchQuery('https://www.google.com/'), undefined)
+  assert.equal(
+    parseGoogleLuckyRedirect('https://www.google.com/url?q=https%3A%2F%2Fpoki.com%2F'),
+    'https://poki.com/',
+  )
+  assert.equal(parseGoogleLuckyRedirect('https://poki.com/'), 'https://poki.com/')
+  assert.equal(parseGoogleLuckyRedirect('https://www.google.com/search?q=poki'), undefined)
+  assert.equal(parseGoogleLuckyRedirect('http://127.0.0.1:5180/'), undefined)
+  assert.equal(parseGoogleLuckyRedirect(null), undefined)
 })
 
 test('scripted popups stay in the live proxy', () => {
@@ -75,7 +93,8 @@ test('Google pages keep the search form but drop Google scripts', () => {
     'https://www.google.com/',
     'http://localhost/api/web-proxy/token',
   )
-  assert.match(html, /<form\b[^>]*\btarget="_blank"[^>]*>/)
+  assert.match(html, /<form action="https:\/\/www\.google\.com\/search"/)
+  assert.doesNotMatch(html, /target="_blank"/)
   assert.doesNotMatch(html, /googleNoise/)
 })
 
@@ -92,12 +111,14 @@ test('search results escape markup and provide a search-again form', () => {
   const html = renderSearchResults('poki <script>', 'https://www.google.com/search?q=poki', [
     { title: 'Poki <b>', url: 'https://poki.com/', snippet: 'Free games & fun' },
   ])
-  assert.match(html, /Search results/)
+  assert.match(html, /Google top result/)
   assert.match(html, /Poki &lt;b&gt;/)
   assert.match(html, /href="https:\/\/poki\.com\/"/)
   assert.match(html, /action="https:\/\/www\.google\.com\/search"/)
   assert.match(html, /name="q"/)
-  assert.match(html, /data-quill-external/)
+  assert.match(html, /full results page needs its own cookies/)
+  assert.doesNotMatch(html, /data-quill-external/)
+  assert.doesNotMatch(html, /target="_blank"/)
   assert.doesNotMatch(html, /<script>/i)
 })
 

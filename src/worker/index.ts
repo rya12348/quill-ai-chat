@@ -5,7 +5,7 @@ import { appOrigin, authMode, getAuth, isCodespacesRequest, requireUser } from '
 import { requireDb } from './db'
 import type { AppContext, Env } from './env'
 import { installPokiGameBridge, isPokiGameId, isPokiGameWrapperUrl, isPokiPage, pokiGameStartUrl, proxyPokiGameAsset } from './poki-game'
-import { escapeHtml, fetchSitePage, isWebProxyToken, normalizeSiteUrl, renderProxyPage, resolveProxyTarget, SiteError, webProxyPath } from './site-proxy'
+import { escapeHtml, fetchSitePage, googleSearchQuery, googleTopResult, isWebProxyToken, normalizeSiteUrl, renderProxyPage, renderSearchResults, resolveProxyTarget, SiteError, webProxyPath } from './site-proxy'
 import { account } from './routes/account'
 import { analysis } from './routes/analysis'
 import { artifacts } from './routes/artifacts'
@@ -65,6 +65,20 @@ app.get('/api/web-proxy/:token', requireDb, async (c) => {
   // sandboxed frame. Let Quill's parent page perform them instead.
   const parentNavigation = isCodespacesRequest(c.env, c.req.raw)
   try {
+    const query = googleSearchQuery(target)
+    if (query) {
+      const top = await googleTopResult(query, c.req.raw.signal)
+      const results = top
+        ? [
+            {
+              title: new URL(top).hostname.replace(/^www\./, ''),
+              url: top,
+              snippet: `Google's top result for “${query}”. Open it inside this preview.`,
+            },
+          ]
+        : []
+      return c.body(renderProxyPage(renderSearchResults(query, target, results), target, proxyUrl, parentNavigation), 200, PROXY_HEADERS)
+    }
     const page = await fetchSitePage(target, c.req.raw.signal)
     let html = page.html
     if (isPokiPage(page.finalUrl)) {
