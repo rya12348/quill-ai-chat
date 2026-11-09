@@ -13,9 +13,13 @@ suggestions on an empty chat.
 
 The plus button in the composer attaches up to four files to one message; a
 screenshot can also be pasted straight into the textarea with Ctrl/Cmd+V.
-Images (PNG, JPG, WebP and GIF) are shrunk in the browser to a readable 1,600px preview
-before sending; text and code files up to 20,000 characters are copied into the
-prompt with their filenames. You can send an image without a caption.
+Images (PNG, JPG, WebP and GIF) are shrunk in the browser to a readable 1,600px
+preview before sending; text and code files up to 40,000 characters are kept
+with the message, and up to 20,000 characters of each file go into the prompt
+with its filename. PDFs with a text layer and DOCX files are extracted in the
+browser and attached as text, keeping the first 40,000 characters; a longer
+document says how much was dropped. Scanned PDFs and legacy `.doc` files are
+refused with a clear message. You can send an image without a caption.
 
 Image turns are routed only through vision-capable free lanes (OpenRouter's
 Nemotron 3.5 VL, Gemma 4 31B, Nemotron Omni and free router, plus Gemini or the
@@ -45,23 +49,34 @@ the dataset remains in that browser profile.
 Build is a fifth free-only composer mode, enabled with `BUILD_ENABLED=1` (add
 it to `.env.local` locally; Codespaces enables it automatically for the
 development user). Describe a website, landing page, portfolio, tool,
-game or demo and a free lane returns one self-contained HTML document. Generated
-pages are previewed in a sandboxed iframe with scripts but no same-origin access
-or cookies. They may load HTTPS images, but cannot use external scripts, fonts,
-fetch/XHR/WebSocket, storage or a backend. The reply can be downloaded as a
-single `.html` file and is included in shares.
+game or demo and a free lane returns one self-contained HTML document. A
+follow-up Build message in the same chat edits the current page: the previous
+HTML is sent back with the change request, and the model returns the complete
+updated document. Games and interactive tools get a game-specific brief
+(canvas loop, keyboard and touch input, collision, score and restart) and a
+larger output budget; a static mock-up is rejected instead of being shown as a
+game. Generated pages are previewed in a sandboxed iframe with no same-origin
+access or cookies. Interactive builds start with scripts on, and every generated
+preview has **Pause scripts** and **Restart** controls. Pages may load HTTPS
+images, but cannot use external scripts, fonts, fetch/XHR/WebSocket, storage or
+a backend. The reply can be downloaded as a single `.html` file and is included
+in shares.
 
 Build also has a live-site path. If the request asks to show, run, open, play or embed a public
 address (for example “run poki.com” or “show poki.com live”),
 Build fetches the real HTML and serves it through a token-scoped, read-only
 preview proxy. This is a live page, not a screenshot or emulator: the page's own
 scripts and assets load in a sandboxed iframe without app cookies or same-origin
-access. The proxy blocks private hosts, non-public redirects, non-HTML responses
-and form submission. Sign-in, payments, service workers and some cross-origin
-APIs may not work, and the original site should be used for those. A live preview
-is reachable by anyone with its capability URL and is included in a shared chat.
-The full-screen **Expand** button opens either kind of preview at page size. Build
-is text-only and capped at three builds per UTC day.
+access. Links and GET forms stay inside the preview. Google Search needs JavaScript
+and its own cookies, so submitting a Google search opens the real Google results
+in a new browser tab instead of replacing them with another search engine. The
+proxy blocks private hosts, non-public redirects, non-HTML responses and form
+submission. Sign-in, payments, service
+workers and some cross-origin APIs may not work, and the original site should be
+used for those. A live preview is reachable by anyone with its capability URL
+and is included in a shared chat. The full-screen **Expand** button opens either
+kind of preview at page size. Build is text-only and capped at three builds per
+UTC day.
 
 ## Canvas
 
@@ -129,10 +144,10 @@ uses its own fixed port on the machine and `strictPort` refuses to start
 somewhere else silently.
 
 No API key is needed, by you or by anyone using the app. Without one, replies
-come from the free chain in `src/worker/public-ai.ts`: BlockRun's keyless
-Nemotron 3 Super 120B, OpenRouter free variants, LLM7 turbo models, Cohere
-trial, Groq, Mistral, Workers AI, Z.ai, and keyless LLM7 and Pollinations
-fallbacks. The chain is ordered by a capability prior, not by provider order, so
+come from the free chain in `src/worker/public-ai.ts`: OVHcloud's anonymous
+GPT-OSS and Qwen lanes, Kilo's keyless free routes, BlockRun's six keyless
+free models, OpenRouter free variants, LLM7 turbo models, Cohere trial, Groq,
+Mistral, Workers AI, Z.ai, and keyless LLM7 and Pollinations fallbacks. The chain is ordered by a capability prior, not by provider order, so
 the best reachable lane answers first. The picker lists every configured lane.
 Every key is optional, and every keyed lane is free to create; Cohere uses trial
 credits rather than unlimited free usage. A rate limit makes that lane rest
@@ -166,10 +181,19 @@ that answers:
   Mistral Small 3.1 on the free daily allowance.
 - **Z.ai** — GLM-4.5 Flash with `ZAI_API_KEY`; newer GLM models need paid
   credits.
-- **BlockRun** — keyless Nemotron 3 Super 120B and Nemotron 3.5 Bolt. The
-  120B lane is a strong, reliable default; it is not a frontier model, but it
-  handles the edge-case coding and reasoning that the old fallback referee
-  missed.
+- **OVHcloud** — keyless GPT-OSS 120B/20B, Qwen 3.5 397B/9B, Qwen 3.6 27B,
+  Qwen 3.8 27B and Qwen 2.5 VL 72B through an EU-hosted OpenAI-compatible
+  endpoint. The free allowance is 2 requests per minute per IP and model, so it
+  is a fallback rather than a full blend.
+- **Kilo** — keyless free routes including its Auto Free router, Nemotron 3.5
+  Super VL and Lightning, Nemotron 3 Ultra, Nemotron 3 Nano Omni, North Mini
+  Code, Dots3 Note and Liquid LFM3. The anonymous limit is 200 requests per
+  hour per IP, and free prompts may be logged by the upstream provider.
+- **BlockRun** — six keyless free models: Nemotron 3 Super, Nemotron 3.5
+  Lightning, Nemotron 3.5 Bolt, Nemotron 3 Nano Omni, Laguna XS and Muse
+  Glimmer. The 120B Super lane is a strong, reliable default; it is not a
+  frontier model, but it handles the edge-case coding and reasoning that the old
+  fallback referee missed.
 - **Pollinations** — keyless GPT-OSS 20B; `POLLINATIONS_API_KEY` adds Kimi K3
   (or `PUBLIC_AI_MODEL`) through the keyed endpoint.
 - **Optional** — NVIDIA NIM (`NVIDIA_API_KEY`), Ollama Cloud

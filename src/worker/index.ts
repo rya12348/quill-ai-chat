@@ -5,7 +5,7 @@ import { appOrigin, authMode, getAuth, isCodespacesRequest, requireUser } from '
 import { requireDb } from './db'
 import type { AppContext, Env } from './env'
 import { installPokiGameBridge, isPokiGameId, isPokiGameWrapperUrl, isPokiPage, pokiGameStartUrl, proxyPokiGameAsset } from './poki-game'
-import { escapeHtml, fetchSitePage, isWebProxyToken, normalizeSiteUrl, renderProxyPage, SiteError, webProxyPath } from './site-proxy'
+import { escapeHtml, fetchSitePage, isWebProxyToken, normalizeSiteUrl, renderProxyPage, resolveProxyTarget, SiteError, webProxyPath } from './site-proxy'
 import { account } from './routes/account'
 import { analysis } from './routes/analysis'
 import { artifacts } from './routes/artifacts'
@@ -34,16 +34,17 @@ const PROXY_HEADERS = {
   'content-security-policy':
     // No frame-ancestors: the unguessable token is the capability, and a
     // sandboxed (opaque-origin) document cannot match 'self' reliably.
-    "sandbox allow-scripts allow-popups allow-modals allow-downloads; default-src * data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' data: blob:; style-src * 'unsafe-inline'; img-src * data: blob:; font-src * data:; connect-src *; media-src * data: blob:; frame-src *; worker-src * blob:; object-src 'none'; base-uri *; form-action 'none'",
+    "sandbox allow-scripts allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox; default-src * data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' data: blob:; style-src * 'unsafe-inline'; img-src * data: blob:; font-src * data:; connect-src *; media-src * data: blob:; frame-src *; worker-src * blob:; object-src 'none'; base-uri *; form-action https://*.google.com https://google.com",
   'referrer-policy': 'no-referrer',
   'x-content-type-options': 'nosniff',
   'x-robots-tag': 'noindex, nofollow',
 }
 
 /**
- * A token-scoped, read-only live-site proxy. The token is the capability: it
- * lets a sandboxed preview load one saved site without sending the signed-in
- * app's cookies. Private hosts and non-HTML responses are refused.
+ * A token-scoped live-site proxy. The token is the capability: it lets a
+ * sandboxed preview load a saved site, follow its public links and submit its
+ * GET forms, all without sending the signed-in app's cookies. Private hosts
+ * and non-HTML responses are refused.
  */
 app.get('/api/web-proxy/:token', requireDb, async (c) => {
   const token = c.req.param('token')
@@ -53,23 +54,18 @@ app.get('/api/web-proxy/:token', requireDb, async (c) => {
   if (!row) return c.body('Live preview not found.', 404, { 'content-type': 'text/plain; charset=utf-8' })
   const storedUrl = normalizeSiteUrl(row.url)
   if (!storedUrl) return c.body('Live preview not found.', 404, { 'content-type': 'text/plain; charset=utf-8' })
-  let target = storedUrl
-  const requested = c.req.query('url')
-  if (requested) {
-    const next = normalizeSiteUrl(requested)
-    if (!next) return c.body('That page is not available.', 400, { 'content-type': 'text/plain; charset=utf-8' })
-    if (new URL(next).origin !== new URL(storedUrl).origin) {
-      return c.body('Navigation is limited to this site.', 403, { 'content-type': 'text/plain; charset=utf-8' })
-    }
-    target = next
-  }
+  // The token started on one saved site, but it can browse onward to any
+  // public HTTP(S) page so search results and ordinary links stay inside the
+  // preview. normalizeSiteUrl keeps private hosts and non-web schemes out.
+  const target = resolveProxyTarget(storedUrl, c.req.query('url'))
+  if (!target) return c.body('That page is not available.', 400, { 'content-type': 'text/plain; charset=utf-8' })
+  const proxyOrigin = appOrigin(c.env, c.req.raw)
+  const proxyUrl = new URL(webProxyPath(token), proxyOrigin).href
+  // Codespaces requires its own authorisation for navigations started in a
+  // sandboxed frame. Let Quill's parent page perform them instead.
+  const parentNavigation = isCodespacesRequest(c.env, c.req.raw)
   try {
     const page = await fetchSitePage(target, c.req.raw.signal)
-    const proxyOrigin = appOrigin(c.env, c.req.raw)
-    const proxyUrl = new URL(webProxyPath(token), proxyOrigin).href
-    // Codespaces requires its own authorisation for navigations started in a
-    // sandboxed frame. Let Quill's parent page perform them instead.
-    const parentNavigation = isCodespacesRequest(c.env, c.req.raw)
     let html = page.html
     if (isPokiPage(page.finalUrl)) {
       html = installPokiGameBridge(html, token, proxyOrigin, parentNavigation)

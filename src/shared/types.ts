@@ -197,6 +197,8 @@ export interface BuildInfo {
   sourceUrl?: string
   /** Token-scoped, same-origin URL that serves the live page. */
   proxyUrl?: string
+  /** A game or tool whose scripts should start as soon as it renders. */
+  interactive?: boolean
   models: string[]
   asOf: number
   reason?: string

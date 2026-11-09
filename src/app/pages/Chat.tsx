@@ -59,10 +59,12 @@ export function Chat() {
   })
   const [proof, setProof] = useState(() => localStorage.getItem('proof') === 'on')
   const [blend, setBlend] = useState(() => localStorage.getItem('blend') !== 'off')
-  const [research, setResearch] = useState(() => localStorage.getItem('research') === 'on')
-  const [analyze, setAnalyze] = useState(() => localStorage.getItem('analyze') === 'on')
-  const [build, setBuild] = useState(() => localStorage.getItem('build') === 'on')
-  const [canvas, setCanvas] = useState(() => localStorage.getItem('canvas') === 'on')
+  // A task mode belongs to a conversation, not to the app: Home starts in plain
+  // chat even if the last chat was set to Build, Analyze, Research or Canvas.
+  const [research, setResearch] = useState(() => id !== undefined && localStorage.getItem('research') === 'on')
+  const [analyze, setAnalyze] = useState(() => id !== undefined && localStorage.getItem('analyze') === 'on')
+  const [build, setBuild] = useState(() => id !== undefined && localStorage.getItem('build') === 'on')
+  const [canvas, setCanvas] = useState(() => id !== undefined && localStorage.getItem('canvas') === 'on')
   const [effort, setEffort] = useState<ReasoningEffort>(() => {
     const saved = localStorage.getItem(EFFORT_KEY)
     return saved === 'low' || saved === 'default' || saved === 'max' ? saved : 'default'
@@ -188,9 +190,11 @@ export function Chat() {
       void (async () => {
         const next = [...attachments]
         let failure: string | null = null
+        let notice: string | null = null
         for (const file of candidates.slice(0, slots)) {
           try {
             const attachment = analyzeOn ? await readDataFile(file) : await readAttachment(file)
+            if (attachment.notice) notice ??= attachment.notice
             const total = next.reduce((sum, item) => sum + item.size, 0) + attachment.size
             if (total > MAX_ATTACHMENT_TOTAL_BYTES) {
               failure = 'Those attachments are too large together. Try fewer or smaller files.'
@@ -204,6 +208,7 @@ export function Chat() {
         }
         if (next.length > attachments.length) setAttachments(next)
         if (failure) toast(failure, 'danger')
+        else if (notice) toast(notice)
       })()
     },
     [analyzeOn, attachments, buildOn, researchOn, toast],
@@ -589,6 +594,21 @@ export function Chat() {
     setCanvas(false)
     localStorage.setItem('canvas', 'off')
   }, [analyzeOn, blend, buildOn, canvas, proof, researchOn])
+
+  // Returning to Home is an explicit "ask anything": clear the previous tool
+  // choice so a plain question is not routed through Build or another mode.
+  // Selecting a card or the Tools menu sets it again on purpose.
+  useEffect(() => {
+    if (id !== undefined) return
+    setResearch(false)
+    setAnalyze(false)
+    setBuild(false)
+    setCanvas(false)
+    localStorage.setItem('research', 'off')
+    localStorage.setItem('analyze', 'off')
+    localStorage.setItem('build', 'off')
+    localStorage.setItem('canvas', 'off')
+  }, [id])
 
   const toggleChatOnly = () => {
     setProof(false)

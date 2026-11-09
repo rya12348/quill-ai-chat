@@ -648,6 +648,7 @@ export function parseBuild(value: unknown): BuildInfo | undefined {
       ...(sourceUrl ? { sourceUrl } : {}),
       ...(proxyUrl ? { proxyUrl } : {}),
       ...(pages.length > 1 ? { pages } : {}),
+      ...(info.interactive === true ? { interactive: true } : {}),
       models,
       asOf: Number.isFinite(Number(info.asOf)) ? Number(info.asOf) : Date.now(),
       ...(typeof info.reason === 'string' && info.reason ? { reason: info.reason.slice(0, 200) } : {}),

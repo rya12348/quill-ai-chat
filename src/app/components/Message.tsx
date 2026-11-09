@@ -343,10 +343,15 @@ function ResearchNote({ research, sources, content }: { research: ResearchInfo; 
 function BuildNote({ build }: { build: BuildInfo }) {
   const [open, setOpen] = useState(true)
   const [expanded, setExpanded] = useState(false)
-  // A generated page can sit in an endless loop. The frame is sandboxed, but a
-  // runaway script still blocks the tab's main thread and paints nothing, so
-  // scripts start off and the reader opts in when the page needs them.
-  const [scripts, setScripts] = useState(false)
+  // Games and tools are dead without their scripts. Other pages still start
+  // paused, because a runaway script can block the tab's main thread.
+  const interactive = build.interactive === true
+  const [scripts, setScripts] = useState(interactive)
+  const [run, setRun] = useState(0)
+  useEffect(() => {
+    setScripts(build.interactive === true)
+    setRun(0)
+  }, [build.interactive, build.asOf])
   // A multi-page build arrives as several documents. The tabs switch the frame
   // between them, since a sandboxed page cannot navigate on its own.
   const pages = build.pages && build.pages.length > 1 ? build.pages : null
@@ -456,7 +461,7 @@ function BuildNote({ build }: { build: BuildInfo }) {
     })()
   const liveSandbox = liveGame
     ? 'allow-scripts allow-same-origin allow-popups allow-modals allow-downloads'
-    : 'allow-scripts allow-popups allow-modals allow-downloads'
+    : 'allow-scripts allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox'
   const preview = (className: string) =>
     live ? (
       <iframe
@@ -470,7 +475,7 @@ function BuildNote({ build }: { build: BuildInfo }) {
       />
     ) : (
       <iframe
-        key={`${scripts ? 'scripts-on' : 'scripts-off'}-${currentPage?.name ?? 'page'}`}
+        key={`${scripts ? 'scripts-on' : 'scripts-off'}-${currentPage?.name ?? 'page'}-${run}`}
         sandbox={scripts ? 'allow-scripts' : ''}
         srcDoc={repairDocument(documentHtml)}
         title={`Preview of ${build.title}`}
@@ -497,15 +502,28 @@ function BuildNote({ build }: { build: BuildInfo }) {
             {preview('h-72 w-full rounded-[8px] border border-line bg-white')}
             <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
               {!live && (
-                <button
-                  type="button"
-                  onClick={() => setScripts((value) => !value)}
-                  aria-pressed={scripts}
-                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-line bg-surface px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:text-fg"
-                >
-                  <Play className="size-3" />
-                  {scripts ? 'Scripts on' : 'Run scripts'}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setScripts((value) => !value)}
+                    aria-pressed={scripts}
+                    className="inline-flex items-center gap-1.5 rounded-[8px] border border-line bg-surface px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:text-fg"
+                  >
+                    <Play className="size-3" />
+                    {scripts ? 'Pause scripts' : 'Run scripts'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScripts(true)
+                      setRun((value) => value + 1)
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-[8px] border border-line bg-surface px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:text-fg"
+                  >
+                    <RefreshCw className="size-3" />
+                    Restart
+                  </button>
+                </>
               )}
               {live ? (
                 build.sourceUrl ? (
@@ -545,7 +563,7 @@ function BuildNote({ build }: { build: BuildInfo }) {
             <p className="mt-2 text-[10.5px] leading-relaxed text-faint">
               {live
                 ? "This is a live page fetched through Quill's proxy, not a screenshot. Sign-in, payments and some cross-origin features may not work."
-                : `${pages ? `This build has ${pages.length} pages — switch with the tabs above the frame. ` : ''}The preview starts with scripts off so a slow page cannot freeze the chat. Turn scripts on for interactive pages; images load from the web.`}
+                : `${pages ? `This build has ${pages.length} pages — switch with the tabs above the frame. ` : ''}${interactive ? 'This interactive build starts with scripts on inside the sandbox. Pause or restart it with the controls above.' : 'The preview starts with scripts off so a slow page cannot freeze the chat. Turn scripts on for interactive pages.'} Ask for a change in the composer to edit this build. Images load from the web.`}
             </p>
           </div>
         )}
@@ -568,15 +586,28 @@ function BuildNote({ build }: { build: BuildInfo }) {
                     {live ? `Live site · ${sourceHost}` : `Build · ${build.title}`}
                   </span>
                   {!live ? (
-                    <button
-                      type="button"
-                      onClick={() => setScripts((value) => !value)}
-                      aria-pressed={scripts}
-                      className="hidden items-center gap-1 text-[11px] text-muted hover:text-fg sm:inline-flex"
-                    >
-                      <Play className="size-3" />
-                      {scripts ? 'Scripts on' : 'Run scripts'}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setScripts((value) => !value)}
+                        aria-pressed={scripts}
+                        className="hidden items-center gap-1 text-[11px] text-muted hover:text-fg sm:inline-flex"
+                      >
+                        <Play className="size-3" />
+                        {scripts ? 'Pause scripts' : 'Run scripts'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setScripts(true)
+                          setRun((value) => value + 1)
+                        }}
+                        className="hidden items-center gap-1 text-[11px] text-muted hover:text-fg sm:inline-flex"
+                      >
+                        <RefreshCw className="size-3" />
+                        Restart
+                      </button>
+                    </>
                   ) : null}
                   {live && build.sourceUrl ? (
                     <a

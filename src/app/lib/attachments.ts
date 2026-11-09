@@ -1,12 +1,19 @@
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS,
+  MAX_DOCUMENT_SOURCE_BYTES,
   MAX_TEXT_ATTACHMENT_CHARS,
 } from '../../shared/config'
+import { isDocumentFile, normalizeDocumentText } from '../../shared/documents'
 import type { AttachmentInput, AttachmentKind, DatasetInput } from '../../shared/types'
 
 /** An attachment selected in the composer, before its message is sent. */
-export type PendingAttachment = AttachmentInput & { id: string; dataset?: DatasetInput }
+export type PendingAttachment = AttachmentInput & {
+  id: string
+  dataset?: DatasetInput
+  /** A non-blocking note for the composer, e.g. a long document was clipped. */
+  notice?: string
+}
 
 export class AttachmentError extends Error {}
 
@@ -24,7 +31,10 @@ export function clipboardFiles(clipboard: DataTransfer | null | undefined): File
 }
 
 export const ATTACHMENT_ACCEPT =
-  'image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown,.csv,.tsv,.xlsx,.xls,.json,.js,.jsx,.ts,.tsx,.css,.html,.htm,.xml,.yaml,.yml,.toml,.ini,.sql,.py,.go,.rs,.java,.c,.cpp,.h,.sh,.log'
+  'image/png,image/jpeg,image/webp,image/gif,.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.txt,.md,.markdown,.csv,.tsv,.xlsx,.xls,.json,.js,.jsx,.ts,.tsx,.css,.html,.htm,.xml,.yaml,.yml,.toml,.ini,.sql,.py,.go,.rs,.java,.c,.cpp,.h,.sh,.log'
+
+const PDF_MIME = 'application/pdf'
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const IMAGE_SOURCE_BYTES = 20_000_000
@@ -113,6 +123,76 @@ async function compressImage(file: File, name: string): Promise<AttachmentInput>
   }
 }
 
+/** PDF text is extracted entirely in this browser and sent as a text attachment. */
+async function extractPdf(file: File): Promise<string> {
+  try {
+    // The legacy build carries its own small polyfills. The modern build assumes
+    // `Uint8Array.prototype.toHex`, which older Chromium/Electron shells lack.
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+    const worker = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')
+    pdfjs.GlobalWorkerOptions.workerSrc = worker.default
+    const task = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) })
+    try {
+      const loaded = await task.promise
+      const pages: string[] = []
+      for (let number = 1; number <= loaded.numPages; number += 1) {
+        const page = await loaded.getPage(number)
+        const content = await page.getTextContent()
+        let pageText = ''
+        for (const item of content.items) {
+          if (!('str' in item)) continue
+          pageText += item.str
+          pageText += item.hasEOL ? '\n' : ' '
+        }
+        pages.push(pageText)
+        page.cleanup()
+      }
+      return pages.join('\n\n')
+    } finally {
+      await task.destroy()
+    }
+  } catch (error) {
+    if (error instanceof AttachmentError) throw error
+    if (error instanceof Error && /password/i.test(`${error.name} ${error.message}`)) {
+      throw new AttachmentError('That PDF is password-protected. Remove the password and try again.')
+    }
+    throw new AttachmentError('That PDF could not be read. Try a text-based PDF.')
+  }
+}
+
+/** DOCX is a zip of XML; mammoth reads it in the browser too. */
+async function extractDocx(file: File): Promise<string> {
+  try {
+    const mammoth = await import('mammoth')
+    const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() })
+    return result.value
+  } catch {
+    throw new AttachmentError('That DOCX could not be read. Re-save it as .docx and try again.')
+  }
+}
+
+async function readDocument(file: File, name: string, extension: 'pdf' | 'docx'): Promise<PendingAttachment> {
+  if (file.size > MAX_DOCUMENT_SOURCE_BYTES) {
+    throw new AttachmentError(`Documents can be up to ${MAX_DOCUMENT_SOURCE_BYTES / 1_000_000} MB.`)
+  }
+  const raw = extension === 'pdf' ? await extractPdf(file) : await extractDocx(file)
+  const { text, truncated } = normalizeDocumentText(raw, MAX_TEXT_ATTACHMENT_CHARS)
+  if (!text.trim()) {
+    throw new AttachmentError('That document has no selectable text. Scanned PDFs and image-only files are not supported yet.')
+  }
+  return {
+    id: crypto.randomUUID(),
+    name,
+    mime: 'text/plain',
+    size: new TextEncoder().encode(text).byteLength,
+    kind: 'text',
+    data: text,
+    ...(truncated
+      ? { notice: `${name} is long: the first ${MAX_TEXT_ATTACHMENT_CHARS.toLocaleString()} characters were attached.` }
+      : {}),
+  }
+}
+
 /** Reads a picked file into the compact shape sent with the chat request. */
 export async function readAttachment(file: File): Promise<PendingAttachment> {
   const mime = normalizeImageMime(file.type)
@@ -120,7 +200,13 @@ export async function readAttachment(file: File): Promise<PendingAttachment> {
   // and the transcript have something useful to show.
   const name =
     file.name.trim() ||
-    (file.type.startsWith('image/') ? `pasted-image.${mime.split('/')[1] || 'png'}` : 'pasted-file.txt')
+    (file.type.startsWith('image/')
+      ? `pasted-image.${mime.split('/')[1] || 'png'}`
+      : mime === PDF_MIME
+        ? 'pasted-document.pdf'
+        : mime === DOCX_MIME
+          ? 'pasted-document.docx'
+          : 'pasted-file.txt')
   if (file.type.startsWith('image/')) {
     if (!IMAGE_TYPES.has(mime)) throw new AttachmentError('Use a PNG, JPG, WebP or GIF image.')
     if (file.size > IMAGE_SOURCE_BYTES) throw new AttachmentError('That image is too large. Try a screenshot under 20 MB.')
@@ -129,8 +215,15 @@ export async function readAttachment(file: File): Promise<PendingAttachment> {
   }
 
   const ext = extensionOf(name)
+  if (ext === 'doc' || mime === 'application/msword') {
+    throw new AttachmentError('Legacy .doc files are not supported. Save it as .docx or PDF and attach that.')
+  }
+  if (isDocumentFile(name) || mime === PDF_MIME || mime === DOCX_MIME) {
+    const extension = ext === 'pdf' || ext === 'docx' ? ext : mime === PDF_MIME ? 'pdf' : 'docx'
+    return readDocument(file, name, extension)
+  }
   const isText = file.type.startsWith('text/') || TEXT_MIMES.has(mime) || TEXT_EXTENSIONS.has(ext)
-  if (!isText) throw new AttachmentError('Attach images or text/code files. PDFs and office files are not supported yet.')
+  if (!isText) throw new AttachmentError('Attach an image, a PDF/DOCX document, or a text/code file.')
   if (file.size > MAX_TEXT_ATTACHMENT_CHARS * 4) throw new AttachmentError(`Text files can be up to ${MAX_TEXT_ATTACHMENT_CHARS.toLocaleString()} characters.`)
   const data = (await file.text()).replace(/^\uFEFF/, '')
   if (data.length > MAX_TEXT_ATTACHMENT_CHARS) throw new AttachmentError(`Text files can be up to ${MAX_TEXT_ATTACHMENT_CHARS.toLocaleString()} characters.`)

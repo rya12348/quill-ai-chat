@@ -5,8 +5,9 @@
 //
 // Keyed lanes cover OpenRouter's rotating free variants, NVIDIA NIM, LLM7,
 // ModelScope, Cohere trial credits, Groq, Mistral, Google AI Studio, Workers AI
-// and Z.ai. Pollinations and BlockRun add keyless lanes, and LLM7's anonymous
-// gateway is the last-resort free option. Keys stay on the server.
+// and Z.ai. OVHcloud, Kilo, Pollinations and BlockRun add keyless lanes, and
+// LLM7's anonymous gateway is the last-resort free option. Keys stay on the
+// server.
 
 import { MAX_OUTPUT_TOKENS } from '../shared/config'
 import { AiError, readSse, textFromContent, type ChatMessage, type StreamPiece } from './ai'
@@ -24,6 +25,8 @@ const MODELSCOPE_URL = 'https://api-inference.modelscope.cn/v1/chat/completions'
 const COHERE_URL = 'https://api.cohere.ai/compatibility/v1/chat/completions'
 const ZAI_URL = 'https://api.z.ai/api/paas/v4/chat/completions'
 const BLOCKRUN_URL = 'https://blockrun.ai/api/v1/chat/completions'
+const OVH_URL = 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions'
+const KILO_URL = 'https://api.kilo.ai/api/gateway/chat/completions'
 const OLLAMA_URL = 'https://ollama.com/v1/chat/completions'
 const SAMBANOVA_URL = 'https://api.sambanova.ai/v1/chat/completions'
 
@@ -60,9 +63,38 @@ const OLLAMA_MODELS = ['deepseek-v4-pro:0813', 'kimi-k3', 'glm-5.3', 'minimax-m3
 // default coding models when OLLAMA_LOCAL_URL is set.
 const OLLAMA_LOCAL_MODELS = ['qwen2.5-coder:3b', 'qwen2.5-coder:7b']
 const SAMBANOVA_MODELS = ['DeepSeek-V3.2', 'DeepSeek-V3.1', 'gpt-oss-120b', 'MiniMax-M2.7']
+// OVHcloud's anonymous lane needs no key and is hosted in the EU. The free
+// allowance is small (2 requests/minute per IP and model), so it is best used
+// as a fallback rather than as every member of a blend.
+const OVH_MODELS = [
+  'gpt-oss-120b',
+  'gpt-oss-20b',
+  'Qwen3.5-397B-A17B',
+  'Qwen3.5-9B',
+  'Qwen3.6-27B',
+  'Qwen3.8-27B',
+  'Qwen2.5-VL-72B-Instruct',
+]
+// Kilo's anonymous free models need no key either (200 requests/hour per IP).
+// Free prompts may be logged by the upstream provider, so this is a fallback
+// lane rather than a place for sensitive work.
+const KILO_FREE_MODELS = [
+  'kilo-auto/free',
+  'nvidia/nemotron-3.5-super-vl:free',
+  'nvidia/nemotron-3.5-lightning:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+  'cohere/north-mini-code:free',
+  'dots-studio/dots-3-note-preview:free',
+  'liquid/lfm-3-1.7b:free',
+  'stealth/glyph-cluster',
+  'stealth/crouton-alpha',
+  'openrouter/free',
+]
 const CLOUDFLARE_MODELS = [
   '@cf/zai-org/glm-5.3',
   '@cf/zai-org/glm-5.3-flash',
+  '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
   '@cf/deepseek-ai/deepseek-v4-flash-0731',
   '@cf/openai/gpt-oss-120b',
   '@cf/qwen/qwen3.8-27b',
@@ -71,7 +103,16 @@ const CLOUDFLARE_MODELS = [
   '@cf/meta/llama-4-scout-17b-16e-instruct',
   '@cf/mistralai/mistral-small-3.1-24b-instruct',
 ]
-const BLOCKRUN_MODELS = ['nvidia/nemotron-3-super-120b', 'nvidia/nemotron-3.5-bolt']
+// BlockRun's live free list. It exposes several models beyond the two Quill
+// originally used, all through the same keyless endpoint.
+const BLOCKRUN_MODELS = [
+  'nvidia/nemotron-3-super-120b',
+  'nvidia/nemotron-3.5-lightning',
+  'nvidia/nemotron-3.5-bolt',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
+  'poolside/laguna-xs-2.1',
+  'nvidia/muse-glimmer-30b',
+]
 
 export type PublicLane = {
   url: string
@@ -149,6 +190,7 @@ function requestBody(lane: PublicLane, input: LaneInput, stream: boolean): Recor
 /** A readable name for a model id, so the picker does not show a slug. */
 function labelFor(id: string): string {
   const lower = id.toLowerCase()
+  if (lower.includes('deepseek-r1-distill-qwen-32b')) return 'DeepSeek R1 Distill 32B'
   if (lower.includes('deepseek-v4.1')) return 'DeepSeek V4.1 Flash'
   if (lower.includes('deepseek-v3.2')) return 'DeepSeek V3.2'
   if (lower.includes('deepseek-v3.1')) return 'DeepSeek V3.1'
@@ -181,7 +223,11 @@ function labelFor(id: string): string {
     const size = lower.match(/qwen2\.5-coder:(\d+(?:\.\d+)?b)/)?.[1]
     return size ? `Qwen2.5 Coder ${size.toUpperCase()}` : 'Qwen2.5 Coder'
   }
+  if (lower.includes('qwen2.5-vl')) return 'Qwen 2.5 VL 72B'
   if (lower.includes('qwen3.8')) return 'Qwen 3.8 27B'
+  if (lower.includes('qwen3.6')) return 'Qwen 3.6 27B'
+  if (lower.includes('qwen3.5-397b')) return 'Qwen 3.5 397B'
+  if (lower.includes('qwen3.5-9b')) return 'Qwen 3.5 9B'
   if (lower.includes('qwen3')) return 'Qwen 3'
   if (lower.includes('qwen')) return 'Qwen'
   if (lower.includes('ministral')) return 'Ministral 14B'
@@ -201,6 +247,11 @@ function labelFor(id: string): string {
   if (lower.includes('ultra')) return 'Nemotron 3 Ultra 550B'
   if (lower.includes('nemotron')) return 'Nemotron 3 Nano 30B'
   if (lower.includes('muse-glimmer')) return 'Muse Glimmer 30B'
+  if (lower.includes('dots')) return 'Dots3 Note'
+  if (lower.includes('liquid')) return 'Liquid LFM3 1.7B'
+  if (lower.includes('glyph')) return 'Glyph Cluster'
+  if (lower.includes('crouton')) return 'Crouton Alpha'
+  if (lower.includes('kilo-auto')) return 'Kilo Auto Free'
   if (lower.includes('minimax-m3.1')) return 'MiniMax M3.1 Flash'
   if (lower.includes('minimax-m3')) return 'MiniMax M3'
   if (lower.includes('minimax-m2.7')) return 'MiniMax M2.7'
@@ -228,12 +279,14 @@ function labelFor(id: string): string {
  * list; the site chooses the best lane of that family instead.
  */
 const FAMILY_RULES: [RegExp, string][] = [
+  // DeepSeek first: its R1 distills are built on Qwen, but they are still
+  // DeepSeek models and must not be absorbed into the Qwen family.
+  [/deepseek/i, 'DeepSeek'],
   [/qwen/i, 'Qwen'],
   [/ministral/i, 'Ministral'],
   [/codestral/i, 'Codestral'],
   [/mistral/i, 'Mistral'],
   [/nemotron/i, 'Nemotron'],
-  [/deepseek/i, 'DeepSeek'],
   [/glm/i, 'GLM'],
   [/gpt|openai/i, 'GPT'],
   [/gemma/i, 'Gemma'],
@@ -249,6 +302,10 @@ const FAMILY_RULES: [RegExp, string][] = [
   [/minimax/i, 'MiniMax'],
   [/muse/i, 'Muse'],
   [/laguna/i, 'Laguna'],
+  [/dots/i, 'Dots'],
+  [/liquid/i, 'Liquid'],
+  [/kilo-auto|kilo auto/i, 'Kilo'],
+  [/stealth|glyph|crouton/i, 'Stealth'],
 ]
 
 export function familyForLane(lane: Pick<PublicLane, 'model' | 'label'>): string {
@@ -297,8 +354,8 @@ export function laneStrength(model: string, url?: string): number {
   // deliberately ranked above the rate-limited free router variants. A 120B
   // model that answers beats a 550B model that returns 429.
   else if (/nemotron-3-super/.test(id)) base = 86
-  else if (/nemotron-3-ultra|deepseek-v4\.1|glm-5\.3-flash|gemini-3\.8|mistral-large-4|command-a-plus|nemotron-3\.5-super/.test(id)) base = 84
-  else if (/deepseek-v4-flash|qwen3\.8|gpt-oss-120b|minimax-m3|mistral-large-3|north-mini-code|kimi-k2/.test(id)) base = 76
+  else if (/nemotron-3-ultra|deepseek-v4\.1|glm-5\.3-flash|gemini-3\.8|mistral-large-4|command-a-plus|nemotron-3\.5-super|qwen3\.5-397b/.test(id)) base = 84
+  else if (/deepseek-v4-flash|qwen3\.8|gpt-oss-120b|minimax-m3|mistral-large-3|north-mini-code|kimi-k2|qwen2\.5-vl/.test(id)) base = 76
   else if (/openrouter\/free|lightning|nemotron-3-120b|gemini-3\.6|gemma-4|flint|qwen3|bolt|muse-glimmer/.test(id)) base = 66
   else if (/qwen2\.5-coder:7b/.test(id)) base = 54
   else if (/qwen2\.5-coder:3b/.test(id)) base = 46
@@ -325,6 +382,11 @@ export function laneSupportsVision(lane: Pick<PublicLane, 'url' | 'model'>): boo
   if (host === 'openrouter.ai') {
     return /nemotron-3\.5-super-vl|nemotron-3-nano-omni|gemma-4-31b|openrouter\/free/.test(model)
   }
+  if (host === 'api.kilo.ai' || host === 'ai-gateway.kilo.ai') {
+    return /nemotron-3\.5-super-vl|nemotron-3-nano-omni/.test(model)
+  }
+  if (host === 'blockrun.ai') return /nemotron-3-nano-omni/.test(model)
+  if (host === 'oai.endpoints.kepler.ai.cloud.ovh.net') return /qwen2\.5-vl/.test(model)
   if (host === 'generativelanguage.googleapis.com') return true
   if (host === 'integrate.api.nvidia.com') return /gemma-4-31b/.test(model)
   if (host === 'api.cloudflare.com') return /gemma-4-26b|llama-4-scout/.test(model)
@@ -523,6 +585,24 @@ export function publicLanes(env: Env): PublicLane[] {
       label: labelFor(model),
       description: 'Free with your Z.ai key',
       key: env.ZAI_API_KEY,
+    })
+  }
+
+  for (const model of OVH_MODELS) {
+    lanes.push({
+      url: OVH_URL,
+      model,
+      label: `${labelFor(model)} (OVHcloud)`,
+      description: 'Free, no key, via OVHcloud',
+    })
+  }
+
+  for (const model of KILO_FREE_MODELS) {
+    lanes.push({
+      url: KILO_URL,
+      model,
+      label: model === 'kilo-auto/free' ? 'Kilo Auto Free' : `${labelFor(model)} (Kilo)`,
+      description: 'Free, no key, via Kilo; prompts may be logged',
     })
   }
 

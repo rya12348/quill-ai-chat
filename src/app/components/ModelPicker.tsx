@@ -3,6 +3,7 @@ import { Check, ChevronDown } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { MODELS } from '../../shared/config'
+import { modelTrait } from '../../shared/model-traits'
 import type { ProviderStatus } from '../../shared/types'
 import { useModels, useProviders } from '../lib/api'
 import { cx } from '../lib/cx'
@@ -99,14 +100,20 @@ export function ModelPicker({
     return lanes.every((lane) => lane.status === 'down' || lane.lastErrorCode === 'invalid_key' || lane.lastErrorCode === 'unavailable')
   }
   const available = models.filter((model) => model.available)
-  const healthy = available.filter((model) => statusFor(model) === 'healthy')
   const usable = available.filter((model) => !unusable(model))
-  // Once health is known, only offer models with a successful check. If nothing
-  // has succeeded yet, fall back to usable lanes so the chat is not stranded.
-  const options = healthy.length ? healthy : usable.length ? usable : available
+  // Show every family that is not confirmed dead, including a lane that is
+  // merely degrading or still being checked. Filtering to healthy-only hid
+  // strong families (DeepSeek, Command, Gemma) as soon as any other family
+  // passed a probe. Healthy families sort first; unhealthy ones stay visible
+  // with an amber or gray dot so they remain selectable.
+  const statusOrder: Record<ProviderStatus, number> = { healthy: 0, unknown: 1, degraded: 2, down: 3 }
+  const options = (usable.length ? usable : available).sort(
+    (a, b) => statusOrder[statusFor(a)] - statusOrder[statusFor(b)],
+  )
   const hiddenCount = models.length - options.length
   const current = options.find((m) => m.id === value) ?? options[0] ?? models[0]
   const currentStatus = current ? statusFor(current) : 'unknown'
+  const currentTrait = current ? modelTrait(current) : ''
   const presets = onPreset ? MODEL_PRESET_OPTIONS : []
   const presetLabel = preset === 'auto' ? 'Auto' : preset === 'fast' ? 'Fast' : preset === 'best' ? 'Best' : null
   const correctedFor = useRef<string | null>(null)
@@ -137,7 +144,7 @@ export function ModelPicker({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={current ? `${current.name} — ${presetLabel ? `${presetLabel} preset · ` : ''}${STATUS_LABEL[currentStatus]}` : undefined}
+        title={current ? `${current.name} — best at ${currentTrait}${presetLabel ? ` · ${presetLabel} preset` : ''} · ${STATUS_LABEL[currentStatus]}` : undefined}
         onClick={() => setOpen((v) => !v)}
         className="inline-flex h-8 min-w-0 max-w-[132px] items-center gap-1.5 rounded-tile px-2.5 text-[12.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg disabled:opacity-50"
       >
@@ -192,14 +199,15 @@ export function ModelPicker({
             )}
             {options.map((model) => {
               const status = statusFor(model)
+              const trait = modelTrait(model)
               return (
                 <li key={model.id}>
                   <button
                     type="button"
                     role="option"
                     aria-selected={model.id === value && (preset === undefined || preset === 'manual')}
-                    aria-label={`${model.name} — ${STATUS_LABEL[status]}`}
-                    title={`${model.name} — ${STATUS_LABEL[status]}`}
+                    aria-label={`${model.name} — best at ${trait} — ${STATUS_LABEL[status]}`}
+                    title={`${model.name} — best at ${trait} — ${STATUS_LABEL[status]}`}
                     disabled={!model.available || status === 'down'}
                     onClick={() => {
                       onChange(model.id)
@@ -209,6 +217,7 @@ export function ModelPicker({
                   >
                     <StatusDot status={status} />
                     <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{shortModelName(model.name)}</span>
+                    <span aria-hidden className="shrink-0 rounded-full bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium leading-none text-faint">{trait}</span>
                     {model.id === value && (preset === undefined || preset === 'manual') && <Check className="size-4 shrink-0 text-fg" />}
                   </button>
                 </li>

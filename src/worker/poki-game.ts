@@ -32,7 +32,7 @@ export function isPokiGameWrapperUrl(value: string): boolean {
     return (
       url.protocol === 'https:' &&
       url.hostname === 'games.poki.com' &&
-      /^\/\d+\/[0-9a-f-]{36}$/i.test(url.pathname)
+      /^\/(?:\d+\/)?[0-9a-f-]{36}$/i.test(url.pathname)
     )
   } catch {
     return false

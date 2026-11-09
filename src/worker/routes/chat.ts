@@ -680,6 +680,32 @@ chat.post('/', async (c) => {
       } else if (build) {
         const target = findSiteTarget(userMessage.content)
         if (target) embedToken = webProxyToken()
+        // A follow-up in a Build chat edits the previous page instead of
+        // replacing it with an unrelated design. Embeds have no editable
+        // document, so only page builds qualify.
+        let previous: BuildInfo | undefined
+        if (!target) {
+          const rows = await db
+            .prepare(
+              `SELECT mb.content FROM message_build mb
+               JOIN messages m ON m.id = mb.message_id AND m.owner_sub = mb.owner_sub
+               WHERE mb.owner_sub = ? AND m.conversation_id = ? AND m.role = 'assistant' AND m.created_at < ?
+               ORDER BY m.created_at DESC LIMIT 5`,
+            )
+            .bind(owner, conversation.id, replyAt)
+            .all<{ content: string }>()
+          for (const candidate of rows.results) {
+            try {
+              const info = (JSON.parse(candidate.content) as { info?: BuildInfo }).info
+              if (info && info.kind !== 'embed' && info.html) {
+                previous = info
+                break
+              }
+            } catch {
+              /* an older or malformed row must not block a new build */
+            }
+          }
+        }
         const outcome = target
           ? await buildEmbed({
               target,
@@ -694,6 +720,7 @@ chat.post('/', async (c) => {
               signal: controller.signal,
               onStatus: (status) => { void send({ type: 'status', text: status }) },
               onLaneResult: recordLane,
+              previous,
             })
         if (gone) return
         buildInfo = outcome.build

@@ -43,6 +43,63 @@ export function isWebProxyToken(value: string): boolean {
   return PROXY_TOKEN.test(value)
 }
 
+export type SearchResultLink = { title: string; url: string; snippet: string }
+
+/** The query for a search-engine results URL, if this is one. */
+export function searchQueryFor(raw: string): string | undefined {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return undefined
+  }
+  const host = url.hostname.replace(/^www\./i, '').toLowerCase()
+  const google = /^google\.[a-z.]+$/i.test(host)
+  const bing = host === 'bing.com' || host.endsWith('.bing.com')
+  const duck = host === 'duckduckgo.com' || host.endsWith('.duckduckgo.com')
+  if (google && url.pathname !== '/search') return undefined
+  if (bing && url.pathname !== '/search') return undefined
+  if (duck && url.pathname !== '/' && url.pathname !== '/html/') return undefined
+  if (!google && !bing && !duck) return undefined
+  const query = (url.searchParams.get('q') ?? '').replace(/\s+/g, ' ').trim()
+  return query ? query.slice(0, 200) : undefined
+}
+
+/** A readable results page for a search engine that will not render in a sandbox. */
+export function renderSearchResults(query: string, searchUrl: string, results: SearchResultLink[]): string {
+  let engine = 'the search engine'
+  let action = 'https://www.google.com/search'
+  try {
+    const url = new URL(searchUrl)
+    engine = url.hostname.replace(/^www\./i, '')
+    action = `${url.origin}${url.pathname}`
+  } catch {
+    /* keep the defaults */
+  }
+  const items = results.length
+    ? results
+        .map((result, index) => {
+          let host = ''
+          try {
+            host = new URL(result.url).hostname.replace(/^www\./i, '')
+          } catch {
+            /* the URL is already validated by the search source */
+          }
+          const snippet = result.snippet.replace(/\s+/g, ' ').trim()
+          return `<li><p class="meta">${index + 1} · ${escapeHtml(host)}</p><h2><a href="${escapeHtml(result.url)}">${escapeHtml(result.title)}</a></h2><p>${escapeHtml(snippet.length > 300 ? `${snippet.slice(0, 297).trimEnd()}…` : snippet)}</p></li>`
+        })
+        .join('')
+    : '<li><p>No results could be fetched right now. Try the original search in a new tab.</p></li>'
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(query)} · Search results</title><style>
+body{margin:0;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;background:#f6f4ef;color:#24221d}
+main{max-width:760px;margin:0 auto;padding:38px 24px 64px}.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#817b70;margin:0 0 10px}
+h1{font-size:clamp(2rem,6vw,3.4rem);line-height:1.02;letter-spacing:-.04em;margin:0 0 12px}.lede{max-width:620px;color:#6f695f;margin:0 0 18px}
+form{display:flex;gap:8px;max-width:580px;margin:0 0 28px}input{flex:1;min-width:0;border:1px solid #d8d1c4;border-radius:10px;padding:10px 12px;font:inherit;background:#fffdf8;color:inherit}button{border:0;border-radius:10px;padding:10px 16px;font:inherit;font-weight:600;background:#24221d;color:#fffdf8;cursor:pointer}
+ol{list-style:none;margin:0;padding:0;display:grid;gap:12px}li{border:1px solid #e4ded2;border-radius:14px;background:#fffdf8;padding:16px 18px}li p{margin:0 0 6px;color:#6f695f;font-size:14px}li p.meta{color:#9a9386;font-size:11px;letter-spacing:.04em;text-transform:uppercase}
+li h2{font-size:18px;line-height:1.25;margin:0 0 6px;letter-spacing:-.01em}a{color:#157a55;text-decoration-thickness:1px;text-underline-offset:2px}.escape{margin:26px 0 0;font-size:13px;color:#817b70}
+</style></head><body><main><header><p class="eyebrow">Search results</p><h1>${escapeHtml(query)}</h1><p class="lede">${escapeHtml(engine)} did not return a readable page inside the sandboxed preview. These are live web results fetched by Quill instead.</p></header><form action="${escapeHtml(action)}" method="get"><input name="q" value="${escapeHtml(query)}" aria-label="Search again"><button type="submit">Search</button></form><ol>${items}</ol><p class="escape"><a href="${escapeHtml(searchUrl)}" target="_blank" rel="noreferrer" data-quill-external>Open this search on ${escapeHtml(engine)}</a></p></main></body></html>`
+}
+
 function privateHost(hostname: string): boolean {
   let host = hostname.toLowerCase()
   if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1)
@@ -94,6 +151,19 @@ export function normalizeSiteUrl(raw: string): string | undefined {
   if (privateHost(url.hostname)) return undefined
   url.hash = ''
   return url.href
+}
+
+/**
+ * A build token can follow public links and GET forms across sites, so one
+ * preview can act as a browser rather than being pinned to a single origin.
+ * The token remains the capability; private hosts and non-HTML responses are
+ * still refused by normalizeSiteUrl and fetchSitePage.
+ */
+export function resolveProxyTarget(storedUrl: string, requested?: string): string | undefined {
+  const stored = normalizeSiteUrl(storedUrl)
+  if (!stored) return undefined
+  if (!requested) return stored
+  return normalizeSiteUrl(requested)
 }
 
 function hasEmbedIntent(question: string): boolean {
@@ -161,7 +231,9 @@ export async function fetchSitePage(target: string, abort?: AbortSignal): Promis
         signal,
         headers: {
           accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1',
-          'user-agent': 'Mozilla/5.0 (compatible; QuillLivePreview/1.0)',
+          'accept-language': 'en-US,en;q=0.9',
+          'user-agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
         },
       })
       if (TRANSIENT_REDIRECTS.has(response.status)) {
@@ -260,9 +332,114 @@ function addNavigation(html: string, origin: string, proxyUrl: string, parentNav
   const navigate = parentNavigation
     ? `function go(url){try{if(window.parent!==window){window.parent.postMessage({type:'quill:preview-navigate',url:url},'*');return}}catch(error){}window.location.href=url}`
     : `function go(url){window.location.href=url}`
-  const script = `<script>(function(){var proxy=${JSON.stringify(proxyUrl)};var origin=${JSON.stringify(origin)};${navigate};document.addEventListener('click',function(event){var node=event.target;var link=node&&node.closest?node.closest('a[href]'):null;if(!link)return;var href=link.getAttribute('href');if(!href||href.charAt(0)==='#')return;var url;try{url=new URL(href,document.baseURI)}catch(_){return}if(url.origin!==origin)return;event.preventDefault();event.stopPropagation();go(proxy+'?url='+encodeURIComponent(url.href))},true);document.addEventListener('submit',function(event){event.preventDefault()},true)})()</script>`
-  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, `${script}</body>`)
-  return `${html}${script}`
+  const script = `<script>(function(){
+var proxy=${JSON.stringify(proxyUrl)};
+var origin=${JSON.stringify(origin)};
+var appOrigin=new URL(proxy).origin;
+var nativeOpen=window.open;
+${navigate}
+function isHttp(url){return url.protocol==='http:'||url.protocol==='https:'}
+function isProxy(url){return url.href===proxy||url.href.indexOf(proxy+'?')===0}
+function isGoogleSearch(url){return /(^|\.)google\.[a-z.]+$/i.test(url.hostname)&&url.pathname==='/search'}
+function open(url){
+  if(!isHttp(url)||isProxy(url))return;
+  var target=url;
+  // A page that navigates to its own relative path resolves against the
+  // preview's origin. Map that path back to the original site before proxying.
+  if(target.origin===appOrigin)target=new URL(target.pathname+target.search+target.hash,origin);
+  // Google Search needs JavaScript and its own cookies. A server-side proxy
+  // cannot render it, so open the real search in a new tab instead of
+  // replacing Google with another engine.
+  if(isGoogleSearch(target)){
+    try{nativeOpen(target.href,'_blank','noopener,noreferrer')}catch(error){}
+    return;
+  }
+  go(proxy+'?url='+encodeURIComponent(target.href));
+}
+// Poki and other sites launch games with window.open. Keep scripted popups on
+// the proxy too, instead of letting the site escape to its own origin.
+window.open=function(url){
+  if(!url)return nativeOpen.apply(window,arguments);
+  var next;try{next=new URL(url,document.baseURI)}catch(_){return nativeOpen.apply(window,arguments)}
+  if(!isHttp(next)||isProxy(next))return nativeOpen.apply(window,arguments);
+  open(next);
+  return null;
+};
+window.addEventListener('click',function(event){
+  var node=event.target;
+  var link=node&&node.closest?node.closest('a[href]'):null;
+  if(!link)return;
+  var href=link.getAttribute('href');
+  if(!href||href.charAt(0)==='#'||link.hasAttribute('download')||link.hasAttribute('data-quill-external'))return;
+  var url;try{url=new URL(href,document.baseURI)}catch(_){return}
+  if(!isHttp(url))return;
+  event.preventDefault();event.stopPropagation();open(url);
+},true);
+window.addEventListener('click',function(event){
+  var node=event.target;
+  var button=node&&node.closest?node.closest('input[type="submit"],input[type="button"],button'):null;
+  if(!button)return;
+  var label=button.getAttribute('aria-label')||button.value||button.textContent||'';
+  var isSearch=/^(?:google\s+)?search$/i.test(label.trim());
+  var isSubmit=button.matches('input[type="submit"],button[type="submit"],button:not([type])');
+  if(!isSubmit&&!isSearch)return;
+  var form=button.form;
+  if(!form&&isSearch){
+    var forms=document.querySelectorAll('form');
+    for(var i=0;i<forms.length;i++){
+      if(forms[i].querySelector('input[name="q"],textarea[name="q"],input[type="search"]')){form=forms[i];break}
+    }
+  }
+  if(form&&submit(form,button)){event.preventDefault();event.stopPropagation();}
+},true);
+window.addEventListener('keydown',function(event){
+  if(event.key!=='Enter'||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey)return;
+  var node=event.target;
+  var form=node&&(node.form||(node.closest&&node.closest('form')));
+  if(!form)return;
+  if(submit(form,node)){event.preventDefault();event.stopPropagation();}
+},true);
+function submit(form,submitter){
+  if(!form)return false;
+  var method=(form.getAttribute('method')||'get').toLowerCase();
+  if(method!=='get')return false;
+  var action;try{action=new URL(form.getAttribute('action')||document.URL,document.baseURI)}catch(_){return false}
+  var data;try{data=new FormData(form,submitter)}catch(_){data=new FormData(form)}
+  data.forEach(function(value,key){if(typeof value==='string')action.searchParams.append(key,value)});
+  open(action);
+  return true;
+}
+window.addEventListener('submit',function(event){
+  event.preventDefault();event.stopPropagation();
+  if(event.target&&event.target.tagName==='FORM')submit(event.target,event.submitter);
+},true);
+try{HTMLFormElement.prototype.submit=function(){submit(this,null)}}catch(error){}
+// Google's results refuse framing. Mark its search form as a top-level tab
+// before the user submits it; the sandbox and CSP allow only that destination.
+function markGoogleSearchForms(){
+  if(!/(^|\.)google\.[a-z.]+$/i.test(origin))return;
+  var forms=document.querySelectorAll('form');
+  for(var i=0;i<forms.length;i++){
+    var action=forms[i].getAttribute('action')||'';
+    if(action.indexOf('/search')!==-1&&!forms[i].target)forms[i].target='_blank';
+  }
+}
+if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',markGoogleSearchForms,{once:true})}else{markGoogleSearchForms()}
+// Catch scripted location changes (Google's search button does this) before
+// the frame leaves the proxy. Chromium supports the Navigation API; the click
+// and submit handlers above remain the fallback elsewhere.
+if(window.navigation&&window.navigation.addEventListener){
+  window.navigation.addEventListener('navigate',function(event){
+    if(event.destination.sameDocument||event.downloadRequest||event.formData)return;
+    var url;try{url=new URL(event.destination.url)}catch(_){return}
+    if(!isHttp(url)||isProxy(url)||!event.cancelable)return;
+    event.preventDefault();open(url);
+  });
+}
+})()</script>`
+  if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${script}`)
+  if (/<html(?:\s[^>]*)?>/i.test(html)) return html.replace(/<html(?:\s[^>]*)?>/i, (root) => `${root}<head>${script}</head>`)
+  return `${script}${html}`
 }
 
 /**
@@ -282,6 +459,41 @@ function addLoadingState(html: string, host: string): string {
   return `${out}${script}`
 }
 
+/**
+ * Google's results page forbids framing, so a Google search submitted in the
+ * preview must become a normal top-level tab. Mark Google's own search form;
+ * the popup sandbox flags and CSP form-action allow that one destination.
+ */
+function googleSearchFormTarget(html: string, origin: string): string {
+  let host: string
+  try {
+    host = new URL(origin).hostname
+  } catch {
+    return html
+  }
+  if (!/(^|\.)google\.[a-z.]+$/i.test(host)) return html
+  return html.replace(/<form\b[^>]*>/gi, (tag) => {
+    if (/\btarget\s*=/i.test(tag)) return tag
+    if (!/\baction\s*=\s*["']?(?:https?:\/\/[^"'\s>]*google\.[^"'\s>]*)?\/search(?:[?"'\s>])/i.test(tag)) return tag
+    return tag.replace(/>$/, ' target="_blank">')
+  })
+}
+
+/** Google's own scripts hijack search and navigate the card to a page that
+ * refuses framing. Keep the static form; our injected script handles the rest. */
+function stripGoogleScripts(html: string, origin: string): string {
+  let host: string
+  try {
+    host = new URL(origin).hostname
+  } catch {
+    return html
+  }
+  if (!/(^|\.)google\.[a-z.]+$/i.test(host)) return html
+  return html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<script\b[^>]*\/>/gi, '')
+}
+
 export function renderProxyPage(html: string, finalUrl: string, proxyUrl: string, parentNavigation = false): string {
   const target = new URL(finalUrl)
   const origin = target.origin
@@ -298,7 +510,7 @@ export function renderProxyPage(html: string, finalUrl: string, proxyUrl: string
     origin,
   )
   return addLoadingState(
-    addNavigation(addSandboxShims(addBase(cleaned, base), historyUrl), origin, app.href, parentNavigation),
+    addNavigation(addSandboxShims(addBase(stripGoogleScripts(googleSearchFormTarget(cleaned, origin), origin), base), historyUrl), origin, app.href, parentNavigation),
     target.hostname.replace(/^www\./, ''),
   )
 }

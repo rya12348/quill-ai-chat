@@ -15,13 +15,18 @@
     "@freebuff/auth": "^0.1.0",
     "@tanstack/react-query": "^5.104.0",
     "hono": "^4.13.0",
+    "katex": "^0.19.1",
     "lucide-react": "^1.60.0",
+    "mammoth": "^1.13.0",
     "motion": "^14.4.0",
+    "pdfjs-dist": "^6.5.438",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
     "react-router": "^8.5.0",
+    "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

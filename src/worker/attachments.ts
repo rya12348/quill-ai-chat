@@ -31,7 +31,7 @@ const APPLICATION_TEXT_MIMES = new Set([
   'application/sql',
 ])
 
-const PROMPT_TEXT_PER_FILE = 12_000
+const PROMPT_TEXT_PER_FILE = 20_000
 
 export class AttachmentValidationError extends Error {}
 

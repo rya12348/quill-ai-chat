@@ -287,7 +287,7 @@ export function Composer({
             onClick={() => fileRef.current?.click()}
             disabled={disabled || busy || attachments.length >= MAX_ATTACHMENTS}
             aria-label="Attach files"
-            title={`Attach up to ${MAX_ATTACHMENTS} images or text files`}
+            title={`Attach up to ${MAX_ATTACHMENTS} images, documents or text files`}
             className="grid size-8 shrink-0 place-items-center rounded-full text-faint transition-colors hover:bg-surface-2 hover:text-fg disabled:opacity-40"
           >
             <Plus className="size-[18px]" />

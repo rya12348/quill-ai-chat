@@ -200,6 +200,13 @@
   background: var(--color-surface-2);
   font-weight: 600;
 }
+/* Display equations scroll instead of stretching the reply column. */
+.prose-chat .katex-display {
+  margin: 0.75em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.15em 0;
+}
 
 /* The caret shown while a reply is streaming, at the end of its last block. */
 .streaming:empty::after,

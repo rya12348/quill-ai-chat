@@ -47,8 +47,10 @@ export const MAX_INSTRUCTIONS_CHARS = 2_000
 export const MAX_ATTACHMENTS = 4
 /** Maximum stored bytes for one image after browser compression. */
 export const MAX_ATTACHMENT_BYTES = 1_200_000
-/** Maximum text copied from one file; this is also the model-context limit. */
-export const MAX_TEXT_ATTACHMENT_CHARS = 20_000
+/** Maximum text kept from one file; the Worker sends a shorter prompt excerpt. */
+export const MAX_TEXT_ATTACHMENT_CHARS = 40_000
+/** A PDF or DOCX is parsed in the browser; this bounds the source upload. */
+export const MAX_DOCUMENT_SOURCE_BYTES = 20_000_000
 /** Total raw attachment bytes in one message. */
 export const MAX_ATTACHMENT_TOTAL_BYTES = 3_200_000
 /** Analyze keeps the full table in the browser, so it can be larger than text attachments. */

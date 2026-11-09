@@ -1,7 +1,13 @@
+import 'katex/dist/katex.min.css'
+
 import { Check, Copy } from 'lucide-react'
 import { memo, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
+import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+
+import { normalizeMath } from '../../shared/math'
 
 // Assistant replies are Markdown. Links open in a new tab and never carry a
 // referrer; raw HTML is not rendered (react-markdown's default), so model
@@ -60,8 +66,12 @@ const components: Components = {
 export const Markdown = memo(function Markdown({ children, className }: { children: string; className?: string }) {
   return (
     <div className={className}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {children}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' as const }]]}
+        components={components}
+      >
+        {normalizeMath(children)}
       </ReactMarkdown>
     </div>
   )
