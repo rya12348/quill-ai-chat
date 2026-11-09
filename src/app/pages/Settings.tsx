@@ -64,7 +64,9 @@ export function Settings() {
   return (
     <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-[640px] px-5 py-8 md:px-6 md:py-10">
-        <h1 className="text-[24px] font-semibold tracking-[-0.02em]">Settings</h1>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">Workspace</p>
+        <h1 className="mt-1 text-[28px] font-semibold tracking-[-0.02em]">Settings</h1>
+        <p className="mt-1 max-w-[480px] text-[13px] leading-relaxed text-muted">Your account, how Quill writes, and which services are connected.</p>
 
         <section className="mt-8">
           <h2 className="text-[13.5px] font-semibold">Account</h2>

@@ -95,7 +95,9 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`
   }, [value])
   useEffect(() => {
-    if (autoFocus && !disabled) ref.current?.focus()
+    // Focus without scrolling: the empty state sits above the composer, and
+    // scrolling it out of view on load made the first screen look broken.
+    if (autoFocus && !disabled) ref.current?.focus({ preventScroll: true })
   }, [autoFocus, disabled])
   useEffect(() => {
     if (!openFilePicker || openFilePicker === filePickerRequestRef.current) return

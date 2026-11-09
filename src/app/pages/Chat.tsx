@@ -10,7 +10,7 @@ import { Composer, type ComposerToggle } from '../components/Composer'
 import { AssistantMessage, UserMessage } from '../components/Message'
 import { MemoryPanel } from '../components/MemoryPanel'
 import { ShareDialog } from '../components/ShareDialog'
-import { Badge, Menu, Spinner, useToast } from '../components/ui'
+import { Menu, Spinner, useToast } from '../components/ui'
 import { ApiError, useConversation, useMe, useMessageFeedback, useModels, useProjects, useProviders, useReviewSummary, useSetConversationModel, useSetConversationProject } from '../lib/api'
 import { cx } from '../lib/cx'
 import { untilLabel } from '../lib/format'
@@ -802,7 +802,8 @@ export function Chat() {
   }
   useEffect(() => {
     const el = scroller.current
-    if (el && stick.current) el.scrollTop = el.scrollHeight
+    // Leave the empty state alone: scrolling it to the bottom hides the heading.
+    if (el && stick.current && messages.length > 0) el.scrollTop = el.scrollHeight
   }, [messages.length, pendingUser, turn?.text, turn?.reasoning, turn?.statusText, id])
   useEffect(() => {
     stick.current = true
@@ -853,7 +854,6 @@ export function Chat() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-2 px-3 md:h-14 md:px-5">
-        {mode === 'public' && <Badge className="hidden sm:inline-flex">{buildOn ? 'Build' : canvasOn ? 'Canvas' : analyzeOn ? 'Analyze' : researchOn ? 'Research' : proof ? 'Proof' : 'Free model'}</Badge>}
         {(conversation || messages.length > 0) && (
           <div className="ml-auto flex items-center gap-0.5">
             {conversation && projectItems.length > 0 && (
@@ -1071,45 +1071,41 @@ function EmptyState({
   onChatOnly: () => void
 }) {
   const { data: review } = useReviewSummary()
-  const tasks: { id: TaskId; title: string; description: string; example: string; icon: LucideIcon }[] = [
+  const tasks: { id: TaskId; title: string; description: string; icon: LucideIcon }[] = [
     {
       id: 'research',
       title: 'Research a question',
       description: 'A cited web report with claim checks.',
-      example: 'What changed in AI regulation this year?',
       icon: Search,
     },
     {
       id: 'analyze',
       title: 'Analyze a spreadsheet',
       description: 'CSV, TSV or XLSX, analyzed in your browser.',
-      example: 'Which region grew fastest last quarter?',
       icon: FileSpreadsheet,
     },
     {
       id: 'build',
       title: 'Build a page or game',
       description: 'A self-contained page, tool or game.',
-      example: 'A landing page for a neighborhood coffee shop',
       icon: Hammer,
     },
     {
       id: 'canvas',
       title: 'Study a topic',
       description: 'Flashcards or a quiz from a topic.',
-      example: 'Flashcards for cell biology basics',
       icon: Layers,
     },
   ]
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="flex min-h-[52vh] flex-col items-center justify-end pb-8 text-center">
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="flex flex-col items-center justify-start pb-4 pt-3 text-center">
       <h1 className="text-balance text-[28px] font-semibold tracking-[-0.02em] md:text-[32px]">What can I help with?</h1>
       <p className="mt-2 max-w-[430px] text-balance text-[13.5px] leading-relaxed text-faint">
         {showTasks ? 'Free models, no key needed. Pick a starting point, or just type below.' : 'Ask anything below.'}
       </p>
       {showTasks ? (
         <>
-          <div className="mt-6 grid w-full gap-2 sm:grid-cols-2">
+          <div className="mt-3 grid w-full gap-2 min-[440px]:grid-cols-2">
             {tasks.map((task) => {
               const reason = unavailable[task.id]
               const blocked = disabled || Boolean(reason)
@@ -1123,7 +1119,7 @@ function EmptyState({
                   aria-pressed={active}
                   onClick={() => onTask(task.id)}
                   className={cx(
-                    'group flex min-h-[104px] flex-col justify-between rounded-card border bg-surface p-3.5 text-left shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-[border-color,background-color,box-shadow]',
+                    'group flex flex-col justify-between rounded-card border bg-surface p-3 text-left shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-[border-color,background-color,box-shadow]',
                     active ? 'border-fg/35 ring-1 ring-fg/8' : 'border-line hover:border-line-strong hover:bg-surface-2/40',
                     blocked && 'cursor-not-allowed opacity-45 hover:border-line hover:bg-surface',
                   )}
@@ -1138,7 +1134,7 @@ function EmptyState({
                     </span>
                     {active && <span className="mt-1 size-1.5 shrink-0 rounded-full bg-accent" aria-hidden />}
                   </span>
-                  <span className="mt-2.5 block text-[11px] leading-snug text-muted">{reason ?? `Try: “${task.example}”`}</span>
+                  {reason ? <span className="mt-1.5 block text-[10.5px] leading-snug text-muted">{reason}</span> : null}
                 </button>
               )
             })}
@@ -1146,10 +1142,10 @@ function EmptyState({
           {review && review.due > 0 ? (
             <Link
               to="/review"
-              className="mt-3 flex w-full items-center gap-3 rounded-card border border-line bg-surface px-4 py-3 text-left shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-colors hover:border-line-strong hover:bg-surface-2/40"
+              className="mt-2 flex w-full items-center gap-3 rounded-card border border-line bg-surface px-3.5 py-2 text-left shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-colors hover:border-line-strong hover:bg-surface-2/40"
             >
-              <span className="grid size-8 shrink-0 place-items-center rounded-tile bg-accent-soft text-accent">
-                <Brain className="size-4" />
+              <span className="grid size-7 shrink-0 place-items-center rounded-tile bg-accent-soft text-accent">
+                <Brain className="size-3.5" />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-[12.5px] font-medium">Smart Review</span>
@@ -1168,7 +1164,7 @@ function EmptyState({
               type="button"
               onClick={onChatOnly}
               disabled={disabled}
-              className="mt-3 inline-flex items-center gap-1.5 text-[11.5px] text-faint underline-offset-2 transition-colors hover:text-fg hover:underline disabled:opacity-40"
+              className="mt-1.5 inline-flex items-center gap-1.5 text-[11.5px] text-faint underline-offset-2 transition-colors hover:text-fg hover:underline disabled:opacity-40"
             >
               <MessageCircle className="size-3.5" />
               Switch to just chat
