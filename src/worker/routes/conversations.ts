@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 
+import { normalizeMemory } from '../../shared/memory'
 import { groupAttachmentMeta } from '../attachments'
 import { aiConfigured, isModelId } from '../ai'
 import { privateJson } from '../auth'
@@ -37,41 +38,10 @@ conversations.get('/:id', async (c) => {
   const db = c.get('db')
   const owner = c.get('user').sub
   const conversationId = c.req.param('id')
-  // Ten cleanup DELETEs precede the conversation, message and attachment SELECTs.
-  const [, , , , , , , , , , conversation, messages, attachmentRows] = await db.batch([
-    db
-      .prepare(`DELETE FROM message_reasoning WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
-      .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
-    db
-      .prepare(`DELETE FROM message_sources WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
-      .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
-    db
-      .prepare(`DELETE FROM message_feedback WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
-      .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
-    db
-      .prepare(`DELETE FROM message_team WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
-      .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
-    db
-      .prepare(`DELETE FROM message_proof WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
-      .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
-    db
-      .prepare(`DELETE FROM message_research WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
-      .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
-    db
-      .prepare(`DELETE FROM message_analysis WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
-      .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
-    db
-      .prepare(`DELETE FROM message_build WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
-      .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
-    db
-      .prepare(`DELETE FROM message_canvas WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
-      .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
-    db
-      .prepare(`DELETE FROM build_embeds WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
-      .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
-    db
-      .prepare(`DELETE FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?`)
-      .bind(owner, conversationId, now() - ORPHAN_AFTER),
+  // Read the chat first. The orphan cleanup used to share this batch, and one
+  // D1 failure there (a lost session commit token) made an existing chat answer
+  // "Not found." — a readable chat must never depend on cleanup succeeding.
+  const [conversation, messages, attachmentRows] = await db.batch([
     db
       .prepare(
         `SELECT c.*, pc.project_id FROM conversations c
@@ -87,6 +57,51 @@ conversations.get('/:id', async (c) => {
       .bind(owner, conversationId),
   ])
   if (!conversation.results[0]) return c.json({ error: 'Not found.' }, 404)
+  // Housekeeping for replies orphaned by a lost connection. The message SELECT
+  // already hides empty assistant rows, so skipping this changes nothing a
+  // reader sees; failing it must never fail the read.
+  try {
+    await db.batch([
+      db
+        .prepare(`DELETE FROM message_reasoning WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
+        .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
+      db
+        .prepare(`DELETE FROM message_sources WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
+        .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
+      db
+        .prepare(`DELETE FROM message_feedback WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
+        .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
+      db
+        .prepare(`DELETE FROM message_team WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
+        .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
+      db
+        .prepare(`DELETE FROM message_proof WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
+        .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
+      db
+        .prepare(`DELETE FROM message_research WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
+        .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
+      db
+        .prepare(`DELETE FROM message_analysis WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
+        .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
+      db
+        .prepare(`DELETE FROM message_build WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
+        .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
+      db
+        .prepare(`DELETE FROM message_canvas WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
+        .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
+      db
+        .prepare(`DELETE FROM canvas_reviews WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
+        .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
+      db
+        .prepare(`DELETE FROM build_embeds WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
+        .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
+      db
+        .prepare(`DELETE FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?`)
+        .bind(owner, conversationId, now() - ORPHAN_AFTER),
+    ])
+  } catch {
+    // Cleanup is housekeeping; never turn it into a failed chat read.
+  }
   const attachmentMeta = groupAttachmentMeta(attachmentRows.results as Record<string, unknown>[])
   return privateJson(c, {
     conversation: mapConversation(conversation.results[0] as Record<string, unknown>),
@@ -98,8 +113,61 @@ conversations.get('/:id', async (c) => {
   })
 })
 
-conversations.get('/:id/share', async (c) => {
+/** The condensed memory carried from earlier turns, when one exists. */
+conversations.get('/:id/memory', async (c) => {
+  const row = await c
+    .get('db')
+    .prepare(`SELECT summary, covered_through, updated_at FROM conversation_summaries WHERE owner_sub = ? AND conversation_id = ?`)
+    .bind(c.get('user').sub, c.req.param('id'))
+    .first<{ summary: string; covered_through: number; updated_at: number }>()
+  if (!row) return privateJson(c, { memory: null })
+  return privateJson(c, {
+    memory: { summary: row.summary, coveredThrough: Number(row.covered_through), updatedAt: Number(row.updated_at) },
+  })
+})
+
+// An edit replaces the text the summarizer wrote. The covered-through cursor is
+// kept, so later turns still merge into the edited memory instead of starting
+// over and re-reading turns the person may have chosen to drop.
+conversations.patch('/:id/memory', async (c) => {
   const db = c.get('db')
+  const owner = c.get('user').sub
+  const conversationId = c.req.param('id')
+  const input = await c.req.json<{ summary?: unknown }>().catch(() => ({} as { summary?: unknown }))
+  if (typeof input.summary !== 'string') {
+    return c.json({ error: 'summary', message: 'Write what Quill should remember.' }, 400)
+  }
+  const summary = normalizeMemory(input.summary)
+  if (!summary) return c.json({ error: 'summary', message: 'The memory cannot be empty. Forget it instead.' }, 400)
+  const result = await db
+    .prepare(`UPDATE conversation_summaries SET summary = ?, updated_at = ? WHERE owner_sub = ? AND conversation_id = ?`)
+    .bind(summary, now(), owner, conversationId)
+    .run()
+  if (!result.meta.changes) {
+    return c.json({ error: 'not_found', message: 'This chat has not saved any memory yet.' }, 404)
+  }
+  const row = await db
+    .prepare(`SELECT summary, covered_through, updated_at FROM conversation_summaries WHERE owner_sub = ? AND conversation_id = ?`)
+    .bind(owner, conversationId)
+    .first<{ summary: string; covered_through: number; updated_at: number }>()
+  return privateJson(c, {
+    memory: row
+      ? { summary: row.summary, coveredThrough: Number(row.covered_through), updatedAt: Number(row.updated_at) }
+      : { summary, coveredThrough: 0, updatedAt: now() },
+  })
+})
+
+// Forgetting removes the summary only; the messages themselves stay readable.
+conversations.delete('/:id/memory', async (c) => {
+  await c
+    .get('db')
+    .prepare(`DELETE FROM conversation_summaries WHERE owner_sub = ? AND conversation_id = ?`)
+    .bind(c.get('user').sub, c.req.param('id'))
+    .run()
+  return privateJson(c, { memory: null })
+})
+
+conversations.get('/:id/share', async (c) => {  const db = c.get('db')
   const owner = c.get('user').sub
   const conversationId = c.req.param('id')
   const conversation = await db.prepare(`SELECT id FROM conversations WHERE owner_sub = ? AND id = ?`).bind(owner, conversationId).first()
@@ -199,6 +267,7 @@ conversations.delete('/:id', async (c) => {
     db.prepare(`DELETE FROM message_analysis WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_build WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_canvas WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
+    db.prepare(`DELETE FROM canvas_reviews WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM build_embeds WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_attachments WHERE owner_sub = ? AND conversation_id = ?`).bind(owner, conversationId),
     db.prepare(`DELETE FROM conversation_shares WHERE owner_sub = ? AND conversation_id = ?`).bind(owner, conversationId),

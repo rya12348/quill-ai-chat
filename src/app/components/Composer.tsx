@@ -5,6 +5,7 @@ import { MAX_MESSAGE_CHARS } from '../../shared/config'
 import type { ReasoningEffort } from '../../shared/types'
 import { cx } from '../lib/cx'
 import { ATTACHMENT_ACCEPT, clipboardFiles, formatFileSize, MAX_ATTACHMENTS, type PendingAttachment } from '../lib/attachments'
+import type { ModelChoice, ModelPreset } from '../lib/model-presets'
 import { ModelPicker } from './ModelPicker'
 
 export type ComposerToggle = {
@@ -37,6 +38,8 @@ export function Composer({
   replyUsage,
   model,
   onChangeModel,
+  modelPreset,
+  onChangeModelPreset,
   effort,
   onChangeEffort,
   onAttach,
@@ -45,6 +48,7 @@ export function Composer({
   onStop,
   busy,
   disabled,
+  openFilePicker,
   placeholder,
   autoFocus,
 }: {
@@ -58,6 +62,9 @@ export function Composer({
   /** The selected model, shown in the compact composer toolbar. */
   model?: string
   onChangeModel?: (id: string) => void
+  /** Auto/Fast/Best resolution policy, or manual selection. */
+  modelPreset?: ModelChoice
+  onChangeModelPreset?: (preset: ModelPreset) => void
   /** Reasoning budget for the free lanes. */
   effort?: ReasoningEffort
   onChangeEffort?: (effort: ReasoningEffort) => void
@@ -68,11 +75,13 @@ export function Composer({
   /** A reply is being generated. */
   busy: boolean
   disabled?: boolean
+  openFilePicker?: number
   placeholder?: string
   autoFocus?: boolean
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const filePickerRequestRef = useRef(openFilePicker ?? 0)
   const effortTriggerRef = useRef<HTMLButtonElement>(null)
   const effortPanelRef = useRef<HTMLDivElement>(null)
   const toolsRef = useRef<HTMLDivElement>(null)
@@ -88,6 +97,11 @@ export function Composer({
   useEffect(() => {
     if (autoFocus && !disabled) ref.current?.focus()
   }, [autoFocus, disabled])
+  useEffect(() => {
+    if (!openFilePicker || openFilePicker === filePickerRequestRef.current) return
+    filePickerRequestRef.current = openFilePicker
+    if (!disabled && !busy) fileRef.current?.click()
+  }, [openFilePicker, disabled, busy])
   useEffect(() => {
     if (!effortOpen) return
     const onDown = (event: MouseEvent) => {
@@ -199,7 +213,7 @@ export function Composer({
     <div className={cx('rounded-[22px] bg-surface shadow-composer transition-[box-shadow] focus-within:shadow-[0_1px_2px_rgb(27_26_23/0.05),0_8px_32px_-12px_rgb(27_26_23/0.22),0_0_0_1px_rgb(27_26_23/0.14)]', disabled && 'opacity-70')}>
       {model && onChangeModel && (
         <div className="flex items-center gap-2 px-3 pt-2">
-          <ModelPicker value={model} onChange={onChangeModel} disabled={busy} placement="up" />
+          <ModelPicker value={model} onChange={onChangeModel} preset={modelPreset} onPreset={onChangeModelPreset} disabled={busy} placement="up" />
         </div>
       )}
       {attachments.length > 0 && (

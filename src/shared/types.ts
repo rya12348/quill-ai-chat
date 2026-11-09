@@ -12,6 +12,8 @@ export interface Project {
   createdAt: number
   updatedAt: number
   conversationCount: number
+  /** Added to every reply in chats that belong to this project. */
+  instructions?: string
 }
 
 export interface Conversation {
@@ -24,6 +26,14 @@ export interface Conversation {
 }
 
 export type FeedbackRating = 'up' | 'down'
+
+/** The condensed memory kept for turns outside the recent-message window. */
+export interface ConversationMemory {
+  summary: string
+  /** Timestamp of the newest message already folded in. */
+  coveredThrough: number
+  updatedAt: number
+}
 
 /** Files a person can attach to one message. */
 export type AttachmentKind = 'image' | 'text'
@@ -166,6 +176,13 @@ export type AnalysisRunResult = {
   loadError?: string
 }
 
+/** One document of a multi-page build, already secured for the preview. */
+export interface BuildPage {
+  /** The file name, such as index.html or menu.html. */
+  name: string
+  html: string
+}
+
 /** A generated page, or a live site shown through the preview proxy. */
 export interface BuildInfo {
   status: 'ready' | 'warning'
@@ -174,6 +191,8 @@ export interface BuildInfo {
   title: string
   /** The generated document. For a live site this is a small download note. */
   html: string
+  /** The extra documents of a multi-page site; html is always the first page. */
+  pages?: BuildPage[]
   /** The original address of a live-site preview. */
   sourceUrl?: string
   /** Token-scoped, same-origin URL that serves the live page. */
@@ -207,6 +226,64 @@ export interface CanvasInfo {
   models: string[]
   asOf: number
   reason?: string
+}
+
+/** A flashcard's Smart Review schedule. A zero interval means it is new. */
+export interface ReviewSchedule {
+  intervalDays: number
+  ease: number
+  repetitions: number
+  lapses: number
+}
+
+export type ReviewRating = 'again' | 'hard' | 'good' | 'easy'
+
+/** One due flashcard, joined to the saved deck that owns it. */
+export interface ReviewCard extends ReviewSchedule {
+  messageId: string
+  cardIndex: number
+  front: string
+  back: string
+  deckTitle: string
+  conversationId: string
+  conversationTitle: string
+  dueAt: number
+}
+
+export interface ReviewSummary {
+  due: number
+  total: number
+  reviewedToday: number
+  nextDueAt: number | null
+}
+
+export interface ReviewQueue {
+  items: ReviewCard[]
+  totalDue: number
+  deckTitle?: string
+}
+
+export interface ReviewRatingResult extends ReviewSchedule {
+  dueAt: number
+  summary: ReviewSummary
+}
+
+/** A saved Build, Analyze, Canvas or Research result, as the library index reports it. */
+export type ArtifactKind = 'build' | 'analysis' | 'canvas' | 'research'
+export type ArtifactStatus = 'ready' | 'warning' | 'checking' | 'verified' | 'failed' | 'unverified'
+export interface ArtifactSummary {
+  messageId: string
+  conversationId: string
+  conversationTitle: string
+  kind: ArtifactKind
+  title: string
+  detail: string
+  status: ArtifactStatus
+  createdAt: number
+  /** Kept at the top of the library by the person who made it. */
+  pinned?: boolean
+  /** The project of the chat that produced it, when it has one. */
+  projectId?: string | null
 }
 
 /** The browser runs this job; the Worker never executes generated code. */

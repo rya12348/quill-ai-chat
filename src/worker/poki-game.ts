@@ -188,20 +188,33 @@ export async function pokiGameStartUrl(
  * loaded. Watch for that frame and route it through the server proxy before it
  * can load the hotlink-protected original.
  */
-export function installPokiGameBridge(html: string, token: string, appOrigin: string): string {
+export function installPokiGameBridge(html: string, token: string, appOrigin: string, parentNavigation = false): string {
   const startUrl = new URL(`/api/poki-game/start/${token}`, appOrigin).href
   const script = `<script>(function(){
 var start=${JSON.stringify(startUrl)};
+var parentNav=${parentNavigation ? 'true' : 'false'};
+var moved=false;
+function play(url){
+  if(!parentNav||moved)return false;
+  moved=true;
+  if(window.parent!==window){
+    try{window.parent.postMessage({type:'quill:preview-navigate',url:url},'*');return true}catch(error){moved=false;return false}
+  }
+  window.location.href=url;
+  return true;
+}
 function fix(frame){
   if(!frame||frame.tagName!=='IFRAME')return;
   if(frame.id!=='game-element'&&!(frame.closest&&frame.closest('#game-player')))return;
   var src=frame.src||frame.getAttribute('src')||'';
   if(src.indexOf('https://games.poki.com/')!==0)return;
+  var target=start+'?url='+encodeURIComponent(src);
+  if(play(target))return;
   if(frame.hasAttribute('sandbox')){
     var flags=(frame.getAttribute('sandbox')||'').split(/\\s+/).filter(function(flag){return flag&&flag!=='allow-same-origin'});
     frame.setAttribute('sandbox',flags.join(' '));
   }
-  frame.setAttribute('src',start+'?url='+encodeURIComponent(src));
+  frame.setAttribute('src',target);
 }
 function scan(root){
   if(!root||root.nodeType!==1)return;

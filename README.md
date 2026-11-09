@@ -74,6 +74,20 @@ be reset or downloaded as Markdown, and it is included in shares. Canvas is
 text-only and reuses the free-lane completion path, so it counts against the
 daily reply limit rather than a separate mode cap.
 
+## Smart Review
+
+A saved flashcard deck can be enrolled in Smart Review from its **Review**
+button. Each card then has its own schedule in D1: **Again** brings it back in
+ten minutes, **Hard** starts at six hours and grows slowly, **Good** steps from
+one day to three days before using the card's ease, and **Easy** starts at three
+days and grows faster. Intervals are capped at one year. The review page shows
+the due queue one card at a time, reveals the answer, and accepts ratings from
+buttons or the 1–4 keys. Home and Library show the current due count.
+
+Scheduling is deterministic and makes no model calls, so it spends no AI
+credits. Rows are owner-scoped and are removed with their chat. Enrolling an
+already-scheduled deck is idempotent and never resets existing due dates.
+
 ## Verified Research
 
 Research is a third free-only composer mode, enabled for a deployment with

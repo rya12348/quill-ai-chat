@@ -1,17 +1,20 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router'
-import { Download, FileSpreadsheet, Folder, FolderX, Hammer, Layers, MessageCircle, Search, Share2, ShieldCheck, Sparkles } from 'lucide-react'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
+import { ArrowUpRight, Brain, Download, FileSpreadsheet, Folder, FolderX, Hammer, Layers, MessageCircle, Search, Share2, ShieldCheck, Sparkles, type LucideIcon } from 'lucide-react'
 
-import { BRAND, DEFAULT_MODEL, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, MODELS, SUGGESTIONS } from '../../shared/config'
+import { BRAND, DEFAULT_MODEL, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, MODELS } from '../../shared/config'
 import type { Conversation, Message, ModeUsage, ReasoningEffort } from '../../shared/types'
 import { Composer, type ComposerToggle } from '../components/Composer'
 import { AssistantMessage, UserMessage } from '../components/Message'
+import { MemoryPanel } from '../components/MemoryPanel'
 import { ShareDialog } from '../components/ShareDialog'
 import { Badge, Menu, Spinner, useToast } from '../components/ui'
-import { ApiError, useConversation, useMe, useMessageFeedback, useModels, useProjects, useSetConversationModel, useSetConversationProject } from '../lib/api'
+import { ApiError, useConversation, useMe, useMessageFeedback, useModels, useProjects, useProviders, useReviewSummary, useSetConversationModel, useSetConversationProject } from '../lib/api'
+import { cx } from '../lib/cx'
 import { untilLabel } from '../lib/format'
+import { resolvePresetModel, type ModelChoice, type ModelPreset } from '../lib/model-presets'
 import { AttachmentError, clipboardFiles, readAttachment, type PendingAttachment } from '../lib/attachments'
 import { buildDataset, isDataFile, readDataFile } from '../lib/dataset'
 import { getDataset, putDataset } from '../lib/dataset-store'
@@ -20,7 +23,10 @@ import { clearPendingMessage, draftKey, queueMessage, readDraft, usePendingMessa
 import { dismissTurn, settleAnalysis, startTurn, useTurn } from '../lib/turn'
 
 const MODEL_KEY = 'model'
+const MODEL_PRESET_KEY = 'model:preset'
 const EFFORT_KEY = 'effort:level'
+
+type TaskId = 'research' | 'analyze' | 'build' | 'canvas'
 
 export function Chat() {
   const { id } = useParams()
@@ -31,6 +37,7 @@ export function Chat() {
   const toast = useToast()
   const { data: me } = useMe()
   const { data: models } = useModels()
+  const { data: health } = useProviders()
   const page = useConversation(id)
   const { data: projectData } = useProjects()
   const projects = projectData?.items ?? []
@@ -44,7 +51,12 @@ export function Chat() {
   const draftStoreKey = draftKey(id)
   const [draft, setDraft] = useState(() => readDraft(draftStoreKey))
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  const [filePickerRequest, setFilePickerRequest] = useState(0)
   const [newModel, setNewModel] = useState(() => localStorage.getItem(MODEL_KEY) ?? DEFAULT_MODEL)
+  const [modelPreset, setModelPreset] = useState<ModelChoice>(() => {
+    const saved = localStorage.getItem(MODEL_PRESET_KEY)
+    return saved === 'auto' || saved === 'fast' || saved === 'best' || saved === 'manual' ? saved : localStorage.getItem(MODEL_KEY) ? 'manual' : 'auto'
+  })
   const [proof, setProof] = useState(() => localStorage.getItem('proof') === 'on')
   const [blend, setBlend] = useState(() => localStorage.getItem('blend') !== 'off')
   const [research, setResearch] = useState(() => localStorage.getItem('research') === 'on')
@@ -68,6 +80,15 @@ export function Chat() {
   useEffect(() => {
     writeDraft(draftKeyRef.current, draft)
   }, [draft])
+  // A remix from the Library opens a new chat with its instruction already in
+  // the composer, so it can be edited before it is sent.
+  const location = useLocation()
+  const remixDraft = (location.state as { remixDraft?: unknown } | null)?.remixDraft
+  useEffect(() => {
+    if (typeof remixDraft !== 'string' || !remixDraft.trim()) return
+    setDraft(remixDraft)
+    navigate(location.pathname + location.search, { replace: true, state: null })
+  }, [remixDraft, location.pathname, location.search, navigate])
   useEffect(() => {
     setAttachments([])
   }, [draftStoreKey])
@@ -95,8 +116,17 @@ export function Chat() {
   const currentProject = conversation?.projectId ? projects.find((project) => project.id === conversation.projectId) : undefined
   const saved = page.data?.messages ?? []
   const availableModels = models?.items ?? MODELS.map((m) => ({ ...m, available: true }))
+  // Presets should not send people to a lane whose last check failed. The
+  // picker has the same health data; this keeps the resolved id in step with it.
+  const healthyModels = health
+    ? availableModels.filter((candidate) => {
+        const lanes = health.items.filter((item) => item.model === candidate.id)
+        if (!lanes.length) return health.mode !== 'api' || !health.items[0] || health.items[0].status !== 'down'
+        return lanes.some((lane) => lane.status !== 'down' && lane.lastErrorCode !== 'invalid_key' && lane.lastErrorCode !== 'unavailable')
+      })
+    : availableModels
+  const presetModels = healthyModels.length ? healthyModels : availableModels
   const selectedModel = availableModels.some((m) => m.id === newModel) ? newModel : availableModels[0]?.id ?? DEFAULT_MODEL
-  const model = conversation?.model && availableModels.some((m) => m.id === conversation.model) ? conversation.model : selectedModel
   const mine = turn !== null && (turn.conversationId === (id ?? null) || (id === undefined && turn.conversationId === owned.current))
   const busy = mine && turn.status !== 'error'
   const mode = me?.capabilities.mode
@@ -114,6 +144,8 @@ export function Chat() {
   const canCanvas = me?.capabilities.canvas === true
   const canvasOn = canvas && canCanvas
   const strategy: 'proof' | 'blend' | 'fast' | 'research' | 'analyze' | 'build' | 'canvas' = buildOn ? 'build' : analyzeOn ? 'analyze' : researchOn ? 'research' : canvasOn ? 'canvas' : proof ? 'proof' : blend ? 'blend' : 'fast'
+  const presetModel = resolvePresetModel(modelPreset, strategy, presetModels)
+  const model = presetModel ?? (conversation?.model && availableModels.some((m) => m.id === conversation.model) ? conversation.model : selectedModel)
   // Fast is the plain chat: hide exposed reasoning, including older replies,
   // until an advanced mode is selected. The model can still reason internally.
   const showReasoning = strategy !== 'fast'
@@ -431,11 +463,18 @@ export function Chat() {
   )
 
   const changeModel = (next: string) => {
+    setModelPreset('manual')
+    localStorage.setItem(MODEL_PRESET_KEY, 'manual')
     if (conversation) setConversationModel.mutate({ id: conversation.id, model: next })
     else {
       setNewModel(next)
       localStorage.setItem(MODEL_KEY, next)
     }
+  }
+
+  const changePreset = (next: ModelPreset) => {
+    setModelPreset(next)
+    localStorage.setItem(MODEL_PRESET_KEY, next)
   }
 
   const toggleProof = () => {
@@ -578,7 +617,7 @@ export function Chat() {
             id: 'chat',
             label: 'Chat only',
             description: 'One direct answer, with no extra mode.',
-            pressed: !proof && !blend && !researchOn && !analyzeOn && !buildOn,
+            pressed: !proof && !blend && !researchOn && !analyzeOn && !buildOn && !canvasOn,
             onClick: toggleChatOnly,
             icon: MessageCircle,
             title: 'No extra mode',
@@ -654,6 +693,14 @@ export function Chat() {
         ]
       : []
 
+  const activeTask: 'chat' | TaskId = buildOn ? 'build' : analyzeOn ? 'analyze' : researchOn ? 'research' : canvasOn ? 'canvas' : 'chat'
+  const unavailableTasks: Partial<Record<TaskId, string>> = {
+    ...(!canResearch ? { research: 'Not available' } : researchLeft === 0 ? { research: 'Used up today' } : {}),
+    ...(!canAnalyze ? { analyze: 'Not available' } : analyzeLeft === 0 ? { analyze: 'Used up today' } : {}),
+    ...(!canBuild ? { build: 'Not available' } : buildLeft === 0 ? { build: 'Used up today' } : {}),
+    ...(!canCanvas ? { canvas: 'Not available' } : {}),
+  }
+
   const assignProject = (projectId: string | null) => {
     if (!conversation) return
     setConversationProject.mutate(
@@ -680,6 +727,14 @@ export function Chat() {
     if (lastUser) messages = saved.filter((m) => m.createdAt <= lastUser.createdAt)
   }
   const pendingUser = mine && turn?.userMessage && !messages.some((m) => m.id === turn.userMessage!.id) ? turn.userMessage : null
+  // Time from the question to its answer, for the receipt above each reply.
+  const elapsedFor = (message: Message): number | undefined => {
+    const index = messages.findIndex((item) => item.id === message.id)
+    for (let previous = index - 1; previous >= 0; previous -= 1) {
+      if (messages[previous].role === 'user') return Math.max(0, message.createdAt - messages[previous].createdAt)
+    }
+    return undefined
+  }
   const lastSavedAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
   const empty = !id && messages.length === 0 && !mine
   const labelFor = (modelId: string | null | undefined) => (modelId && models?.items.find((model) => model.id === modelId)?.name) || modelId || ''
@@ -700,7 +755,13 @@ export function Chat() {
         parts.push('', '```python', analysis.code, '```')
       }
       if (message.build) {
-        parts.push('', `### Build · ${message.build.title}`, '', '```html', message.build.html, '```')
+        parts.push('', `### Build · ${message.build.title}`)
+        const buildPages = message.build.pages?.length
+          ? message.build.pages
+          : [{ name: `${message.build.title}.html`, html: message.build.html }]
+        for (const page of buildPages) {
+          parts.push('', `#### ${page.name}`, '', '```html', page.html, '```')
+        }
       }
       if (message.canvas) {
         const canvas = message.canvas
@@ -746,6 +807,15 @@ export function Chat() {
   useEffect(() => {
     stick.current = true
   }, [id])
+  // Opening an artifact from the library lands on the reply that made it,
+  // rather than at the bottom of the conversation.
+  useEffect(() => {
+    if (!page.data) return
+    const hash = window.location.hash
+    if (!hash.startsWith('#message-')) return
+    const timer = window.setTimeout(() => document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'center' }), 80)
+    return () => window.clearTimeout(timer)
+  }, [id, page.data])
 
   if (id && page.isLoading) {
     return (
@@ -831,8 +901,35 @@ export function Chat() {
 
       <div ref={scroller} onScroll={onScroll} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[760px] px-4 pb-6 pt-2 md:px-6">
+          {conversation && messages.length > 0 ? <MemoryPanel conversationId={conversation.id} /> : null}
           {empty ? (
-            <EmptyState onPick={(text) => void send(text)} disabled={limitReached} buildOn={buildOn} canvasOn={canvasOn} />
+            <EmptyState
+              disabled={limitReached}
+              activeTask={activeTask}
+              unavailable={unavailableTasks}
+              showTasks={mode !== 'api'}
+              onChatOnly={toggleChatOnly}
+              onTask={(task) => {
+                if (task === 'research') {
+                  if (!canResearch || researchLeft === 0 || researchOn) return
+                  toggleResearch()
+                  return
+                }
+                if (task === 'analyze') {
+                  if (!canAnalyze || analyzeLeft === 0) return
+                  if (!analyzeOn) toggleAnalyze()
+                  setFilePickerRequest((request) => request + 1)
+                  return
+                }
+                if (task === 'build') {
+                  if (!canBuild || buildLeft === 0 || buildOn) return
+                  toggleBuild()
+                  return
+                }
+                if (!canCanvas || canvasOn) return
+                toggleCanvas()
+              }}
+            />
           ) : (
             <div className="space-y-7">
               {messages.map((message) =>
@@ -851,6 +948,7 @@ export function Chat() {
                     analysis={message.analysis}
                     build={message.build}
                     canvas={message.canvas}
+                    elapsedMs={elapsedFor(message)}
                     model={labelFor(message.model)}
                     interrupted={message.interrupted}
                     messageId={message.id}
@@ -882,6 +980,7 @@ export function Chat() {
                   analysis={turn.analysis}
                   build={turn.build}
                   canvas={turn.canvas}
+                  elapsedMs={turn.userMessage ? Date.now() - turn.userMessage.createdAt : undefined}
                   statusText={turn.statusText}
                   statusLog={turn.statusLog}
                   model={labelFor(turn.model)}
@@ -918,9 +1017,12 @@ export function Chat() {
             replyUsage={me?.usage}
             model={model}
             onChangeModel={changeModel}
+            modelPreset={modelPreset}
+            onChangeModelPreset={changePreset}
             effort={mode === 'public' && me?.capabilities.reasoning ? effort : undefined}
             onChangeEffort={changeEffort}
             onAttach={addFiles}
+            openFilePicker={filePickerRequest}
             onRemoveAttachment={(attachmentId) => setAttachments((current) => current.filter((item) => item.id !== attachmentId))}
             onSend={() => void send(draft)}
             onStop={() => turn?.stop()}
@@ -953,42 +1055,127 @@ function Notice({ children }: { children: React.ReactNode }) {
   return <p className="rounded-control bg-surface-2 px-4 py-3 text-center text-[13.5px] text-muted">{children}</p>
 }
 
-function EmptyState({ onPick, disabled, buildOn, canvasOn }: { onPick: (text: string) => void; disabled: boolean; buildOn: boolean; canvasOn: boolean }) {
-  const suggestions = buildOn
-    ? [
-        'Build a landing page for a neighborhood coffee shop',
-        'Build a personal portfolio for a product designer',
-        'Build a small budget calculator with a chart',
-        'Show poki.com live inside a sandboxed page',
-      ]
-    : canvasOn
-      ? [
-          'Flashcards for the cell biology basics',
-          'Make a quiz on the French Revolution for a high-school class',
-          'Flashcards for common Spanish verbs in the present tense',
-          'Quiz me on Python list comprehensions',
-        ]
-      : SUGGESTIONS
+function EmptyState({
+  disabled,
+  activeTask,
+  unavailable,
+  showTasks,
+  onTask,
+  onChatOnly,
+}: {
+  disabled: boolean
+  activeTask: 'chat' | TaskId
+  unavailable: Partial<Record<TaskId, string>>
+  showTasks: boolean
+  onTask: (task: TaskId) => void
+  onChatOnly: () => void
+}) {
+  const { data: review } = useReviewSummary()
+  const tasks: { id: TaskId; title: string; description: string; example: string; icon: LucideIcon }[] = [
+    {
+      id: 'research',
+      title: 'Research a question',
+      description: 'A cited web report with claim checks.',
+      example: 'What changed in AI regulation this year?',
+      icon: Search,
+    },
+    {
+      id: 'analyze',
+      title: 'Analyze a spreadsheet',
+      description: 'CSV, TSV or XLSX, analyzed in your browser.',
+      example: 'Which region grew fastest last quarter?',
+      icon: FileSpreadsheet,
+    },
+    {
+      id: 'build',
+      title: 'Build a page or game',
+      description: 'A self-contained page, tool or game.',
+      example: 'A landing page for a neighborhood coffee shop',
+      icon: Hammer,
+    },
+    {
+      id: 'canvas',
+      title: 'Study a topic',
+      description: 'Flashcards or a quiz from a topic.',
+      example: 'Flashcards for cell biology basics',
+      icon: Layers,
+    },
+  ]
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="flex min-h-[52vh] flex-col items-center justify-end pb-8 text-center">
       <h1 className="text-balance text-[28px] font-semibold tracking-[-0.02em] md:text-[32px]">What can I help with?</h1>
       <p className="mt-2 max-w-[430px] text-balance text-[13.5px] leading-relaxed text-faint">
-        Free models, no key needed. Proof runs independent tests; Research returns a cited web report; Analyze runs Python on your table in the browser; Build makes a page, tool or game, and can open a live site through a proxy; Canvas makes flashcards or a practice quiz; Deep adds drafts and review; Effort sets how much extra reasoning the model spends.
+        {showTasks ? 'Free models, no key needed. Pick a starting point, or just type below.' : 'Ask anything below.'}
       </p>
-      <ul className="mt-6 grid w-full gap-2 sm:grid-cols-2">
-        {suggestions.map((text) => (
-          <li key={text}>
+      {showTasks ? (
+        <>
+          <div className="mt-6 grid w-full gap-2 sm:grid-cols-2">
+            {tasks.map((task) => {
+              const reason = unavailable[task.id]
+              const blocked = disabled || Boolean(reason)
+              const active = activeTask === task.id
+              const Icon = task.icon
+              return (
+                <button
+                  key={task.id}
+                  type="button"
+                  disabled={blocked}
+                  aria-pressed={active}
+                  onClick={() => onTask(task.id)}
+                  className={cx(
+                    'group flex min-h-[104px] flex-col justify-between rounded-card border bg-surface p-3.5 text-left shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-[border-color,background-color,box-shadow]',
+                    active ? 'border-fg/35 ring-1 ring-fg/8' : 'border-line hover:border-line-strong hover:bg-surface-2/40',
+                    blocked && 'cursor-not-allowed opacity-45 hover:border-line hover:bg-surface',
+                  )}
+                >
+                  <span className="flex items-start gap-2.5">
+                    <span className="grid size-7 shrink-0 place-items-center rounded-tile bg-surface-2 text-fg">
+                      <Icon className="size-3.5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13px] font-medium leading-snug">{task.title}</span>
+                      <span className="mt-1 block text-[11.5px] leading-snug text-faint">{task.description}</span>
+                    </span>
+                    {active && <span className="mt-1 size-1.5 shrink-0 rounded-full bg-accent" aria-hidden />}
+                  </span>
+                  <span className="mt-2.5 block text-[11px] leading-snug text-muted">{reason ?? `Try: “${task.example}”`}</span>
+                </button>
+              )
+            })}
+          </div>
+          {review && review.due > 0 ? (
+            <Link
+              to="/review"
+              className="mt-3 flex w-full items-center gap-3 rounded-card border border-line bg-surface px-4 py-3 text-left shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-colors hover:border-line-strong hover:bg-surface-2/40"
+            >
+              <span className="grid size-8 shrink-0 place-items-center rounded-tile bg-accent-soft text-accent">
+                <Brain className="size-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[12.5px] font-medium">Smart Review</span>
+                <span className="mt-0.5 block text-[11px] text-faint">
+                  {review.due} card{review.due === 1 ? '' : 's'} due today
+                </span>
+              </span>
+              <span className="inline-flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-muted">
+                Review
+                <ArrowUpRight className="size-3.5" />
+              </span>
+            </Link>
+          ) : null}
+          {activeTask !== 'chat' && (
             <button
               type="button"
+              onClick={onChatOnly}
               disabled={disabled}
-              onClick={() => onPick(text)}
-              className="h-full w-full rounded-card border border-line bg-surface px-4 py-3 text-left text-[13.5px] leading-snug text-muted shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-[border-color,color,background-color] hover:border-line-strong hover:text-fg disabled:opacity-50"
+              className="mt-3 inline-flex items-center gap-1.5 text-[11.5px] text-faint underline-offset-2 transition-colors hover:text-fg hover:underline disabled:opacity-40"
             >
-              {text}
+              <MessageCircle className="size-3.5" />
+              Switch to just chat
             </button>
-          </li>
-        ))}
-      </ul>
+          )}
+        </>
+      ) : null}
     </motion.div>
   )
 }

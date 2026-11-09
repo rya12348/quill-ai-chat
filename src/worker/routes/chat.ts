@@ -281,6 +281,12 @@ chat.post('/', async (c) => {
       db.prepare(`DELETE FROM message_build WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND created_at > ?)`).bind(owner, owner, conversation.id, lastUser.createdAt),
     )
     statements.push(
+      db.prepare(`DELETE FROM message_canvas WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND created_at > ?)`).bind(owner, owner, conversation.id, lastUser.createdAt),
+    )
+    statements.push(
+      db.prepare(`DELETE FROM canvas_reviews WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND created_at > ?)`).bind(owner, owner, conversation.id, lastUser.createdAt),
+    )
+    statements.push(
       db.prepare(`DELETE FROM build_embeds WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND created_at > ?)`).bind(owner, owner, conversation.id, lastUser.createdAt),
     )
     statements.push(db.prepare(`DELETE FROM messages WHERE owner_sub = ? AND conversation_id = ? AND created_at > ?`).bind(owner, conversation.id, lastUser.createdAt))
@@ -512,6 +518,7 @@ chat.post('/', async (c) => {
         db.prepare(`DELETE FROM message_analysis WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM message_build WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM message_canvas WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
+        db.prepare(`DELETE FROM canvas_reviews WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM build_embeds WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM messages WHERE owner_sub = ? AND id = ?`).bind(owner, assistantMessageId),
       ])
@@ -552,6 +559,20 @@ chat.post('/', async (c) => {
       if (!research && results.length && !(await send({ type: 'sources', sources: results }))) return await abandon()
       const settings = await db.prepare(`SELECT instructions FROM user_settings WHERE owner_sub = ?`).bind(owner).first<{ instructions?: string }>()
       const customInstructions = typeof settings?.instructions === 'string' ? settings.instructions.trim().slice(0, MAX_INSTRUCTIONS_CHARS) : ''
+      // A chat can belong to one project; that project's instructions refine
+      // every reply in it without changing the account-wide settings.
+      const projectSettings = await db
+        .prepare(
+          `SELECT ps.instructions FROM project_conversations pc
+           JOIN project_settings ps ON ps.project_id = pc.project_id AND ps.owner_sub = pc.owner_sub
+           WHERE pc.owner_sub = ? AND pc.conversation_id = ?`,
+        )
+        .bind(owner, conversation.id)
+        .first<{ instructions?: string }>()
+      const projectInstructions =
+        typeof projectSettings?.instructions === 'string'
+          ? projectSettings.instructions.trim().slice(0, MAX_INSTRUCTIONS_CHARS)
+          : ''
 
       // Keep the newest turns verbatim. Anything older is folded into the
       // persisted rolling memory, but only when it has just fallen outside the
@@ -606,6 +627,7 @@ chat.post('/', async (c) => {
         `Today is ${new Date().toISOString().slice(0, 10)} (UTC). Treat this as the current date; use it when deciding whether a fact is current, and prefer recent sources over older ones.`,
         SYSTEM_PROMPT,
         customInstructions ? `Standing instructions from the person you are helping:\n${customInstructions}` : '',
+        projectInstructions ? `Instructions for this project (they refine, but never override, a safety rule or the request itself):\n${projectInstructions}` : '',
         memory ? `Rolling memory from earlier in this conversation. Use it for details that are no longer in the recent messages. Do not mention the memory or say that earlier context was condensed:\n${memory}` : '',
         searchPrompt(results),
       ]

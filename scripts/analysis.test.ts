@@ -3,12 +3,15 @@ import test from 'node:test'
 
 import * as XLSX from 'xlsx'
 
-import { ANALYZE_DAILY_LIMIT, BUILD_DAILY_LIMIT } from '../src/shared/config'
+import { ANALYZE_DAILY_LIMIT, BUILD_DAILY_LIMIT, MAX_SUMMARY_CHARS } from '../src/shared/config'
 import { profileCsv } from '../src/shared/csv'
 import { readDataFile } from '../src/app/lib/dataset'
 import { isUnsafeAnalysisCode, parseDataset } from '../src/worker/analysis'
 import { repairDocument } from '../src/shared/html'
-import { extractHtml } from '../src/worker/build'
+import { extractHtml, extractPages } from '../src/worker/build'
+import { pickPhotos, photoQuery } from '../src/worker/photos'
+import { normalizeMemory } from '../src/shared/memory'
+import { elapsedLabel } from '../src/shared/receipt'
 import { analysisToday, buildToday, parseAnalysis, parseBuild, parseCanvas } from '../src/worker/db'
 import { findSiteTarget } from '../src/worker/site-proxy'
 
@@ -161,6 +164,14 @@ test('ignores an echoed prompt and keeps the real build document', () => {
   const dots =
     '<!doctype html><html><body><h1>Corner Roast</h1><p>...</p><p>...</p><p>...</p><p>...</p><p>...</p></body></html>'
   assert.equal(extractHtml(dots), undefined)
+  // Mangled CSS and corrupted closing tags are rejected too: they render as a
+  // half-styled page even though the copy is there.
+  const mangled =
+    '<!doctype html><html><head><title>Bakery</title><style>.hero{width:100%;height:100%</style></head><body><h1>Crumb &amp; Co</h1><p>Fresh bread baked every morning on Oak Street.</p></body></html>'
+  assert.equal(extractHtml(mangled), undefined)
+  const spaced =
+    '<!doctype html><html><body><h1>Crumb &amp; Co</h1><p>Fresh bread baked every morning on Oak Street.</p></ h1></body></html>'
+  assert.equal(extractHtml(spaced), undefined)
 })
 
 test('parses a generated canvas set and rejects an empty one', () => {
@@ -174,6 +185,115 @@ test('parses a generated canvas set and rejects an empty one', () => {
   }
   assert.equal(parseCanvas(JSON.stringify({ info }))?.cards?.length, 1)
   assert.equal(parseCanvas(JSON.stringify({ info: { ...info, cards: [] } })), undefined)
+})
+
+test('splits a multi-page build and drops a broken page', () => {
+  const page = (title: string, copy: string) =>
+    `<!doctype html><html><head><title>${title}</title></head><body><h1>${title}</h1><p>${copy}</p><a href="menu.html">Menu</a></body></html>`
+  const two = extractPages(
+    [
+      '<!-- page: index.html -->',
+      page('Oak Street Roast', 'Fresh coffee roasted on Oak Street every morning since 2019.'),
+      '<!-- page: menu.html -->',
+      page('Menu', 'Espresso, flat white and a filter of the day, all under five dollars.'),
+    ].join('\n'),
+  )
+  assert.equal(two.length, 2)
+  assert.equal(two[0].name, 'index.html')
+  assert.equal(two[1].name, 'menu.html')
+  // A nav link to a generated page becomes a preview tab link.
+  assert.match(two[0].html, /href="#page:menu"/)
+  // A truncated second page is dropped rather than failing the whole build.
+  const broken = extractPages(
+    [
+      '<!-- page: index.html -->',
+      page('Oak Street Roast', 'Fresh coffee roasted on Oak Street every morning since 2019.'),
+      '<!-- page: menu.html -->',
+      '<!doctype html><html><body><h1>Menu',
+    ].join('\n'),
+  )
+  assert.equal(broken.length, 1)
+  // No markers still means one page.
+  assert.equal(extractPages(page('Solo', 'A single page about one topic, with enough real copy to pass.')).length, 1)
+})
+
+test('keeps the extra pages of a multi-page build', () => {
+  const index = '<!doctype html><html><body><h1>Oak Street Roast</h1></body></html>'
+  const info = {
+    status: 'ready',
+    kind: 'page',
+    title: 'Oak Street Roast',
+    html: index,
+    pages: [
+      { name: 'index.html', html: index },
+      { name: 'menu.html', html: '<!doctype html><html><body><h1>Menu</h1></body></html>' },
+    ],
+    models: ['A model'],
+    asOf: Date.now(),
+  }
+  const parsed = parseBuild(JSON.stringify({ info }))
+  assert.equal(parsed?.pages?.length, 2)
+  assert.equal(parsed?.pages?.[1].name, 'menu.html')
+  // A single page stays a single page.
+  assert.equal(parseBuild(JSON.stringify({ info: { ...info, pages: [info.pages[0]] } }))?.pages, undefined)
+})
+
+test('turns a request into a photo subject, not web-page words', () => {
+  assert.equal(
+    photoQuery('Build a 2-page website for a neighborhood bakery called Crumb & Co, with photos and gentle animations'),
+    'neighborhood bakery',
+  )
+  assert.equal(photoQuery('Build a landing page for a coffee shop with animations'), 'coffee shop')
+  assert.equal(photoQuery('make me a portfolio for a wedding photographer named Ana'), 'wedding photographer')
+})
+
+test('keeps only usable landscape photographs from Commons', () => {
+  const info = (width: number, height: number, mime: string, license: string) => [
+    {
+      url: `https://upload.wikimedia.org/wikipedia/commons/${width}.jpg`,
+      thumburl: `https://thumb.wikimedia.org/wikipedia/commons/thumb/${width}.jpg`,
+      width,
+      height,
+      mime,
+      extmetadata: {
+        LicenseShortName: { value: license },
+        Artist: { value: `<a href="#">A Photographer</a>` },
+      },
+    },
+  ]
+  const photos = pickPhotos(
+    [
+      { title: 'File:Bakery counter.jpg', imageinfo: info(4000, 2600, 'image/jpeg', 'CC BY-SA 4.0') },
+      { title: 'File:Bakery portrait.jpg', imageinfo: info(1200, 2000, 'image/jpeg', 'CC BY 4.0') },
+      { title: 'File:Bakery logo.svg', imageinfo: info(1200, 800, 'image/svg+xml', 'CC0') },
+      { title: 'File:Map of bakeries.jpg', imageinfo: info(2000, 1200, 'image/jpeg', 'CC BY 4.0') },
+      { title: 'File:The Erotic Bakery, Seattle.jpg', imageinfo: info(2500, 1600, 'image/jpeg', 'CC BY 3.0') },
+      { title: 'File:Bakery ovens.jpg', imageinfo: info(3000, 2000, 'image/jpeg', 'CC BY 2.0') },
+    ],
+    4,
+    'bakery',
+  )
+  assert.equal(photos.length, 2)
+  assert.match(photos[0].url, /^https:\/\/thumb\.wikimedia\.org\//)
+  assert.equal(photos[0].credit, 'A Photographer')
+  assert.equal(photos[0].license, 'CC BY-SA 4.0')
+  assert.equal(photos[0].alt, 'bakery photograph')
+  assert.equal(photos[1].license, 'CC BY 2.0')
+})
+
+test('labels reply time without inventing precision', () => {
+  assert.equal(elapsedLabel(4_200), '4s')
+  assert.equal(elapsedLabel(59_600), '1m')
+  assert.equal(elapsedLabel(78_000), '1m 18s')
+  assert.equal(elapsedLabel(0), '0s')
+  assert.equal(elapsedLabel(-5), '0s')
+})
+
+test('normalises an edited memory before it is stored', () => {
+  assert.equal(normalizeMemory('  Ada\n\nprefers  tea  '), 'Ada prefers tea')
+  assert.equal(normalizeMemory('   \n  '), undefined)
+  const long = normalizeMemory('x'.repeat(MAX_SUMMARY_CHARS + 500))
+  assert.equal(long?.length, MAX_SUMMARY_CHARS)
 })
 
 test('uses separate daily caps and counter queries', async () => {

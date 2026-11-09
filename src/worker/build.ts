@@ -3,11 +3,12 @@
 
 import type { PublicLane } from './public-ai'
 import { activeLanes, laneKey, laneStrength, laneText, type LaneResult } from './public-ai'
-import type { BuildInfo } from '../shared/types'
+import type { BuildInfo, BuildPage } from '../shared/types'
 import { AiError } from './ai'
 import { MAX_BUILD_HTML_CHARS } from '../shared/config'
 import { repairDocument } from '../shared/html'
 import { escapeHtml, fetchSitePage, SiteError } from './site-proxy'
+import { findPhotos, photoQuery } from './photos'
 
 export type BuildIntent = {
   lanes: PublicLane[]
@@ -60,6 +61,12 @@ export function extractHtml(raw: string): string | undefined {
     if ((text.match(/[a-z]/gi) ?? []).length < 50) return false
     if ((text.match(/\.{3,}/g) ?? []).length > 4) return false
     if (!/<(?:h1|h2|h3|p|div|header|main|section|article|nav|footer|button|form|ul|li|table|img|a)[\s>]/i.test(visible)) return false
+    // A stylesheet with unbalanced braces means the page was truncated or the
+    // model mangled its CSS; either way it paints a half-styled page.
+    const css = [...visible.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((match) => match[1]).join('\n')
+    if ((css.match(/{/g) ?? []).length !== (css.match(/}/g) ?? []).length) return false
+    // "</ h1>" and "<h1 Crumb" are corrupted markup, not a document.
+    if (/<\/\s+[a-z]/i.test(visible)) return false
     return /^\s*(?:<!doctype html|<html[\s>])/i.test(html)
   }
   for (const source of fenced ? [fenced, raw] : [raw]) {
@@ -91,6 +98,73 @@ export function extractHtml(raw: string): string | undefined {
   return undefined
 }
 
+// A multi-page site arrives as several documents, each introduced by a marker
+// comment. A missing or truncated page is dropped rather than failing the whole
+// build, so a good first page still reaches the preview.
+const PAGE_MARKER = /<!--\s*page:\s*([^\s>][^>]{0,59}?)\s*-->/gi
+
+function pageName(raw: string, index: number): string {
+  const cleaned = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^[-._]+|[-._]+$/g, '')
+    .slice(0, 40)
+  if (!cleaned) return index === 0 ? 'index.html' : `page-${index + 1}.html`
+  return /\.html?$/.test(cleaned) ? cleaned : `${cleaned}.html`
+}
+
+/** Points links between generated pages at the preview's page tabs. */
+function linkPages(pages: BuildPage[]): BuildPage[] {
+  if (pages.length < 2) return pages
+  const bySlug = new Map(pages.map((page) => [page.name.replace(/\.html?$/i, '').toLowerCase(), page.name]))
+  const index = pages.find((page) => /^(?:index|home)\.html?$/i.test(page.name))
+  if (index) bySlug.set('home', index.name)
+  return pages.map((page) => ({
+    ...page,
+    html: page.html.replace(/(href\s*=\s*["'])([^"']+)(["'])/gi, (whole, open: string, value: string, close: string) => {
+      const trimmed = value.trim()
+      if (!trimmed || /^[a-z]+:/i.test(trimmed) || trimmed.startsWith('#')) return whole
+      const target = trimmed.replace(/^\.\//, '').replace(/^\//, '').split('#')[0].split('?')[0]
+      const name = bySlug.get(target.toLowerCase()) ?? bySlug.get(target.replace(/\.html?$/i, '').toLowerCase())
+      return name ? `${open}#page:${name.replace(/\.html?$/i, '')}${close}` : whole
+    }),
+  }))
+}
+
+/**
+ * Splits a reply into pages and keeps the ones that are real documents. With no
+ * page markers the reply is one page, which is the common case.
+ */
+export function extractPages(raw: string): BuildPage[] {
+  const segments: { name: string; body: string }[] = []
+  let start = 0
+  let name = ''
+  for (const match of raw.matchAll(PAGE_MARKER)) {
+    const at = match.index ?? 0
+    if (raw.slice(start, at).trim()) segments.push({ name, body: raw.slice(start, at) })
+    name = match[1]
+    start = at + match[0].length
+  }
+  if (raw.slice(start).trim()) segments.push({ name, body: raw.slice(start) })
+
+  const pages: BuildPage[] = []
+  const used = new Set<string>()
+  let total = 0
+  for (const [index, segment] of segments.entries()) {
+    const html = extractHtml(segment.body)
+    if (!html) continue
+    const page: BuildPage = { name: pageName(segment.name, index), html: secure(repairDocument(html)) }
+    // Two markers can name the same file; the first document owns the name.
+    if (used.has(page.name)) continue
+    if (total + page.html.length > MAX_BUILD_HTML_CHARS) break
+    total += page.html.length
+    used.add(page.name)
+    pages.push(page)
+  }
+  return linkPages(pages.slice(0, 4))
+}
+
 function secure(html: string): string {
   const csp =
     `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data: blob:; media-src https: data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">`
@@ -99,8 +173,14 @@ function secure(html: string): string {
 }
 
 function titleOf(html: string): string {
-  const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]
-  return (title ?? 'Built page').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Built page'
+  // A model that forgets <title> still names the page in its heading.
+  const raw = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? /<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(html)?.[1]
+  const text = (raw ?? '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[a-z#0-9]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text.slice(0, 120) || 'Built page'
 }
 
 export async function buildComplete(input: BuildIntent): Promise<BuildOutcome> {
@@ -111,6 +191,19 @@ export async function buildComplete(input: BuildIntent): Promise<BuildOutcome> {
     const status = input.health?.get(laneKey(lane))
     return status === 'healthy' ? 0 : status === 'down' ? 2 : 1
   }
+  // One keyless search for the subject, so the page gets real photographs with
+  // a licence and a photographer to credit. This runs before the page lanes so
+  // photo time never eats into the page-writing budget.
+  const photos = await findPhotos(photoQuery(input.question), input.signal)
+  const photoBrief = photos.length
+    ? `\n\nAvailable photographs (Wikimedia Commons). Use up to ${photos.length}, only these URLs, and keep the credit:\n${photos
+        .map(
+          (photo, index) =>
+            `${index + 1}. <img src="${photo.url}" alt="${photo.alt}" width="${photo.width}" height="${photo.height}" loading="lazy" style="width:100%;height:100%;object-fit:cover">\n   credit: ${photo.credit} / Wikimedia Commons, ${photo.license}`,
+        )
+        .join('\n')}`
+    : '\n\nNo photographs were found for this subject. Use inline SVG illustrations or CSS gradients instead of stock photos.'
+
   const ranked = [...activeLanes(input.lanes)].sort(
     (a, b) => healthRank(a) - healthRank(b) || laneStrength(b.model, b.url) - laneStrength(a.model, a.url),
   )
@@ -124,20 +217,26 @@ Rules:
 - Use inline CSS and JavaScript, semantic HTML, and responsive layouts for phone and desktop.
 - Write specific, useful copy. Never use lorem ipsum or placeholder headings.
 - Make the controls actually work in the browser. A form may show a success message; there is no backend.
-- Use inline SVG, CSS gradients or HTTPS images for artwork. Do not use external scripts, stylesheets, fonts, fetch, XHR, WebSocket, storage or API calls.
-- Fill the body with the real page: headings, copy and controls. Never return an empty shell or a CSS-only document.
-- Keep it compact: one page of roughly 8–15 KB with at most three sections, and include a descriptive <title>.
+- Use the real photographs listed at the end of this message, and only those, for imagery: each inside a fixed-aspect container with a background colour, with loading="lazy" and the exact width, height and alt text given. Draw anything product-specific that no photo covers (a loaf, a chair, a chart) as inline SVG. Never invent or hotlink any other image URL. If no photographs are listed, use inline SVG or CSS gradients instead.
+- Credit every photograph in a small caption or credits line: the photographer, "Wikimedia Commons", the licence, and a link to commons.wikimedia.org.
+- Add motion that works without JavaScript: CSS transitions on hover and focus, plus a short fade or slide-in on load using @keyframes. Wrap animation rules in @media (prefers-reduced-motion: reduce) so the page respects that setting.
+- Do not use external scripts, stylesheets, fonts, fetch, XHR, WebSocket, storage or API calls.
+- Fill every page with the real content: headings, copy and controls. Never return an empty shell or a CSS-only document.
+- When the subject suits a small site (shop, restaurant, studio, portfolio, service), return 2–3 pages. Put each document behind its own marker line, exactly like this, followed by the complete document:
+  <!-- page: index.html -->
+  Link pages together with relative hrefs such as href="menu.html"; Quill shows them as preview tabs. Otherwise return one page with no markers.
+- Keep each page compact: 4–8 KB, about three sections, with a descriptive <title>, and the whole reply under 20 KB.
 - Do not claim to have tested it, and do not invent testimonials, statistics or customers.`
 
   // A page takes tens of seconds on a free lane. Cap the whole attempt so a
   // busy model cannot leave the reply spinning for minutes, and report the
   // wait while a lane writes, since there is no partial HTML to show yet.
-  const deadline = Date.now() + 110_000
+  const deadline = Date.now() + 120_000
   for (const lane of ranked.slice(0, 5)) {
     const remaining = deadline - Date.now()
     if (remaining < 12_000) break
     const startedAt = Date.now()
-    const timeout = AbortSignal.timeout(Math.min(40_000, remaining))
+    const timeout = AbortSignal.timeout(Math.min(50_000, remaining))
     let heartbeat: ReturnType<typeof setInterval> | undefined
     try {
       await input.onStatus?.(`Building a self-contained page with ${lane.label}…`)
@@ -148,20 +247,21 @@ Rules:
       const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout
       const raw = await laneText(lane, {
         messages: [
-          { role: 'system', content: system },
+          { role: 'system', content: `${system}${photoBrief}` },
           { role: 'user', content: input.question.replace(/\s+/g, ' ').trim().slice(0, 2_000) },
         ],
         signal,
         temperature: 0.2,
-        maxTokens: 4_000,
+        maxTokens: 5_000,
         // laneText reports its own failures; a success only counts once the
         // page passes validation, so junk output cannot mark a lane healthy.
         onLaneResult: (result) => {
           if (!result.ok) input.onLaneResult?.(result)
         },
       })
-      const html = extractHtml(raw)
-      if (!html) {
+      const pages = extractPages(raw)
+      const first = pages[0]
+      if (!first) {
         console.log('build.rejected', {
           lane: lane.label,
           chars: raw.length,
@@ -181,14 +281,17 @@ Rules:
         continue
       }
       input.onLaneResult?.({ lane, ok: true, latencyMs: Date.now() - startedAt })
-      const safe = secure(repairDocument(html))
       return {
-        text: 'Here is your page. Preview it below, then download it when it looks right.',
+        text:
+          pages.length > 1
+            ? `Here is your ${pages.length}-page site. Preview it below, switch pages with the tabs above the frame, then download the pages you want.`
+            : 'Here is your page. Preview it below, then download it when it looks right.',
         build: {
           status: 'ready',
           kind: 'page',
-          title: titleOf(safe),
-          html: safe,
+          title: titleOf(first.html),
+          html: first.html,
+          ...(pages.length > 1 ? { pages } : {}),
           models: [lane.label ?? lane.model],
           asOf: Date.now(),
         },

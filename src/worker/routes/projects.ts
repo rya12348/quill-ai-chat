@@ -1,10 +1,16 @@
 import { Hono } from 'hono'
 
+import { MAX_INSTRUCTIONS_CHARS } from '../../shared/config'
+import type { Project } from '../../shared/types'
 import { privateJson } from '../auth'
 import { id, mapProject, now } from '../db'
 import type { AppContext } from '../env'
 
 export const projects = new Hono<AppContext>()
+
+function mapProjectWithInstructions(row: Record<string, unknown>): Project {
+  return { ...mapProject(row), instructions: typeof row.instructions === 'string' ? row.instructions : '' }
+}
 
 const MAX_PROJECTS = 50
 const MAX_NAME = 60
@@ -19,18 +25,19 @@ projects.get('/', async (c) => {
   const rows = await c
     .get('db')
     .prepare(
-      `SELECT p.*,
+      `SELECT p.*, COALESCE(ps.instructions, '') AS instructions,
               (SELECT COUNT(*) FROM project_conversations pc
                JOIN conversations c ON c.id = pc.conversation_id AND c.owner_sub = pc.owner_sub
                WHERE pc.owner_sub = p.owner_sub AND pc.project_id = p.id) AS conversation_count
        FROM projects p
+       LEFT JOIN project_settings ps ON ps.project_id = p.id AND ps.owner_sub = p.owner_sub
        WHERE p.owner_sub = ?
        ORDER BY p.updated_at DESC, p.created_at DESC
        LIMIT ?`,
     )
     .bind(c.get('user').sub, MAX_PROJECTS)
     .all()
-  return privateJson(c, { items: (rows.results as Record<string, unknown>[]).map(mapProject) })
+  return privateJson(c, { items: (rows.results as Record<string, unknown>[]).map(mapProjectWithInstructions) })
 })
 
 projects.post('/', async (c) => {
@@ -62,15 +69,51 @@ projects.patch('/:id', async (c) => {
   await db.prepare(`UPDATE projects SET name = ?, updated_at = ? WHERE owner_sub = ? AND id = ?`).bind(name, now(), owner, projectId).run()
   const row = await db
     .prepare(
-      `SELECT p.*,
+      `SELECT p.*, COALESCE(ps.instructions, '') AS instructions,
               (SELECT COUNT(*) FROM project_conversations pc
                JOIN conversations c ON c.id = pc.conversation_id AND c.owner_sub = pc.owner_sub
                WHERE pc.owner_sub = p.owner_sub AND pc.project_id = p.id) AS conversation_count
-       FROM projects p WHERE p.owner_sub = ? AND p.id = ?`,
+       FROM projects p
+       LEFT JOIN project_settings ps ON ps.project_id = p.id AND ps.owner_sub = p.owner_sub
+       WHERE p.owner_sub = ? AND p.id = ?`,
     )
     .bind(owner, projectId)
     .first<Record<string, unknown>>()
-  return privateJson(c, { project: mapProject(row!) })
+  return privateJson(c, { project: mapProjectWithInstructions(row!) })
+})
+
+/** Instructions apply to every chat in the project, not to one conversation. */
+projects.patch('/:id/instructions', async (c) => {
+  const db = c.get('db')
+  const owner = c.get('user').sub
+  const projectId = c.req.param('id')
+  const existing = await db.prepare(`SELECT id FROM projects WHERE owner_sub = ? AND id = ?`).bind(owner, projectId).first()
+  if (!existing) return c.json({ error: 'Project not found.' }, 404)
+  const input = await c.req.json<{ instructions?: unknown }>().catch(() => ({} as { instructions?: unknown }))
+  if (typeof input.instructions !== 'string') {
+    return c.json({ error: 'instructions', message: 'Instructions must be text.' }, 400)
+  }
+  const instructions = input.instructions.replace(/\r\n?/g, '\n').trim().slice(0, MAX_INSTRUCTIONS_CHARS)
+  await db
+    .prepare(
+      `INSERT INTO project_settings (project_id, owner_sub, instructions, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(project_id) DO UPDATE SET instructions = excluded.instructions, updated_at = excluded.updated_at`,
+    )
+    .bind(projectId, owner, instructions, now())
+    .run()
+  const row = await db
+    .prepare(
+      `SELECT p.*, COALESCE(ps.instructions, '') AS instructions,
+              (SELECT COUNT(*) FROM project_conversations pc
+               JOIN conversations c ON c.id = pc.conversation_id AND c.owner_sub = pc.owner_sub
+               WHERE pc.owner_sub = p.owner_sub AND pc.project_id = p.id) AS conversation_count
+       FROM projects p
+       LEFT JOIN project_settings ps ON ps.project_id = p.id AND ps.owner_sub = p.owner_sub
+       WHERE p.owner_sub = ? AND p.id = ?`,
+    )
+    .bind(owner, projectId)
+    .first<Record<string, unknown>>()
+  return privateJson(c, { project: mapProjectWithInstructions(row!) })
 })
 
 projects.delete('/:id', async (c) => {

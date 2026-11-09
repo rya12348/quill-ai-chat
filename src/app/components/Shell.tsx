@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { Menu as MenuIcon, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, X } from 'lucide-react'
+import { Menu as MenuIcon, Library as LibraryIcon, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 
@@ -124,6 +124,15 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
         >
           <Plus className="size-4" />
           New chat
+        </NavLink>
+        <NavLink
+          to="/library"
+          className={({ isActive }) =>
+            cx('mt-1 flex h-9 items-center gap-2 rounded-control px-3 text-[13.5px] font-medium transition-colors', isActive ? 'bg-surface text-fg shadow-card' : 'text-muted hover:bg-surface hover:text-fg')
+          }
+        >
+          <LibraryIcon className="size-4" />
+          Library
         </NavLink>
         <label className="relative mt-2 block">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-faint" />

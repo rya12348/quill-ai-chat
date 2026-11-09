@@ -6,6 +6,8 @@ import { Shell } from './components/Shell'
 import { Spinner, ToastProvider } from './components/ui'
 import { ApiError, useMe } from './lib/api'
 import { Chat } from './pages/Chat'
+import { Library } from './pages/Library'
+import { Review } from './pages/Review'
 import { Settings } from './pages/Settings'
 import { SharedChat } from './pages/SharedChat'
 import { SetupNeeded, SignIn } from './pages/SignIn'
@@ -30,6 +32,8 @@ function Gate() {
       <Route element={<Shell />}>
         <Route index element={<Chat />} />
         <Route path="c/:id" element={<Chat />} />
+        <Route path="library" element={<Library />} />
+        <Route path="review" element={<Review />} />
         <Route path="settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

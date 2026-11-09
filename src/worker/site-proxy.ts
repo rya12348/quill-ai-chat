@@ -251,15 +251,38 @@ try{history.replaceState(history.state,'',${JSON.stringify(historyUrl)})}catch(e
  * an address that refuses to be framed. Cross-origin links still leave the
  * preview; forms are disabled because this route is read-only.
  */
-function addNavigation(html: string, origin: string, proxyUrl: string): string {
+function addNavigation(html: string, origin: string, proxyUrl: string, parentNavigation = false): string {
   // Use the absolute proxy URL: the document path is made to look like the
   // original site so client-side routers do not treat the preview as their 404.
-  const script = `<script>(function(){var proxy=${JSON.stringify(proxyUrl)};var origin=${JSON.stringify(origin)};document.addEventListener('click',function(event){var node=event.target;var link=node&&node.closest?node.closest('a[href]'):null;if(!link)return;var href=link.getAttribute('href');if(!href||href.charAt(0)==='#')return;var url;try{url=new URL(href,document.baseURI)}catch(_){return}if(url.origin!==origin)return;event.preventDefault();event.stopPropagation();window.location.href=proxy+'?url='+encodeURIComponent(url.href)},true);document.addEventListener('submit',function(event){event.preventDefault()},true)})()</script>`
+  // A Codespaces-forwarded port will not authorise a navigation started inside
+  // the preview's sandbox, so let the parent page change the frame's src with
+  // the page's own credentials. Direct previews keep navigating themselves.
+  const navigate = parentNavigation
+    ? `function go(url){try{if(window.parent!==window){window.parent.postMessage({type:'quill:preview-navigate',url:url},'*');return}}catch(error){}window.location.href=url}`
+    : `function go(url){window.location.href=url}`
+  const script = `<script>(function(){var proxy=${JSON.stringify(proxyUrl)};var origin=${JSON.stringify(origin)};${navigate};document.addEventListener('click',function(event){var node=event.target;var link=node&&node.closest?node.closest('a[href]'):null;if(!link)return;var href=link.getAttribute('href');if(!href||href.charAt(0)==='#')return;var url;try{url=new URL(href,document.baseURI)}catch(_){return}if(url.origin!==origin)return;event.preventDefault();event.stopPropagation();go(proxy+'?url='+encodeURIComponent(url.href))},true);document.addEventListener('submit',function(event){event.preventDefault()},true)})()</script>`
   if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, `${script}</body>`)
   return `${html}${script}`
 }
 
-export function renderProxyPage(html: string, finalUrl: string, proxyUrl: string): string {
+/**
+ * A live site can spend several seconds booting its own scripts, and until it
+ * paints the sandboxed frame is blank. Show a quiet placeholder from the first
+ * paint and remove it once the page has loaded (or after a cap, so a stalled ad
+ * script cannot hide the site forever).
+ */
+function addLoadingState(html: string, host: string): string {
+  const overlay = `<div id="quill-live-loading" role="status" aria-live="polite"><span class="quill-live-spinner" aria-hidden="true"></span><p>Loading <strong>${escapeHtml(host)}</strong>…</p></div>`
+  const style = `<style>#quill-live-loading{position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#f6f4ef;color:#6f695f;font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;transition:opacity .25s ease;pointer-events:none}#quill-live-loading p{margin:0}#quill-live-loading strong{color:#24221d;font-weight:600}#quill-live-loading.quill-live-done{opacity:0}#quill-live-loading.quill-live-done .quill-live-spinner{animation:none}.quill-live-spinner{width:22px;height:22px;border-radius:50%;border:2px solid #ddd6ca;border-top-color:#817b70;animation:quill-live-spin .8s linear infinite}@keyframes quill-live-spin{to{transform:rotate(360deg)}}</style>`
+  const script = `<script>(function(){var done=false;function hide(){if(done)return;done=true;var el=document.getElementById('quill-live-loading');if(!el)return;el.classList.add('quill-live-done');setTimeout(function(){el.remove()},300)}window.addEventListener('load',function(){setTimeout(hide,350)},{once:true});setTimeout(hide,12000)})()</script>`
+  let out = html
+  if (/<body(?:\s[^>]*)?>/i.test(out)) out = out.replace(/<body(?:\s[^>]*)?>/i, (body) => `${body}${style}${overlay}`)
+  else out = `${style}${overlay}${out}`
+  if (/<\/body>/i.test(out)) return out.replace(/<\/body>/i, `${script}</body>`)
+  return `${out}${script}`
+}
+
+export function renderProxyPage(html: string, finalUrl: string, proxyUrl: string, parentNavigation = false): string {
   const target = new URL(finalUrl)
   const origin = target.origin
   const base = new URL('.', finalUrl).href
@@ -274,5 +297,8 @@ export function renderProxyPage(html: string, finalUrl: string, proxyUrl: string
       .replace(/<base\b[^>]*>/gi, ''),
     origin,
   )
-  return addNavigation(addSandboxShims(addBase(cleaned, base), historyUrl), origin, app.href)
+  return addLoadingState(
+    addNavigation(addSandboxShims(addBase(cleaned, base), historyUrl), origin, app.href, parentNavigation),
+    target.hostname.replace(/^www\./, ''),
+  )
 }

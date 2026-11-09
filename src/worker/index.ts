@@ -1,13 +1,14 @@
 import { Hono } from 'hono'
 
 import { aiConfigured } from './ai'
-import { appOrigin, authMode, getAuth, requireUser } from './auth'
+import { appOrigin, authMode, getAuth, isCodespacesRequest, requireUser } from './auth'
 import { requireDb } from './db'
 import type { AppContext, Env } from './env'
 import { installPokiGameBridge, isPokiGameId, isPokiGameWrapperUrl, isPokiPage, pokiGameStartUrl, proxyPokiGameAsset } from './poki-game'
 import { escapeHtml, fetchSitePage, isWebProxyToken, normalizeSiteUrl, renderProxyPage, SiteError, webProxyPath } from './site-proxy'
 import { account } from './routes/account'
 import { analysis } from './routes/analysis'
+import { artifacts } from './routes/artifacts'
 import { attachments } from './routes/attachments'
 import { chat } from './routes/chat'
 import { conversations } from './routes/conversations'
@@ -15,6 +16,7 @@ import { messages } from './routes/messages'
 import { proof } from './routes/proof'
 import { projects } from './routes/projects'
 import { providers } from './routes/providers'
+import { review } from './routes/review'
 import { settings } from './routes/settings'
 import { shares } from './routes/shares'
 
@@ -30,7 +32,9 @@ const PROXY_HEADERS = {
   'content-type': 'text/html; charset=utf-8',
   'cache-control': 'private, no-store',
   'content-security-policy':
-    "sandbox allow-scripts allow-popups allow-modals allow-downloads; default-src * data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' data: blob:; style-src * 'unsafe-inline'; img-src * data: blob:; font-src * data:; connect-src *; media-src * data: blob:; frame-src *; worker-src * blob:; object-src 'none'; base-uri *; form-action 'none'; frame-ancestors 'self'",
+    // No frame-ancestors: the unguessable token is the capability, and a
+    // sandboxed (opaque-origin) document cannot match 'self' reliably.
+    "sandbox allow-scripts allow-popups allow-modals allow-downloads; default-src * data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' data: blob:; style-src * 'unsafe-inline'; img-src * data: blob:; font-src * data:; connect-src *; media-src * data: blob:; frame-src *; worker-src * blob:; object-src 'none'; base-uri *; form-action 'none'",
   'referrer-policy': 'no-referrer',
   'x-content-type-options': 'nosniff',
   'x-robots-tag': 'noindex, nofollow',
@@ -63,11 +67,14 @@ app.get('/api/web-proxy/:token', requireDb, async (c) => {
     const page = await fetchSitePage(target, c.req.raw.signal)
     const proxyOrigin = appOrigin(c.env, c.req.raw)
     const proxyUrl = new URL(webProxyPath(token), proxyOrigin).href
+    // Codespaces requires its own authorisation for navigations started in a
+    // sandboxed frame. Let Quill's parent page perform them instead.
+    const parentNavigation = isCodespacesRequest(c.env, c.req.raw)
     let html = page.html
     if (isPokiPage(page.finalUrl)) {
-      html = installPokiGameBridge(html, token, proxyOrigin)
+      html = installPokiGameBridge(html, token, proxyOrigin, parentNavigation)
     }
-    return c.body(renderProxyPage(html, page.finalUrl, proxyUrl), 200, PROXY_HEADERS)
+    return c.body(renderProxyPage(html, page.finalUrl, proxyUrl, parentNavigation), 200, PROXY_HEADERS)
   } catch (error) {
     if (!(error instanceof SiteError)) console.error(error)
     const failure = error instanceof SiteError ? error : new SiteError(502, 'The site could not be loaded.')
@@ -127,6 +134,7 @@ const api = new Hono<AppContext>()
 api.use('*', requireUser, requireDb)
 api.route('/', account)
 api.route('/analysis', analysis)
+api.route('/artifacts', artifacts)
 api.route('/attachments', attachments)
 api.route('/conversations', conversations)
 api.route('/chat', chat)
@@ -134,6 +142,7 @@ api.route('/messages', messages)
 api.route('/proof', proof)
 api.route('/projects', projects)
 api.route('/providers', providers)
+api.route('/review', review)
 api.route('/settings', settings)
 // Public read-only links live outside the authenticated /api subapp. The
 // random token is scoped to one conversation and only GET is implemented.

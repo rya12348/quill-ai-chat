@@ -79,6 +79,22 @@ const SCHEMA = [
     updated_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS conversation_summaries_owner ON conversation_summaries(owner_sub)`,
+  // Pinning is a library preference, not a property of the artifact, so a pin
+  // never rewrites the reply or its generated content.
+  `CREATE TABLE IF NOT EXISTS pinned_artifacts (
+    message_id TEXT PRIMARY KEY,
+    owner_sub TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS pinned_artifacts_owner ON pinned_artifacts(owner_sub, created_at DESC)`,
+  // Per-project instructions are kept apart from the project row so an edit
+  // never touches its id, name or membership.
+  `CREATE TABLE IF NOT EXISTS project_settings (
+    project_id TEXT PRIMARY KEY,
+    owner_sub TEXT NOT NULL,
+    instructions TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL
+  )`,
   // Projects group conversations without changing the conversation rows. The
   // join table keeps one chat in at most one project and survives schema
   // creation on existing deployments.
@@ -235,6 +251,24 @@ const SCHEMA = [
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS build_embeds_owner ON build_embeds(owner_sub, created_at DESC)`,
+  // Smart Review keeps one schedule row per saved flashcard. The card text
+  // stays in message_canvas; this table only maps a stable message/card index
+  // to its next due date. No model call is involved in scheduling.
+  `CREATE TABLE IF NOT EXISTS canvas_reviews (
+    owner_sub TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    card_index INTEGER NOT NULL,
+    due_at INTEGER NOT NULL,
+    interval_days REAL NOT NULL DEFAULT 0,
+    ease REAL NOT NULL DEFAULT 2.5,
+    repetitions INTEGER NOT NULL DEFAULT 0,
+    lapses INTEGER NOT NULL DEFAULT 0,
+    last_rating TEXT,
+    last_reviewed_at INTEGER,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (owner_sub, message_id, card_index)
+  )`,
+  `CREATE INDEX IF NOT EXISTS canvas_reviews_owner_due ON canvas_reviews(owner_sub, due_at)`,
 ]
 
 let ready: Promise<void> | undefined
@@ -594,6 +628,15 @@ export function parseBuild(value: unknown): BuildInfo | undefined {
         ? info.proxyUrl
         : undefined
     if (kind === 'embed' && (!sourceUrl || !proxyUrl)) return undefined
+    const pages = (kind === 'page' && Array.isArray(info.pages) ? info.pages : [])
+      .flatMap((item) => {
+        if (!item || typeof item !== 'object') return []
+        const entry = item as { name?: unknown; html?: unknown }
+        if (typeof entry.html !== 'string' || !entry.html.trim()) return []
+        const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim().slice(0, 60) : 'page.html'
+        return [{ name, html: entry.html.slice(0, 60_000) }]
+      })
+      .slice(0, 4)
     const models = Array.isArray(info.models)
       ? info.models.filter((model): model is string => typeof model === 'string' && Boolean(model.trim())).map((model) => model.trim().slice(0, 80)).slice(0, 4)
       : []
@@ -604,6 +647,7 @@ export function parseBuild(value: unknown): BuildInfo | undefined {
       html,
       ...(sourceUrl ? { sourceUrl } : {}),
       ...(proxyUrl ? { proxyUrl } : {}),
+      ...(pages.length > 1 ? { pages } : {}),
       models,
       asOf: Number.isFinite(Number(info.asOf)) ? Number(info.asOf) : Date.now(),
       ...(typeof info.reason === 'string' && info.reason ? { reason: info.reason.slice(0, 200) } : {}),

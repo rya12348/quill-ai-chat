@@ -1,12 +1,17 @@
 import { Brain, Check, ChevronDown, Copy, Download, ExternalLink, FileSpreadsheet, FileText, Globe2, Hammer, Layers, Link2, Maximize2, Play, RefreshCw, Shield, ShieldAlert, ShieldCheck, ShieldX, ThumbsDown, ThumbsUp, Users, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { motion, useReducedMotion } from 'motion/react'
+import { useNavigate } from 'react-router'
 
 import { repairDocument } from '../../shared/html'
+import { elapsedLabel } from '../../shared/receipt'
 import type { AnalysisInfo, BuildInfo, CanvasInfo, FeedbackRating, MessageAttachment, ProofInfo, ResearchInfo, Source, TeamInfo } from '../../shared/types'
 import { cx } from '../lib/cx'
+import { useEnrollReviewDeck } from '../lib/api'
 import { Markdown } from './Markdown'
 import { Mark } from './Shell'
+import { useToast } from './ui'
 
 const fileSize = (bytes: number) => (bytes < 1_000 ? `${bytes} B` : bytes < 1_000_000 ? `${Math.round(bytes / 1_000)} KB` : `${(bytes / 1_000_000).toFixed(1)} MB`)
 
@@ -342,7 +347,15 @@ function BuildNote({ build }: { build: BuildInfo }) {
   // runaway script still blocks the tab's main thread and paints nothing, so
   // scripts start off and the reader opts in when the page needs them.
   const [scripts, setScripts] = useState(false)
+  // A multi-page build arrives as several documents. The tabs switch the frame
+  // between them, since a sandboxed page cannot navigate on its own.
+  const pages = build.pages && build.pages.length > 1 ? build.pages : null
+  const [pageIndex, setPageIndex] = useState(0)
+  const currentPage = pages ? pages[Math.min(pageIndex, pages.length - 1)] ?? pages[0] : undefined
+  const documentHtml = currentPage?.html ?? build.html
   const live = build.kind === 'embed' && Boolean(build.proxyUrl)
+  const liveFrame = useRef<HTMLIFrameElement>(null)
+  const [liveUrl, setLiveUrl] = useState(build.proxyUrl ?? '')
   const sourceHost = (() => {
     try {
       return new URL(build.sourceUrl ?? '').hostname.replace(/^www\./, '')
@@ -350,6 +363,33 @@ function BuildNote({ build }: { build: BuildInfo }) {
       return 'live site'
     }
   })()
+  useEffect(() => {
+    setLiveUrl(build.proxyUrl ?? '')
+  }, [build.proxyUrl])
+  // A sandboxed page cannot carry a Codespaces forwarded-port session into a
+  // navigation. The proxied page asks us to move the frame instead, while it
+  // stays isolated and without access to this origin.
+  useEffect(() => {
+    if (!live) return
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== liveFrame.current?.contentWindow) return
+      const data: unknown = event.data
+      if (!data || typeof data !== 'object') return
+      const message = data as { type?: unknown; url?: unknown }
+      if (message.type !== 'quill:preview-navigate' || typeof message.url !== 'string') return
+      let next: URL
+      try {
+        next = new URL(message.url, window.location.origin)
+      } catch {
+        return
+      }
+      if (next.origin !== window.location.origin) return
+      if (!next.pathname.startsWith('/api/web-proxy/') && !next.pathname.startsWith('/api/poki-game/')) return
+      setLiveUrl(next.href)
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [live])
   useEffect(() => {
     if (!expanded) return
     const onKey = (event: KeyboardEvent) => {
@@ -363,29 +403,76 @@ function BuildNote({ build }: { build: BuildInfo }) {
       document.body.style.overflow = previous
     }
   }, [expanded])
+  const pageLabel = (name: string) => {
+    const slug = name.replace(/\.html?$/i, '').replace(/[-_]+/g, ' ').trim()
+    if (!slug || /^(?:index|home)$/i.test(slug)) return 'Home'
+    return slug.replace(/\b[a-z]/g, (letter) => letter.toUpperCase())
+  }
+  const tabs = pages ? (
+    <div role="tablist" aria-label="Pages" className="flex flex-wrap items-center gap-1">
+      {pages.map((item, index) => (
+        <button
+          key={item.name}
+          type="button"
+          role="tab"
+          aria-selected={index === pageIndex}
+          onClick={() => setPageIndex(index)}
+          className={cx(
+            'rounded-[7px] px-2 py-1 text-[11px] font-medium transition-colors',
+            index === pageIndex ? 'bg-surface text-fg shadow-sm' : 'text-muted hover:text-fg',
+          )}
+        >
+          {pageLabel(item.name)}
+        </button>
+      ))}
+    </div>
+  ) : null
   const download = () => {
-    const blob = new Blob([build.html], { type: 'text/html;charset=utf-8' })
+    const blob = new Blob([documentHtml], { type: 'text/html;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `${build.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'build'}.html`
+    const title = build.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'build'
+    const name = currentPage ? currentPage.name.replace(/\.html?$/i, '') : title
+    link.download = `${name || title}.html`
     link.click()
     URL.revokeObjectURL(url)
   }
+  // Codespaces authorises a forwarded port with its cookie. A sandboxed
+  // (opaque-origin) frame requests module scripts without credentials, so the
+  // game's assets are redirected to the port sign-in page and it stays on its
+  // loading screen. Give only the game document same-origin access there; the
+  // proxied site itself and every other live page stay opaque. The key makes
+  // the new sandbox apply when the bridge hands over to the game.
+  const liveGame =
+    typeof window !== 'undefined' &&
+    /\.app\.github\.dev$/i.test(window.location.hostname) &&
+    (() => {
+      try {
+        return new URL(liveUrl, window.location.origin).pathname.startsWith('/api/poki-game/')
+      } catch {
+        return false
+      }
+    })()
+  const liveSandbox = liveGame
+    ? 'allow-scripts allow-same-origin allow-popups allow-modals allow-downloads'
+    : 'allow-scripts allow-popups allow-modals allow-downloads'
   const preview = (className: string) =>
     live ? (
       <iframe
-        src={build.proxyUrl}
-        sandbox="allow-scripts allow-popups allow-modals allow-downloads"
+        key={liveGame ? 'live-game' : 'live-site'}
+        ref={liveFrame}
+        src={liveUrl}
+        sandbox={liveSandbox}
         title={`Live preview of ${sourceHost}`}
         className={className}
         referrerPolicy="no-referrer"
       />
     ) : (
       <iframe
-        key={scripts ? 'scripts-on' : 'scripts-off'}
+        key={`${scripts ? 'scripts-on' : 'scripts-off'}-${currentPage?.name ?? 'page'}`}
         sandbox={scripts ? 'allow-scripts' : ''}
-        srcDoc={repairDocument(build.html)}
+        srcDoc={repairDocument(documentHtml)}
         title={`Preview of ${build.title}`}
         className={className}
       />
@@ -406,6 +493,7 @@ function BuildNote({ build }: { build: BuildInfo }) {
         </button>
         {open && (
           <div className="border-t border-line p-2.5">
+            {tabs ? <div className="mb-2">{tabs}</div> : null}
             {preview('h-72 w-full rounded-[8px] border border-line bg-white')}
             <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
               {!live && (
@@ -457,7 +545,7 @@ function BuildNote({ build }: { build: BuildInfo }) {
             <p className="mt-2 text-[10.5px] leading-relaxed text-faint">
               {live
                 ? "This is a live page fetched through Quill's proxy, not a screenshot. Sign-in, payments and some cross-origin features may not work."
-                : 'The preview starts with scripts off so a slow page cannot freeze the chat. Turn scripts on for interactive pages; images may load from the web.'}
+                : `${pages ? `This build has ${pages.length} pages — switch with the tabs above the frame. ` : ''}The preview starts with scripts off so a slow page cannot freeze the chat. Turn scripts on for interactive pages; images load from the web.`}
             </p>
           </div>
         )}
@@ -510,6 +598,7 @@ function BuildNote({ build }: { build: BuildInfo }) {
                     <X className="size-4" />
                   </button>
                 </div>
+                {tabs ? <div className="border-b border-line px-3 py-2">{tabs}</div> : null}
                 <div className="min-h-0 flex-1 bg-white">{preview('h-full w-full border-0 bg-white')}</div>
               </div>
             </div>,
@@ -633,13 +722,22 @@ function AnalysisNote({ analysis, content, onRerun }: { analysis: AnalysisInfo; 
   )
 }
 
-function CanvasNote({ canvas }: { canvas: CanvasInfo }) {
+function CanvasNote({ canvas, messageId }: { canvas: CanvasInfo; messageId?: string }) {
   const [flipped, setFlipped] = useState<Record<number, boolean>>({})
   const [picked, setPicked] = useState<Record<number, number>>({})
+  const reduceMotion = useReducedMotion()
+  const navigate = useNavigate()
+  const toast = useToast()
+  const enroll = useEnrollReviewDeck()
   const cards = canvas.cards ?? []
   const questions = canvas.questions ?? []
+  const isQuiz = canvas.kind === 'quiz'
+  const flippedCount = cards.filter((_, index) => flipped[index]).length
   const answered = Object.keys(picked).length
   const correct = questions.filter((question, index) => picked[index] === question.answer).length
+  const total = isQuiz ? questions.length : cards.length
+  const completed = isQuiz ? answered : flippedCount
+  const progress = total ? Math.round((completed / total) * 100) : 0
   const download = () => {
     const lines = [`# ${canvas.title}`, '']
     for (const card of cards) lines.push(`- **${card.front}** — ${card.back}`)
@@ -656,34 +754,128 @@ function CanvasNote({ canvas }: { canvas: CanvasInfo }) {
     link.click()
     URL.revokeObjectURL(url)
   }
+  const startReview = () => {
+    if (!messageId || enroll.isPending) return
+    enroll.mutate(messageId, {
+      onSuccess: () => navigate(`/review?deck=${messageId}`),
+      onError: (cause) => toast(cause instanceof Error ? cause.message : 'Could not start Smart Review', 'danger'),
+    })
+  }
   return (
-    <div className="mt-2 overflow-hidden rounded-[12px] border border-line bg-surface-2/40">
-      <div className="flex items-center gap-2 px-3 py-2 text-[11.5px] font-medium text-muted">
-        <Layers className="size-3.5 shrink-0 text-accent" />
-        <span className="min-w-0 flex-1 truncate">Canvas · {canvas.title}</span>
-        <span className="hidden shrink-0 text-[11px] text-faint sm:inline">
-          {canvas.kind === 'quiz' ? `${questions.length} questions` : `${cards.length} cards`}
-        </span>
+    <div className="mt-2 overflow-hidden rounded-[16px] border border-line bg-surface shadow-[0_18px_44px_-34px_rgb(27_26_23/0.55)]">
+      <div
+        className="relative overflow-hidden border-b border-line px-4 pb-3 pt-3.5"
+        style={{ background: 'radial-gradient(circle at top left, rgb(194 87 27 / 0.11), transparent 58%)' }}
+      >
+        <div className="relative flex items-center gap-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-[11px] bg-accent-soft text-accent shadow-[inset_0_1px_0_rgb(255_255_255/0.7)]">
+            <Layers className="size-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-accent">
+                {isQuiz ? 'Canvas quiz' : 'Canvas deck'}
+              </span>
+              <span className="text-[10px] text-faint">
+                {total} {isQuiz ? 'questions' : 'cards'}
+              </span>
+            </div>
+            <h3 className="truncate text-[13.5px] font-semibold tracking-[-0.01em] text-fg">{canvas.title}</h3>
+          </div>
+          <span className="shrink-0 rounded-full border border-line bg-surface/80 px-2 py-1 text-[10px] font-medium tabular-nums text-muted">
+            {completed}/{total}
+          </span>
+        </div>
+        <div className="relative mt-3 h-1 overflow-hidden rounded-full bg-line/80">
+          <motion.span
+            initial={false}
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: reduceMotion ? 0 : 0.45, ease: [0.22, 1, 0.36, 1] }}
+            className="block h-full rounded-full bg-accent"
+          />
+        </div>
       </div>
-      <div className="border-t border-line p-3">
-        {canvas.kind === 'flashcards' ? (
-          <div className="grid gap-2 sm:grid-cols-2">
+      <div className="p-3.5 md:p-4">
+        {!isQuiz ? (
+          <div className="grid gap-2.5 sm:grid-cols-2">
             {cards.map((card, index) => {
               const open = Boolean(flipped[index])
               return (
-                <button
+                <motion.button
                   key={`${card.front}-${index}`}
                   type="button"
                   aria-pressed={open}
+                  aria-label={`Flashcard ${index + 1}: ${open ? 'answer' : 'question'} — ${open ? card.back : card.front}`}
+                  initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    duration: reduceMotion ? 0 : 0.32,
+                    delay: reduceMotion ? 0 : Math.min(index * 0.035, 0.32),
+                    ease: [0.22, 1, 0.36, 1],
+                  }}
+                  whileHover={reduceMotion ? undefined : { y: -2 }}
+                  whileTap={reduceMotion ? undefined : { scale: 0.985 }}
                   onClick={() => setFlipped((current) => ({ ...current, [index]: !current[index] }))}
-                  className={cx(
-                    'flex min-h-24 flex-col justify-between gap-2 rounded-[10px] border bg-surface px-3 py-2.5 text-left transition-colors',
-                    open ? 'border-line-strong' : 'border-line hover:border-line-strong',
-                  )}
+                  className="group relative min-h-[144px] w-full rounded-[14px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35"
+                  style={{ perspective: 900 }}
                 >
-                  <span className="text-[12.5px] font-medium leading-snug text-fg">{open ? card.back : card.front}</span>
-                  <span className="text-[10px] uppercase tracking-wide text-faint">{open ? 'Answer' : 'Tap to flip'}</span>
-                </button>
+                  <motion.span
+                    className="grid h-full w-full"
+                    style={{ transformStyle: 'preserve-3d' }}
+                    initial={false}
+                    animate={{ rotateY: open ? 180 : 0 }}
+                    transition={{ duration: reduceMotion ? 0 : 0.48, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <span
+                      style={{ backfaceVisibility: 'hidden' }}
+                      className="relative col-start-1 row-start-1 flex min-h-[144px] flex-col overflow-hidden rounded-[14px] border border-line bg-surface p-3.5 shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-colors group-hover:border-line-strong"
+                    >
+                      <span className="relative flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-1.5 text-[9.5px] font-semibold uppercase tracking-[0.12em] text-faint">
+                          <span className="grid size-5 place-items-center rounded-full bg-surface-2 text-[9px] font-semibold tabular-nums text-muted">
+                            {String(index + 1).padStart(2, '0')}
+                          </span>
+                          Question
+                        </span>
+                        <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-accent">
+                          Card
+                        </span>
+                      </span>
+                      <span className="relative mt-4 flex-1 break-words text-[13px] font-medium leading-snug text-fg">{card.front}</span>
+                      <span className="relative mt-3 flex items-center justify-between border-t border-line/70 pt-2 text-[9.5px] font-medium uppercase tracking-[0.1em] text-faint">
+                        Tap to reveal
+                        <span className="grid size-6 place-items-center rounded-full bg-surface-2 text-muted transition-colors group-hover:bg-accent-soft group-hover:text-accent">
+                          <RefreshCw className="size-3" />
+                        </span>
+                      </span>
+                      <span aria-hidden className="pointer-events-none absolute -right-8 -top-10 size-28 rounded-full bg-accent/10 blur-2xl" />
+                    </span>
+                    <span
+                      style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+                      className="relative col-start-1 row-start-1 flex min-h-[144px] flex-col overflow-hidden rounded-[14px] border border-fg/80 bg-fg p-3.5 text-white shadow-[0_12px_28px_-18px_rgb(27_26_23/0.8)]"
+                    >
+                      <span className="relative flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-1.5 text-[9.5px] font-semibold uppercase tracking-[0.12em] text-white/50">
+                          <span className="grid size-5 place-items-center rounded-full bg-white/10 text-[9px] font-semibold tabular-nums text-white/70">
+                            {String(index + 1).padStart(2, '0')}
+                          </span>
+                          Answer
+                        </span>
+                        <span className="rounded-full bg-accent px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-white">
+                          Back
+                        </span>
+                      </span>
+                      <span className="relative mt-4 flex-1 break-words text-[13px] font-medium leading-relaxed text-white">{card.back}</span>
+                      <span className="relative mt-3 flex items-center justify-between border-t border-white/10 pt-2 text-[9.5px] font-medium uppercase tracking-[0.1em] text-white/45">
+                        Tap to hide
+                        <span className="grid size-6 place-items-center rounded-full bg-white/10 text-white/70">
+                          <RefreshCw className="size-3" />
+                        </span>
+                      </span>
+                      <span aria-hidden className="pointer-events-none absolute -right-8 -bottom-10 size-28 rounded-full bg-accent/20 blur-2xl" />
+                    </span>
+                  </motion.span>
+                </motion.button>
               )
             })}
           </div>
@@ -731,19 +923,20 @@ function CanvasNote({ canvas }: { canvas: CanvasInfo }) {
             })}
           </ol>
         )}
-        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-2">
-          <span className="text-[10.5px] text-faint">
-            {canvas.kind === 'quiz'
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+          <span className="text-[10.5px] text-faint" aria-live="polite">
+            {isQuiz
               ? `${correct}/${questions.length} correct${answered < questions.length ? ` · ${questions.length - answered} to go` : ''}`
-              : `${Object.values(flipped).filter(Boolean).length}/${cards.length} flipped`}
+              : `${flippedCount}/${cards.length} flipped${cards.length > 0 && flippedCount === cards.length ? ' · deck complete' : ''}`}
           </span>
           <button
             type="button"
+            disabled={completed === 0}
             onClick={() => {
               setFlipped({})
               setPicked({})
             }}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-[8px] border border-line bg-surface px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:text-fg"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-[8px] border border-line bg-surface px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:text-fg disabled:pointer-events-none disabled:opacity-35"
           >
             <RefreshCw className="size-3" />
             Reset
@@ -756,6 +949,18 @@ function CanvasNote({ canvas }: { canvas: CanvasInfo }) {
             <Download className="size-3" />
             Download .md
           </button>
+          {messageId && !isQuiz && cards.length > 0 && (
+            <button
+              type="button"
+              disabled={enroll.isPending}
+              onClick={startReview}
+              title="Rate these cards and see them again when they are due"
+              className="inline-flex items-center gap-1.5 rounded-[8px] bg-fg px-2.5 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-[#2e2c27] disabled:opacity-50"
+            >
+              <Brain className="size-3" />
+              {enroll.isPending ? 'Starting…' : 'Review'}
+            </button>
+          )}
         </div>
         <p className="mt-2 text-[10.5px] leading-relaxed text-faint">
           {canvas.models.length ? `${canvas.models.join(' · ')} · ` : ''}
@@ -837,6 +1042,92 @@ function ProofNote({ proof }: { proof: ProofInfo }) {
   )
 }
 
+/**
+ * A compact receipt above the answer: what replied, what was checked, how many
+ * drafts or web sources were involved, and how long it took. Every line is a
+ * fact already recorded with the reply, not an estimate.
+ */
+function Receipt({
+  model,
+  elapsedMs,
+  sources,
+  team,
+  proof,
+  research,
+  analysis,
+}: {
+  model?: string
+  elapsedMs?: number
+  sources?: Source[]
+  team?: TeamInfo
+  proof?: ProofInfo
+  research?: ResearchInfo
+  analysis?: AnalysisInfo
+}) {
+  const parts: { label: string; tone?: string; title?: string }[] = []
+  if (model) parts.push({ label: model, title: `Answered by ${model}` })
+  if (sources?.length) {
+    parts.push({
+      label: `${sources.length} source${sources.length === 1 ? '' : 's'}`,
+      title: sources.map((source) => source.title).join('\n'),
+    })
+  }
+  if (proof) {
+    const passed = proof.checks.filter((check) => check.status === 'pass').length
+    const failed = proof.checks.filter((check) => check.status === 'fail').length
+    parts.push({
+      label:
+        proof.status === 'checking'
+          ? 'checks running'
+          : `${passed}/${proof.checks.length} check${proof.checks.length === 1 ? '' : 's'} passed`,
+      tone: failed ? 'text-danger' : proof.checks.length ? 'text-accent' : undefined,
+      title: proof.checks.map((check) => `${check.status}: ${check.label}`).join('\n'),
+    })
+    if (proof.attempts > 1) parts.push({ label: `${proof.attempts} attempts` })
+  }
+  if (research) {
+    const { supported, unsupported } = research.counts
+    parts.push({
+      label: `${supported}/${research.claims.length} claims supported`,
+      tone: unsupported ? 'text-warning' : 'text-accent',
+    })
+  }
+  if (analysis) {
+    parts.push({
+      label:
+        analysis.status === 'verified'
+          ? 'Python ran'
+          : analysis.status === 'failed'
+            ? 'Python failed'
+            : 'Python unverified',
+      tone: analysis.status === 'verified' ? 'text-accent' : analysis.status === 'failed' ? 'text-danger' : undefined,
+    })
+  }
+  if (team) {
+    if (team.drafts > 1) parts.push({ label: `${team.drafts} drafts` })
+    if (team.reviewed) parts.push({ label: team.repaired ? 'reviewed and repaired' : 'reviewed' })
+    if (team.verified) parts.push({ label: 'independently verified' })
+  }
+  if (elapsedMs && elapsedMs >= 1_000) parts.push({ label: elapsedLabel(elapsedMs), title: 'Time from your question to this reply' })
+  if (!parts.length) return null
+  return (
+    <p className="mb-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] leading-none text-faint">
+      {parts.map((part, index) => (
+        <span key={`${part.label}-${index}`} className="inline-flex items-center gap-1.5">
+          {index ? (
+            <span aria-hidden="true" className="text-line-strong">
+              ·
+            </span>
+          ) : null}
+          <span className={part.tone} title={part.title}>
+            {part.label}
+          </span>
+        </span>
+      ))}
+    </p>
+  )
+}
+
 export function AssistantMessage({
   content,
   reasoning,
@@ -860,6 +1151,7 @@ export function AssistantMessage({
   onRegenerate,
   error,
   onRetry,
+  elapsedMs,
 }: {
   content: string
   /** Reasoning the model exposed before its answer. */
@@ -899,6 +1191,8 @@ export function AssistantMessage({
   onRegenerate?: () => void
   error?: string | null
   onRetry?: () => void
+  /** Time from the question that prompted this reply, when known. */
+  elapsedMs?: number
 }) {
   const [copied, setCopied] = useState(false)
   const sourceKeys = new Set((sources ?? []).map((source) => normalizeUrl(source.url)))
@@ -920,17 +1214,16 @@ export function AssistantMessage({
   }
   const waiting = streaming && !content
   return (
-    <div className="group flex gap-3.5">
+    <div id={messageId ? `message-${messageId}` : undefined} className="group flex scroll-mt-4 gap-3.5">
       <Mark size={26} className="mt-0.5 rounded-[8px]" />
       <div className="min-w-0 flex-1 pt-0.5">
         {reasoning && <Thoughts text={reasoning} ms={reasoningMs} live={Boolean(waiting)} />}
+        {!waiting && (
+          <Receipt model={model} elapsedMs={elapsedMs} sources={sources} team={team} proof={proof} research={research} analysis={analysis} />
+        )}
         {waiting ? reasoning ? null : <Progress statusLog={statusLog} statusText={statusText} /> : <Markdown className={cx('prose-chat', streaming && 'streaming')}>{content}</Markdown>}
         {!research && <Sources sources={sources} unverified={unverified} />}
-        {!streaming && !error && (build ? <BuildNote build={build} /> : canvas ? <CanvasNote canvas={canvas} /> : analysis ? <AnalysisNote analysis={analysis} content={content} onRerun={onRerun} /> : research ? <ResearchNote research={research} sources={sources} content={content} /> : proof ? <ProofNote proof={proof} /> : team ? <TeamNote team={team} /> : model && (
-          <p className="mt-2 text-[11.5px] leading-none text-faint" title={`Answered by ${model}`}>
-            Answered by {model}
-          </p>
-        ))}
+        {!streaming && !error && (build ? <BuildNote build={build} /> : canvas ? <CanvasNote canvas={canvas} messageId={messageId} /> : analysis ? <AnalysisNote analysis={analysis} content={content} onRerun={onRerun} /> : research ? <ResearchNote research={research} sources={sources} content={content} /> : proof ? <ProofNote proof={proof} /> : team ? <TeamNote team={team} /> : null)}
         {error && (
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-danger">
             <span>{error}</span>

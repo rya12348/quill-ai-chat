@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { Conversation, FeedbackRating, Me, Message, ModelInfo, Project, ProviderHealth, SharedConversation, UserSettings } from '../../shared/types'
+import type { ArtifactSummary, Conversation, ConversationMemory, FeedbackRating, Me, Message, ModelInfo, Project, ProviderHealth, ReviewQueue, ReviewRating, ReviewRatingResult, ReviewSummary, SharedConversation, UserSettings } from '../../shared/types'
 import { noteOffline } from './offline'
 
 export class ApiError extends Error {
@@ -72,6 +72,95 @@ export function useProbeProviders() {
   })
 }
 export const useConversations = () => useQuery({ queryKey: ['conversations'], queryFn: () => api<{ items: Conversation[] }>('/conversations') })
+export const useArtifacts = () =>
+  useQuery({ queryKey: ['artifacts'], queryFn: () => api<{ items: ArtifactSummary[] }>('/artifacts'), staleTime: 0, refetchOnMount: 'always' })
+
+export const useReviewSummary = () =>
+  useQuery({ queryKey: ['review-summary'], queryFn: () => api<ReviewSummary>('/review/summary'), staleTime: 15_000, refetchOnWindowFocus: true })
+
+export const useReviewQueue = (deck?: string) =>
+  useQuery({
+    queryKey: ['review-queue', deck ?? 'all'],
+    queryFn: () => api<ReviewQueue>(`/review${deck ? `?deck=${encodeURIComponent(deck)}` : ''}`),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+  })
+
+export function useEnrollReviewDeck() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (messageId: string) =>
+      api<{ deckTitle: string; cards: number; summary: ReviewSummary }>(`/review/decks/${messageId}`, { method: 'POST' }),
+    onSuccess: (data) => {
+      client.setQueryData(['review-summary'], data.summary)
+      void client.invalidateQueries({ queryKey: ['review-queue'] })
+    },
+  })
+}
+
+export function useRateReview() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ messageId, cardIndex, rating }: { messageId: string; cardIndex: number; rating: ReviewRating }) =>
+      api<ReviewRatingResult>(`/review/${messageId}/${cardIndex}`, { method: 'POST', json: { rating } }),
+    onSuccess: (result) => client.setQueryData(['review-summary'], result.summary),
+  })
+}
+
+export function usePinArtifact() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
+      api<{ pinned: boolean }>(`/artifacts/${id}/pin`, { method: pinned ? 'POST' : 'DELETE' }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['artifacts'] }),
+  })
+}
+
+export function useDuplicateArtifact() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api<{ conversationId: string }>(`/artifacts/${id}/duplicate`, { method: 'POST' }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['conversations'] })
+      void client.invalidateQueries({ queryKey: ['artifacts'] })
+    },
+  })
+}
+
+/** Fetch the file the Worker composed and hand it to the browser's downloader. */
+export async function downloadArtifact(messageId: string): Promise<string> {
+  const response = await fetch(`/api/artifacts/${messageId}/download`, { credentials: 'same-origin' })
+  if (!response.ok) {
+    let message = 'Could not download this artifact'
+    try {
+      const body = (await response.json()) as { message?: unknown }
+      if (typeof body.message === 'string') message = body.message
+    } catch {
+      // Keep the generic message when the body is not JSON.
+    }
+    throw new Error(message)
+  }
+  const disposition = response.headers.get('content-disposition') ?? ''
+  const name = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? 'artifact'
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  link.click()
+  URL.revokeObjectURL(url)
+  return name
+}
+
+export function useUpdateProjectInstructions() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, instructions }: { id: string; instructions: string }) =>
+      api<{ project: unknown }>(`/projects/${id}/instructions`, { method: 'PATCH', json: { instructions } }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['projects'] }),
+  })
+}
 export const useProjects = () => useQuery({ queryKey: ['projects'], queryFn: () => api<{ items: Project[] }>('/projects'), staleTime: 30_000 })
 
 export function useCreateProject() {
@@ -126,6 +215,34 @@ export const useConversation = (id: string | undefined) =>
     // explicit offline state at once instead.
     retry: false,
   })
+
+export type MemoryState = { memory: ConversationMemory | null }
+
+/** The rolling memory for a chat, or null while the chat fits verbatim. */
+export const useConversationMemory = (id: string | undefined) =>
+  useQuery({
+    queryKey: ['memory', id],
+    queryFn: () => api<MemoryState>(`/conversations/${id}/memory`),
+    enabled: Boolean(id),
+    staleTime: 30_000,
+    retry: false,
+  })
+
+export function useEditConversationMemory(id: string | undefined) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (summary: string) => api<MemoryState>(`/conversations/${id}/memory`, { method: 'PATCH', json: { summary } }),
+    onSuccess: (state) => client.setQueryData(['memory', id], state),
+  })
+}
+
+export function useForgetConversationMemory(id: string | undefined) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () => api<MemoryState>(`/conversations/${id}/memory`, { method: 'DELETE' }),
+    onSuccess: (state) => client.setQueryData(['memory', id], state),
+  })
+}
 
 export function useRenameConversation() {
   const client = useQueryClient()
