@@ -5,6 +5,7 @@
 // are pointed back at the original site so they load from the real CDN.
 
 const MAX_PAGE_BYTES = 3_000_000
+const MAX_ASSET_BYTES = 8_000_000
 const MAX_REDIRECTS = 5
 const FETCH_TIMEOUT = 20_000
 const PROXY_TOKEN = /^[a-f0-9]{48}$/
@@ -180,6 +181,199 @@ export function resolveProxyTarget(storedUrl: string, requested?: string): strin
   return normalizeSiteUrl(requested)
 }
 
+/**
+ * Scripts, stylesheets and module chunks cannot be loaded from the original
+ * origin from a sandboxed document: modules and CSS use CORS, and an opaque
+ * origin has no credentials there. Serve those files through the same
+ * capability, with a path that preserves their directory so relative imports
+ * and CSS url() references keep working.
+ */
+export function assetProxyPath(proxyUrl: string, raw: string): string | undefined {
+  let candidate: URL
+  try {
+    candidate = new URL(raw)
+  } catch {
+    return undefined
+  }
+  if (candidate.protocol !== 'http:' && candidate.protocol !== 'https:') return undefined
+  const normalized = normalizeSiteUrl(candidate.href)
+  if (!normalized) return undefined
+  const url = new URL(normalized)
+  const base = proxyUrl.replace(/\/$/, '')
+  return `${base}/p/${url.protocol.slice(0, -1)}/${url.host}${url.pathname}${url.search ? `?q=${encodeURIComponent(url.search.slice(1))}` : ''}`
+}
+
+export type SiteAsset = {
+  body: ArrayBuffer
+  contentType: string
+}
+
+export async function fetchSiteAsset(target: string, abort?: AbortSignal): Promise<SiteAsset> {
+  let current = normalizeSiteUrl(target)
+  if (!current) throw new SiteError(400, 'That asset is not on a public website.')
+  const signal = abort ? AbortSignal.any([abort, AbortSignal.timeout(FETCH_TIMEOUT)]) : AbortSignal.timeout(FETCH_TIMEOUT)
+  try {
+    for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
+      const response = await fetch(current, {
+        redirect: 'manual',
+        signal,
+        headers: {
+          accept: '*/*',
+          'accept-language': 'en-US,en;q=0.9',
+          'user-agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        },
+      })
+      if (TRANSIENT_REDIRECTS.has(response.status)) {
+        const location = response.headers.get('location')
+        await response.body?.cancel()
+        if (!location) throw new SiteError(502, 'The asset sent an incomplete redirect.')
+        const next = normalizeSiteUrl(new URL(location, current).href)
+        if (!next) throw new SiteError(400, 'The asset redirected to a non-public address.')
+        current = next
+        continue
+      }
+      if (!response.ok) {
+        await response.body?.cancel()
+        throw new SiteError(502, `The asset returned ${response.status}.`)
+      }
+      const type = response.headers.get('content-type') ?? 'application/octet-stream'
+      const length = Number(response.headers.get('content-length') ?? '0')
+      if (length > MAX_ASSET_BYTES) throw new SiteError(413, 'That asset is too large to preview.')
+      const body = await response.arrayBuffer()
+      if (body.byteLength > MAX_ASSET_BYTES) throw new SiteError(413, 'That asset is too large to preview.')
+      return { body, contentType: type }
+    }
+    throw new SiteError(502, 'The asset redirected too many times.')
+  } catch (error) {
+    if (error instanceof SiteError) throw error
+    if (signal.aborted) throw new SiteError(504, 'The asset took too long to respond.')
+    throw new SiteError(502, 'The asset could not be reached.')
+  }
+}
+
+/**
+ * A site's own scripts load data from its API at runtime. From the preview
+ * those calls are cross-origin, so browsers block them unless the API allows
+ * CORS. Forward same-site requests through the capability instead, keeping the
+ * method, body and useful headers. Cookies, Origin and Referer are dropped so a
+ * preview host's session can never leak to a browsed site.
+ */
+export type SiteResponse = {
+  body: ArrayBuffer
+  status: number
+  contentType: string
+}
+
+const BLOCKED_REQUEST_HEADERS = new Set([
+  'accept-encoding',
+  'connection',
+  'content-length',
+  'cookie',
+  'host',
+  'keep-alive',
+  'origin',
+  'proxy-authorization',
+  'proxy-connection',
+  'referer',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+])
+
+export async function fetchSiteRequest(target: string, request: Request): Promise<SiteResponse> {
+  const next = normalizeSiteUrl(target)
+  if (!next) throw new SiteError(400, 'That address is not on a public website.')
+  const headers = new Headers()
+  request.headers.forEach((value, name) => {
+    const key = name.toLowerCase()
+    if (BLOCKED_REQUEST_HEADERS.has(key) || key.startsWith('sec-')) return
+    headers.set(key, value)
+  })
+  if (!headers.has('user-agent')) {
+    headers.set(
+      'user-agent',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+    )
+  }
+  const method = request.method.toUpperCase()
+  const body = method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer()
+  if (body && body.byteLength > MAX_ASSET_BYTES) throw new SiteError(413, 'That request is too large to preview.')
+  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(FETCH_TIMEOUT)])
+  let response: Response
+  try {
+    response = await fetch(next, { method, headers, body, redirect: 'follow', signal })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') throw new SiteError(504, 'That request took too long.')
+    throw new SiteError(502, 'That request could not be completed.')
+  }
+  const length = Number(response.headers.get('content-length') ?? '0')
+  if (length > MAX_ASSET_BYTES) {
+    await response.body?.cancel()
+    throw new SiteError(413, 'That response is too large to preview.')
+  }
+  const buffer = await response.arrayBuffer()
+  if (buffer.byteLength > MAX_ASSET_BYTES) throw new SiteError(413, 'That response is too large to preview.')
+  return {
+    body: buffer,
+    status: response.status,
+    contentType: response.headers.get('content-type') ?? 'application/octet-stream',
+  }
+}
+
+function encodeText(text: string): ArrayBuffer {
+  const bytes = new TextEncoder().encode(text)
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+}
+
+/**
+ * CSS root-relative url() references would otherwise resolve against Quill's
+ * origin. Vite's preload map stores asset paths as "assets/...", and its
+ * helper prepends a slash, so those entries are made proxy-relative too.
+ */
+export function rewriteAssetContent(
+  body: ArrayBuffer,
+  contentType: string,
+  targetUrl: string,
+  proxyUrl: string,
+): ArrayBuffer {
+  const type = contentType.toLowerCase()
+  const decoder = new TextDecoder()
+  let target: URL
+  try {
+    target = new URL(targetUrl)
+  } catch {
+    return body
+  }
+  if (type.includes('text/css')) {
+    const css = decoder.decode(body)
+    const rewriteUrl = (raw: string): string => {
+      try {
+        return assetProxyPath(proxyUrl, new URL(raw, target).href) ?? raw
+      } catch {
+        return raw
+      }
+    }
+    const rewritten = css
+      .replace(/url\(\s*(["']?)(\/(?!\/)[^)"']*)\1\s*\)/gi, (_match, quote: string, path: string) => `url(${quote}${rewriteUrl(path)}${quote})`)
+      .replace(/(@import\s+)(["'])(\/(?!\/)[^"']+)\2/gi, (_match, prefix: string, quote: string, path: string) => `${prefix}${quote}${rewriteUrl(path)}${quote}`)
+    return encodeText(rewritten)
+  }
+  if (type.includes('javascript') || type.includes('ecmascript')) {
+    const assetBase = `${proxyUrl.replace(/\/$/, '')}/p/${target.protocol.slice(0, -1)}/${target.host}/`
+    // Vite's preload helper turns its map entries ("assets/...") into URLs
+    // with `"/" + dep`. That resolves against the page's original <base>, so
+    // patch the helper to make the URL absolute on the proxy origin instead.
+    const js = decoder.decode(body).replace(
+      /(function\([A-Za-z_$][\w$]*\)\s*\{\s*return|\([A-Za-z_$][\w$]*\)\s*=>)\s*(["'])\/\2\s*\+\s*([A-Za-z_$][\w$]*)/g,
+      (_match, prefix: string, _quote: string, depArg: string) => `${prefix}${JSON.stringify(assetBase)} + ${depArg}`,
+    )
+    return encodeText(js)
+  }
+  return body
+}
+
 function hasEmbedIntent(question: string): boolean {
   return (
     /\b(?:show|display|embed|open|load|view|browse|preview|visit|run|launch|play|access|try|inside|include|includes|including|contain|contains|containing|live|sandbox)\b/i.test(
@@ -197,7 +391,7 @@ function hasEmbedIntent(question: string): boolean {
 export function findSiteTarget(question: string): string | undefined {
   const explicit = question.match(/https?:\/\/[^\s<>"'`]+/i)?.[0]
   const bare = question.match(
-    /(?:^|[\s(])((?:www\.)?(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:com|org|net|io|dev|app|ai|co|gg|games|tv|xyz|site|online|store|shop|me|to|fm|us|uk|ca|de|fr|jp|au|in|edu|gov)(?:\/[^\s<>"'`]*)?)/i,
+    /(?:^|[\s(])((?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{2,5})?(?:\/[^\s<>"'`]*)?)/i,
   )?.[1]
   const candidate = explicit ?? bare ?? (/\bpoki\b/i.test(question) ? 'https://poki.com/' : undefined)
   if (!candidate) return undefined
@@ -364,6 +558,31 @@ function rootRelative(markup: string, origin: string): string {
   return out
 }
 
+function proxyAssetTags(html: string, finalUrl: string, proxyUrl: string): string {
+  return html.replace(/<(script|link)\b[^>]*>/gi, (tag: string, tagName: string) => {
+    const name = tagName.toLowerCase()
+    if (name === 'link') {
+      const relMatch = /\brel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag)
+      const rel = (relMatch?.[1] ?? relMatch?.[2] ?? relMatch?.[3] ?? '').toLowerCase()
+      if (!/(?:^|\s)(?:stylesheet|modulepreload|preload)(?:\s|$)/.test(rel)) return tag
+    }
+    const attribute = name === 'script' ? 'src' : 'href'
+    const pattern = new RegExp(`(\\b${attribute}\\s*=\\s*)(["'])([^"']*)\\2`, 'i')
+    return tag.replace(pattern, (match: string, prefix: string, quote: string, raw: string) => {
+      if (!raw || /^(?:data:|blob:|javascript:|#)/i.test(raw)) return match
+      let target: URL
+      try {
+        target = new URL(raw, finalUrl)
+      } catch {
+        return match
+      }
+      if (target.protocol !== 'http:' && target.protocol !== 'https:') return match
+      const proxied = assetProxyPath(proxyUrl, target.href)
+      return proxied ? `${prefix}${quote}${escapeHtml(proxied)}${quote}` : match
+    })
+  })
+}
+
 function addBase(html: string, base: string): string {
   const tag = `<base href="${escapeHtml(base)}">`
   if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${tag}`)
@@ -390,6 +609,88 @@ try{history.replaceState(history.state,'',${JSON.stringify(historyUrl)})}catch(e
   if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${shim}`)
   if (/<html(?:\s[^>]*)?>/i.test(html)) return html.replace(/<html(?:\s[^>]*)?>/i, (root) => `${root}<head>${shim}</head>`)
   return `${shim}${html}`
+}
+
+export type FrameBridgeOptions = {
+  /** Absolute token-scoped URL that renders another public HTML page. */
+  proxyUrl: string
+  /** Optional wrapper resolver for sites whose games need their own referrer. */
+  gameStartUrl?: string
+  /** Hosts that need the wrapper resolver instead of the ordinary page proxy. */
+  gameHosts?: string[]
+  /** Codespaces needs the parent page to start a game navigation. */
+  parentNavigation?: boolean
+}
+
+/**
+ * Every embedded page is a public address that would otherwise load outside
+ * the sandbox. Keep iframes behind the same capability proxy, including frames
+ * a site creates after its scripts boot. A frame that needs a game wrapper
+ * resolver can use it, but ordinary sites do not need a site-specific branch.
+ */
+export function installFrameBridge(html: string, options: FrameBridgeOptions): string {
+  const script = `<script>(function(){
+var proxy=${JSON.stringify(options.proxyUrl)};
+var gameStart=${JSON.stringify(options.gameStartUrl ?? '')};
+var gameHosts=${JSON.stringify(options.gameHosts ?? [])};
+var parentNav=${options.parentNavigation ? 'true' : 'false'};
+var appOrigin=new URL(proxy).origin;
+var moved=false;
+function isProxy(url){return url.origin===appOrigin&&(url.pathname.indexOf('/api/web-proxy/')===0||url.pathname.indexOf('/api/poki-game/')===0)}
+function isGame(url){for(var i=0;i<gameHosts.length;i++)if(url.hostname===gameHosts[i])return true;return false}
+function play(url){
+  if(!parentNav||moved)return false;
+  moved=true;
+  try{if(window.parent!==window){window.parent.postMessage({type:'quill:preview-navigate',url:url},'*');return true}}catch(error){moved=false;return false}
+  window.location.href=url;return true;
+}
+function allowFrame(frame){
+  if(!frame.hasAttribute('allowfullscreen'))frame.setAttribute('allowfullscreen','');
+  var existingAllow=frame.getAttribute('allow')||'';
+  var allowParts=existingAllow.split(';').map(function(part){return part.trim()}).filter(Boolean);
+  var allowText=allowParts.join(';').toLowerCase();
+  if(allowText.indexOf('fullscreen')<0)allowParts.push('fullscreen');
+  if(allowParts.join('; ')!==existingAllow)frame.setAttribute('allow',allowParts.join('; '));
+  if(!frame.hasAttribute('sandbox'))return;
+  var needed=['allow-scripts','allow-forms','allow-pointer-lock','allow-popups','allow-modals','allow-downloads'];
+  var flags=(frame.getAttribute('sandbox')||'').split(/\\s+/).filter(function(flag){return flag&&flag!=='allow-same-origin'&&flag!=='allow-popups-to-escape-sandbox'});
+  for(var i=0;i<needed.length;i++)if(flags.indexOf(needed[i])<0)flags.push(needed[i]);
+  var nextSandbox=flags.join(' ');
+  if(frame.getAttribute('sandbox')!==nextSandbox)frame.setAttribute('sandbox',nextSandbox);
+}
+function fix(frame){
+  if(!frame||frame.tagName!=='IFRAME')return;
+  allowFrame(frame);
+  var raw=frame.getAttribute('src')||'';
+  if(!raw||/^(?:about:|data:|blob:|javascript:)/i.test(raw))return;
+  var url;try{url=new URL(raw,document.baseURI)}catch(error){return}
+  if(url.protocol!=='http:'&&url.protocol!=='https:')return;
+  if(isProxy(url))return;
+  var game=isGame(url);
+  var target=(game&&gameStart?gameStart:proxy)+'?url='+encodeURIComponent(url.href);
+  if(frame.getAttribute('src')===target)return;
+  allowFrame(frame);
+  if(game&&play(target))return;
+  frame.setAttribute('src',target);
+}
+function scan(root){
+  if(!root||root.nodeType!==1)return;
+  if(root.tagName==='IFRAME')fix(root);
+  if(root.querySelectorAll){var frames=root.querySelectorAll('iframe');for(var i=0;i<frames.length;i++)fix(frames[i]);}
+}
+try{new MutationObserver(function(records){
+  for(var i=0;i<records.length;i++){
+    var record=records[i];
+    if(record.type==='attributes')fix(record.target);
+    else for(var j=0;j<record.addedNodes.length;j++)scan(record.addedNodes[j]);
+  }
+}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src','sandbox']})}catch(error){}
+document.addEventListener('DOMContentLoaded',function(){scan(document.documentElement)},{once:true});
+scan(document.documentElement);
+})()</script>`
+  if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${script}`)
+  if (/<html(?:\s[^>]*)?>/i.test(html)) return html.replace(/<html(?:\s[^>]*)?>/i, (root) => `${root}<head>${script}</head>`)
+  return `${script}${html}`
 }
 
 /**
@@ -501,6 +802,76 @@ if(window.navigation&&window.navigation.addEventListener){
 }
 
 /**
+ * Fullscreen is unreliable inside the preview's layered sandbox: some browsers
+ * leave requestFullscreen() pending forever instead of rejecting it. Sites then
+ * keep their game behind a button that looks dead. Keep the native request, but
+ * if it does not settle, expand the target in the preview instead.
+ */
+function addFullscreenFallback(html: string): string {
+  const script = `<script>(function(){
+if(window.__quillFullscreenFallback)return;
+window.__quillFullscreenFallback=true;
+var active=null,saved='',savedOverflow=null,exitButton=null,timer=null;
+function removeExitButton(){if(exitButton&&exitButton.parentNode)exitButton.parentNode.removeChild(exitButton);exitButton=null}
+function clearFaux(){
+  if(!active)return;
+  active.style.cssText=saved;
+  if(savedOverflow!==null)document.documentElement.style.overflow=savedOverflow;
+  active=null;saved='';removeExitButton();
+}
+function cleanup(){if(timer){clearTimeout(timer);timer=null}clearFaux()}
+function exitFullscreen(){
+  if(document.fullscreenElement&&document.exitFullscreen)try{document.exitFullscreen().catch(function(){})}catch(error){}
+  cleanup();
+}
+function enter(element){
+  if(active===element)return;
+  clearFaux();
+  active=element;saved=element.style.cssText;
+  savedOverflow=document.documentElement.style.overflow;
+  document.documentElement.style.overflow='hidden';
+  element.style.cssText=saved+';position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483646!important;background:#000!important;';
+  exitButton=document.createElement('button');
+  exitButton.type='button';exitButton.textContent='Exit fullscreen';
+  exitButton.setAttribute('aria-label','Exit fullscreen');
+  exitButton.style.cssText='position:fixed;top:10px;right:10px;z-index:2147483647;padding:8px 10px;background:rgba(0,0,0,.72);color:#fff;border:1px solid rgba(255,255,255,.55);border-radius:6px;font:13px system-ui;cursor:pointer';
+  exitButton.addEventListener('click',exitFullscreen);
+  document.body.appendChild(exitButton);
+  if(!window.__quillFullscreenEscape){
+    window.__quillFullscreenEscape=true;
+    document.addEventListener('keydown',function(event){if(event.key==='Escape')exitFullscreen()},true);
+  }
+}
+var nativeRequest=Element.prototype.requestFullscreen||Element.prototype.webkitRequestFullscreen;
+if(nativeRequest){
+  Element.prototype.requestFullscreen=function(){
+    var element=this,result;
+    try{result=nativeRequest.call(element)}catch(error){enter(element);return Promise.resolve()}
+    if(!result||typeof result.then!=='function')return result;
+    return new Promise(function(resolve){
+      var settled=false;
+      function done(ok){if(settled)return;settled=true;if(timer){clearTimeout(timer);timer=null}if(!ok)enter(element);resolve()}
+      result.then(function(){done(true)},function(){done(false)});
+      timer=setTimeout(function(){if(!settled){if(document.fullscreenElement)done(true);else done(false)}},700);
+    });
+  };
+  if(Element.prototype.webkitRequestFullscreen)Element.prototype.webkitRequestFullscreen=function(){return Element.prototype.requestFullscreen.call(this)};
+}else{
+  Element.prototype.requestFullscreen=function(){enter(this);return Promise.resolve()};
+}
+var nativeExit=document.exitFullscreen;
+if(nativeExit)document.exitFullscreen=function(){
+  cleanup();
+  try{var result=nativeExit.apply(document,arguments);return result&&typeof result.catch==='function'?result.catch(function(){}):result}catch(error){return Promise.resolve()}
+};
+document.addEventListener('fullscreenchange',function(){if(document.fullscreenElement)clearFaux()});
+})()</script>`
+  if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${script}`)
+  if (/<html(?:\s[^>]*)?>/i.test(html)) return html.replace(/<html(?:\s[^>]*)?>/i, (root) => `${root}<head>${script}</head>`)
+  return `${script}${html}`
+}
+
+/**
  * A live site can spend several seconds booting its own scripts, and until it
  * paints the sandboxed frame is blank. Show a quiet placeholder from the first
  * paint and remove it once the page has loaded (or after a cap, so a stalled ad
@@ -532,7 +903,71 @@ function stripGoogleScripts(html: string, origin: string): string {
     .replace(/<script\b[^>]*\/>/gi, '')
 }
 
-export function renderProxyPage(html: string, finalUrl: string, proxyUrl: string, parentNavigation = false): string {
+/**
+ * A page's own scripts fetch its APIs at runtime. Those requests carry the
+ * site's real origin, so from the preview they are cross-origin and fail CORS.
+ * Route same-site calls through the network proxy; leave third-party requests
+ * untouched so their normal CORS rules still apply.
+ */
+function addNetworkShim(html: string, proxyUrl: string, siteOrigin: string): string {
+  const script = `<script>(function(){
+var proxy=${JSON.stringify(proxyUrl)};
+var siteOrigin=${JSON.stringify(siteOrigin)};
+var appOrigin=new URL(proxy).origin;
+function proxied(raw){
+  var url;try{url=new URL(raw,document.baseURI)}catch(error){return raw}
+  if(url.protocol!=='http:'&&url.protocol!=='https:')return raw;
+  if(url.pathname.indexOf('/api/web-proxy/')===0||url.pathname.indexOf('/api/poki-game/')===0)return raw;
+  if(url.origin!==siteOrigin&&url.origin!==appOrigin)return raw;
+  if(url.origin===appOrigin)url=new URL(url.pathname+url.search+url.hash,siteOrigin);
+  return proxy+'/net?url='+encodeURIComponent(url.href);
+}
+var nativeFetch=window.fetch;
+if(typeof nativeFetch==='function'){
+  window.fetch=function(input,init){
+    try{
+      if(typeof input==='string'||input instanceof URL)return nativeFetch.call(this,proxied(String(input)),init);
+      if(input&&typeof input.url==='string'){
+        var next=proxied(input.url);
+        if(next!==input.url)return nativeFetch.call(this,new Request(next,input),init);
+      }
+    }catch(error){}
+    return nativeFetch.apply(this,arguments);
+  };
+}
+try{
+  var nativeOpen=XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open=function(method,url){
+    var args=Array.prototype.slice.call(arguments);
+    args[1]=proxied(url);
+    return nativeOpen.apply(this,args);
+  };
+}catch(error){}
+try{
+  var nativeBeacon=navigator.sendBeacon;
+  if(typeof nativeBeacon==='function')navigator.sendBeacon=function(url,data){return nativeBeacon.call(navigator,proxied(url),data)};
+}catch(error){}
+})()</script>`
+  if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${script}`)
+  if (/<html(?:\s[^>]*)?>/i.test(html)) return html.replace(/<html(?:\s[^>]*)?>/i, (root) => `${root}<head>${script}</head>`)
+  return `${script}${html}`
+}
+
+/** Keep the site's path on the proxy origin without shadowing native storage. */
+function addHistoryShim(html: string, historyUrl: string): string {
+  const shim = `<script>try{history.replaceState(history.state,'',${JSON.stringify(historyUrl)})}catch(error){}</script>`
+  if (/<head(?:s[^>]*)?>/i.test(html)) return html.replace(/<head(?:s[^>]*)?>/i, (head) => `${head}${shim}`)
+  if (/<html(?:s[^>]*)?>/i.test(html)) return html.replace(/<html(?:s[^>]*)?>/i, (root) => `${root}<head>${shim}</head>`)
+  return `${shim}${html}`
+}
+
+export function renderProxyPage(
+  html: string,
+  finalUrl: string,
+  proxyUrl: string,
+  parentNavigation = false,
+  nativeStorage = false,
+): string {
   const target = new URL(finalUrl)
   const origin = target.origin
   const base = new URL('.', finalUrl).href
@@ -543,12 +978,19 @@ export function renderProxyPage(html: string, finalUrl: string, proxyUrl: string
   const historyUrl = new URL(`${target.pathname}${target.search}`, app.origin).href
   const cleaned = rootRelative(
     html
-      .replace(/<meta\b[^>]*http-equiv\s*=\s*["']?\s*(?:content-security-policy|refresh)\s*["']?[^>]*>/gi, '')
+      .replace(/<meta\b[^>]*http-equivs*=s*["']?s*(?:content-security-policy|refresh)s*["']?[^>]*>/gi, '')
       .replace(/<base\b[^>]*>/gi, ''),
     origin,
   )
+  const withAssets = proxyAssetTags(stripGoogleScripts(cleaned, origin), finalUrl, app.href)
+  const based = addBase(withAssets, base)
+  const withFullscreen = addFullscreenFallback(based)
+  // The isolated preview origin has real storage, cookies and same-origin
+  // frames. Keep them native instead of shadowing them with memory shims.
+  const withStorage = nativeStorage ? addHistoryShim(withFullscreen, historyUrl) : addSandboxShims(withFullscreen, historyUrl)
+  const withNetwork = addNetworkShim(withStorage, proxyUrl, origin)
   return addLoadingState(
-    addNavigation(addSandboxShims(addBase(stripGoogleScripts(cleaned, origin), base), historyUrl), origin, app.href, parentNavigation),
+    addNavigation(withNetwork, origin, app.href, parentNavigation),
     target.hostname.replace(/^www\./, ''),
   )
 }

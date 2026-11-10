@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { installPokiGameBridge, isPokiGameWrapperUrl } from '../src/worker/poki-game'
-import { findSiteTarget, googleSearchQuery, parseGoogleLuckyRedirect, renderProxyPage, renderSearchResults, resolveProxyTarget, searchQueryFor } from '../src/worker/site-proxy'
+import { assetProxyPath, findSiteTarget, googleSearchQuery, installFrameBridge, parseGoogleLuckyRedirect, renderProxyPage, renderSearchResults, resolveProxyTarget, rewriteAssetContent, searchQueryFor } from '../src/worker/site-proxy'
 
 const TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef'
 const ORIGIN = 'https://quill-5180.app.github.dev'
@@ -55,6 +55,61 @@ test('a token can browse to another public site but never a private host', () =>
 
 test('show google.com is detected as a live site', () => {
   assert.equal(findSiteTarget('show google.com'), 'https://google.com/')
+})
+
+test('runtime same-site requests go through the network proxy', () => {
+  const html = renderProxyPage(PAGE, 'https://freezenova.com/game', PROXY_URL)
+  assert.match(html, /\/net\?url=/)
+  assert.match(html, /XMLHttpRequest\.prototype\.open/)
+  assert.match(html, /navigator\.sendBeacon/)
+})
+
+test('an isolated preview origin keeps native storage and cookies', () => {
+  const html = renderProxyPage(PAGE, 'https://poki.com/', PROXY_URL, false, true)
+  assert.doesNotMatch(html, /Object\.defineProperty\(window,'localStorage'/)
+  assert.match(html, /history\.replaceState/)
+})
+
+test('the opaque sandbox keeps memory storage shims', () => {
+  const html = renderProxyPage(PAGE, 'https://poki.com/', PROXY_URL)
+  assert.match(html, /Object\.defineProperty\(window,'localStorage'/)
+})
+
+test('live proxy serves module scripts and styles through the asset proxy', () => {
+  const html = renderProxyPage(
+    '<script type="module" crossorigin src="/assets/index.js"></script><link rel="stylesheet" href="/assets/site.css"><a href="/game">Game</a>',
+    'https://freezenova.com/',
+    PROXY_URL,
+  )
+  assert.ok(html.includes(`${PROXY_URL}/p/https/freezenova.com/assets/index.js`))
+  assert.ok(html.includes(`${PROXY_URL}/p/https/freezenova.com/assets/site.css`))
+  assert.ok(html.includes('href="https://freezenova.com/game"'))
+})
+
+test('asset proxy paths preserve the source directory and query', () => {
+  assert.equal(
+    assetProxyPath(PROXY_URL, 'https://freezenova.com/assets/app.js?v=1'),
+    `${PROXY_URL}/p/https/freezenova.com/assets/app.js?q=v%3D1`,
+  )
+})
+
+test('asset content rewrites root CSS and Vite preload paths', () => {
+  const css = new TextEncoder().encode('body{background:url(/imgs/emeralds.svg)}')
+  const rewrittenCss = new TextDecoder().decode(
+    rewriteAssetContent(css.buffer as ArrayBuffer, 'text/css', 'https://freezenova.com/assets/site.css', PROXY_URL),
+  )
+  assert.ok(rewrittenCss.includes(`${PROXY_URL}/p/https/freezenova.com/imgs/emeralds.svg`))
+
+  const js = new TextEncoder().encode('const deps=["assets/page.js"];Vb=function(a){return"/"+a}')
+  const rewrittenJs = new TextDecoder().decode(
+    rewriteAssetContent(js.buffer as ArrayBuffer, 'text/javascript', 'https://freezenova.com/assets/index.js', PROXY_URL),
+  )
+  assert.ok(rewrittenJs.includes(`function(a){return"${PROXY_URL}/p/https/freezenova.com/" + a}`))
+})
+
+test('any public domain is detected as a live site, not just a fixed list', () => {
+  assert.equal(findSiteTarget('open neal.fun'), 'https://neal.fun/')
+  assert.equal(findSiteTarget('show example.games/play'), 'https://example.games/play')
 })
 
 test('Google searches stay inside the live preview', () => {
@@ -128,7 +183,47 @@ test('Poki wrapper URLs accept current and legacy shapes', () => {
     true,
   )
   assert.equal(isPokiGameWrapperUrl('https://games.poki.com/123/5dd312fa-015f-11ea-ad56-9cb6d0d995f7'), true)
+  assert.equal(isPokiGameWrapperUrl('https://games.poki.com/458768/2048'), true)
   assert.equal(isPokiGameWrapperUrl('https://evil.example/5dd312fa-015f-11ea-ad56-9cb6d0d995f7'), false)
+})
+
+test('the frame bridge proxies ordinary iframes and reserves the game wrapper for game hosts', () => {
+  const html = installFrameBridge(
+    '<!doctype html><html><head></head><body><iframe src="https://example.com/embed"></iframe></body></html>',
+    {
+      proxyUrl: PROXY_URL,
+      gameStartUrl: `${ORIGIN}/api/poki-game/start/${TOKEN}`,
+      gameHosts: ['games.poki.com'],
+    },
+  )
+  assert.match(html, /querySelectorAll\('iframe'\)/)
+  assert.match(html, /indexOf\('\/api\/web-proxy\/'\)/)
+  assert.match(html, /gameHosts/)
+  assert.match(html, /poki-game\/start/)
+  assert.match(html, /frame\.setAttribute\('src',target\)/)
+  assert.doesNotMatch(html, /closest\('#game-player'\)/)
+})
+
+test('the frame bridge lets site frames use fullscreen and pointer lock', () => {
+  const html = installFrameBridge('<iframe src="about:blank"></iframe>', { proxyUrl: PROXY_URL })
+  assert.match(html, /frame\.setAttribute\('allowfullscreen',''\)/)
+  assert.match(html, /fullscreen/)
+  assert.match(html, /pointer-lock/)
+  assert.match(html, /allowFrame\(frame\);\s*var raw=/)
+  assert.match(html, /if\(frame\.getAttribute\('sandbox'\)!==nextSandbox\)frame\.setAttribute\('sandbox',nextSandbox\)/)
+})
+
+test('a proxied page has an in-preview fallback when fullscreen stalls', () => {
+  const html = renderProxyPage(PAGE, 'https://poki.com/', PROXY_URL)
+  assert.match(html, /__quillFullscreenFallback/)
+  assert.match(html, /Exit fullscreen/)
+  assert.match(html, /Element\.prototype\.requestFullscreen/)
+})
+
+test('the frame bridge delegates a game navigation to the parent in Codespaces', () => {
+  const html = installFrameBridge(PAGE, { proxyUrl: PROXY_URL, parentNavigation: true })
+  assert.match(html, /var parentNav=true;/)
+  assert.match(html, /quill:preview-navigate/)
 })
 
 test('Poki game bridge hands off to the parent only in Codespaces', () => {

@@ -340,6 +340,39 @@ function ResearchNote({ research, sources, content }: { research: ResearchInfo; 
   )
 }
 
+/**
+ * On loopback the dev server also answers on a second `.localhost` hostname.
+ * Point the live preview there so a site that needs a real origin for its own
+ * about:blank frames still cannot touch Quill's origin or its session. Deployed
+ * origins keep the opaque sandbox because they have no second hostname.
+ */
+const LIVE_PREVIEW_HOST = 'quill-preview.localhost'
+
+function isolatedLiveUrl(url: string): string {
+  if (typeof window === 'undefined') return url
+  const host = window.location.hostname
+  if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') return url
+  try {
+    const next = new URL(url, window.location.origin)
+    if (next.protocol !== 'http:' && next.protocol !== 'https:') return url
+    next.protocol = window.location.protocol
+    next.hostname = LIVE_PREVIEW_HOST
+    next.port = window.location.port
+    return next.href
+  } catch {
+    return url
+  }
+}
+
+function isIsolatedLiveUrl(url: string): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return new URL(url, window.location.origin).hostname === LIVE_PREVIEW_HOST
+  } catch {
+    return false
+  }
+}
+
 function BuildNote({ build }: { build: BuildInfo }) {
   const [open, setOpen] = useState(true)
   const [expanded, setExpanded] = useState(false)
@@ -360,7 +393,7 @@ function BuildNote({ build }: { build: BuildInfo }) {
   const documentHtml = currentPage?.html ?? build.html
   const live = build.kind === 'embed' && Boolean(build.proxyUrl)
   const liveFrame = useRef<HTMLIFrameElement>(null)
-  const [liveUrl, setLiveUrl] = useState(build.proxyUrl ?? '')
+  const [liveUrl, setLiveUrl] = useState(() => isolatedLiveUrl(build.proxyUrl ?? ''))
   const sourceHost = (() => {
     try {
       return new URL(build.sourceUrl ?? '').hostname.replace(/^www\./, '')
@@ -369,7 +402,7 @@ function BuildNote({ build }: { build: BuildInfo }) {
     }
   })()
   useEffect(() => {
-    setLiveUrl(build.proxyUrl ?? '')
+    setLiveUrl(isolatedLiveUrl(build.proxyUrl ?? ''))
   }, [build.proxyUrl])
   // A sandboxed page cannot carry a Codespaces forwarded-port session into a
   // navigation. The proxied page asks us to move the frame instead, while it
@@ -390,7 +423,7 @@ function BuildNote({ build }: { build: BuildInfo }) {
       }
       if (next.origin !== window.location.origin) return
       if (!next.pathname.startsWith('/api/web-proxy/') && !next.pathname.startsWith('/api/poki-game/')) return
-      setLiveUrl(next.href)
+      setLiveUrl(isolatedLiveUrl(next.href))
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
@@ -459,9 +492,10 @@ function BuildNote({ build }: { build: BuildInfo }) {
         return false
       }
     })()
-  const liveSandbox = liveGame
-    ? 'allow-scripts allow-same-origin allow-popups allow-modals allow-downloads'
-    : 'allow-scripts allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox'
+  const liveSandbox =
+    liveGame || isIsolatedLiveUrl(liveUrl)
+      ? 'allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-popups allow-modals allow-downloads'
+      : 'allow-scripts allow-forms allow-pointer-lock allow-popups allow-modals allow-downloads'
   const preview = (className: string) =>
     live ? (
       <iframe
@@ -469,6 +503,8 @@ function BuildNote({ build }: { build: BuildInfo }) {
         ref={liveFrame}
         src={liveUrl}
         sandbox={liveSandbox}
+        allow={live ? 'fullscreen' : undefined}
+        allowFullScreen={live}
         title={`Live preview of ${sourceHost}`}
         className={className}
         referrerPolicy="no-referrer"

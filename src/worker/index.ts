@@ -4,8 +4,8 @@ import { aiConfigured } from './ai'
 import { appOrigin, authMode, getAuth, isCodespacesRequest, requireUser } from './auth'
 import { requireDb } from './db'
 import type { AppContext, Env } from './env'
-import { installPokiGameBridge, isPokiGameId, isPokiGameWrapperUrl, isPokiPage, pokiGameStartUrl, proxyPokiGameAsset } from './poki-game'
-import { escapeHtml, fetchSitePage, googleSearchQuery, googleTopResult, isWebProxyToken, normalizeSiteUrl, renderProxyPage, renderSearchResults, resolveProxyTarget, SiteError, webProxyPath } from './site-proxy'
+import { isPokiGameId, isPokiGameWrapperUrl, isSafeGameSegment, pokiGameStartUrl, proxyPokiGameAsset } from './poki-game'
+import { escapeHtml, fetchSiteAsset, fetchSitePage, fetchSiteRequest, googleSearchQuery, googleTopResult, installFrameBridge, isWebProxyToken, normalizeSiteUrl, renderProxyPage, renderSearchResults, resolveProxyTarget, rewriteAssetContent, SiteError, webProxyPath } from './site-proxy'
 import { account } from './routes/account'
 import { analysis } from './routes/analysis'
 import { artifacts } from './routes/artifacts'
@@ -22,11 +22,30 @@ import { shares } from './routes/shares'
 
 const app = new Hono<AppContext>()
 
+// The loopback preview hostname exists only to isolate browsed sites from the
+// app origin. It must not serve Quill itself: development auth does not require
+// a cookie, so exposing app APIs there would defeat the isolation.
+app.use('*', async (c, next) => {
+  if (!isIsolatedPreviewRequest(c.req.raw)) return next()
+  const path = new URL(c.req.url).pathname
+  if (path.startsWith('/api/web-proxy/') || path.startsWith('/api/poki-game/')) return next()
+  return c.notFound()
+})
+
 app.get('/api/auth/status', (c) => {
   c.header('Cache-Control', 'private, no-store')
   return c.json({ mode: authMode(c.env, c.req.raw), database: Boolean(c.env.DB), ai: aiConfigured(c.env) })
 })
 app.get('/api/health', (c) => c.json({ ok: true }))
+
+const ASSET_HEADERS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS',
+  'access-control-allow-headers': '*, authorization, content-type, accept, x-requested-with, x-api-key, range',
+  'cross-origin-resource-policy': 'cross-origin',
+  'cache-control': 'private, max-age=300',
+  'x-content-type-options': 'nosniff',
+}
 
 const PROXY_HEADERS = {
   'content-type': 'text/html; charset=utf-8',
@@ -34,17 +53,139 @@ const PROXY_HEADERS = {
   'content-security-policy':
     // No frame-ancestors: the unguessable token is the capability, and a
     // sandboxed (opaque-origin) document cannot match 'self' reliably.
-    "sandbox allow-scripts allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox; default-src * data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' data: blob:; style-src * 'unsafe-inline'; img-src * data: blob:; font-src * data:; connect-src *; media-src * data: blob:; frame-src *; worker-src * blob:; object-src 'none'; base-uri *; form-action https://*.google.com https://google.com",
+    "sandbox allow-scripts allow-forms allow-pointer-lock allow-popups allow-modals allow-downloads; default-src * data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' data: blob:; style-src * 'unsafe-inline'; img-src * data: blob:; font-src * data:; connect-src *; media-src * data: blob:; frame-src *; worker-src * blob:; object-src 'none'; base-uri *; form-action https://*.google.com https://google.com",
   'referrer-policy': 'no-referrer',
   'x-content-type-options': 'nosniff',
   'x-robots-tag': 'noindex, nofollow',
 }
 
 /**
+ * Loopback development serves the same app on a second hostname so the live
+ * preview is a different origin from Quill (and from its session). Only that
+ * hostname may keep a real origin inside the sandbox: sites such as FreezeNova
+ * write their game into an about:blank frame, which needs same-origin access,
+ * and remote code there then still cannot reach the app origin.
+ */
+const ISOLATED_PREVIEW_HOST = 'quill-preview.localhost'
+
+function isIsolatedPreviewRequest(request: Request): boolean {
+  try {
+    return new URL(request.url).hostname === ISOLATED_PREVIEW_HOST
+  } catch {
+    return false
+  }
+}
+
+function proxyPageHeaders(request: Request): Record<string, string> {
+  if (!isIsolatedPreviewRequest(request)) return PROXY_HEADERS
+  // The frame keeps its own sandbox. A CSP sandbox on top of it makes Chrome
+  // leave requestFullscreen() pending forever, so the game's fullscreen button
+  // never completes. The isolated host is still cross-origin from Quill and the
+  // iframe sandbox still blocks top navigation, popup escape and native storage
+  // access outside the preview.
+  return {
+    ...PROXY_HEADERS,
+    'content-security-policy': PROXY_HEADERS['content-security-policy'].replace(
+      /^sandbox [^;]+; /,
+      '',
+    ),
+  }
+}
+
+/** Keep every generated frame URL on the isolated host the browser visited. */
+function proxyOriginFor(env: Env, request: Request): string {
+  return isIsolatedPreviewRequest(request) ? new URL(request.url).origin : appOrigin(env, request)
+}
+
+app.options('/api/web-proxy/:token/p/*', (c) => c.body(null, 204, ASSET_HEADERS))
+app.options('/api/web-proxy/:token/net', (c) => c.body(null, 204, ASSET_HEADERS))
+
+/**
+ * Runtime network route for proxied pages. Same-site fetch/XHR calls cannot
+ * reach the site directly from the preview, so the injected page shim sends
+ * them here. The token is the capability; private hosts are refused and the
+ * preview host's cookies are never forwarded.
+ */
+app.all('/api/web-proxy/:token/net', requireDb, async (c) => {
+  const token = c.req.param('token')
+  if (!isWebProxyToken(token)) return c.body('Live preview not found.', 404, { 'content-type': 'text/plain; charset=utf-8' })
+  const row = await c.get('db').prepare(`SELECT token FROM build_embeds WHERE token = ?`).bind(token).first<{ token: string }>()
+  if (!row) return c.body('Live preview not found.', 404, { 'content-type': 'text/plain; charset=utf-8' })
+  const target = normalizeSiteUrl(c.req.query('url') ?? '')
+  if (!target) return c.body('That address is not on a public website.', 400, { 'content-type': 'text/plain; charset=utf-8' })
+  try {
+    const result = await fetchSiteRequest(target, c.req.raw)
+    const noBody = c.req.method === 'HEAD' || result.status === 204 || result.status === 304
+    return new Response(noBody ? null : result.body, {
+      status: result.status,
+      headers: {
+        ...ASSET_HEADERS,
+        'content-type': result.contentType,
+        'cache-control': 'private, no-store',
+      },
+    })
+  } catch (error) {
+    if (!(error instanceof SiteError)) console.error(error)
+    const failure = error instanceof SiteError ? error : new SiteError(502, 'That request could not be completed.')
+    return new Response(failure.message, {
+      status: failure.status,
+      headers: { 'content-type': 'text/plain; charset=utf-8', ...ASSET_HEADERS },
+    })
+  }
+})
+
+/**
+ * A path-preserving asset proxy for live pages. A module's relative imports
+ * and a stylesheet's relative url() lookups stay under this path, while root
+ * references are rewritten by the renderer. The response is cross-origin so a
+ * sandboxed (opaque-origin) document can load its own scripts and styles.
+ */
+app.get('/api/web-proxy/:token/p/*', requireDb, async (c) => {
+  const token = c.req.param('token')
+  if (!isWebProxyToken(token)) return c.body('Live preview not found.', 404, { 'content-type': 'text/plain; charset=utf-8' })
+  const requestUrl = new URL(c.req.url)
+  const marker = `/api/web-proxy/${token}/p/`
+  if (!requestUrl.pathname.startsWith(marker)) return c.body('That asset is not available.', 400, { 'content-type': 'text/plain; charset=utf-8' })
+  let raw: string
+  try {
+    raw = decodeURIComponent(requestUrl.pathname.slice(marker.length))
+  } catch {
+    return c.body('That asset address is invalid.', 400, { 'content-type': 'text/plain; charset=utf-8' })
+  }
+  const firstSlash = raw.indexOf('/')
+  if (firstSlash <= 0) return c.body('That asset address is invalid.', 400, { 'content-type': 'text/plain; charset=utf-8' })
+  const scheme = raw.slice(0, firstSlash)
+  const rest = raw.slice(firstSlash + 1)
+  const hostEnd = rest.indexOf('/')
+  const host = hostEnd === -1 ? rest : rest.slice(0, hostEnd)
+  const assetPath = hostEnd === -1 ? '/' : rest.slice(hostEnd)
+  if ((scheme !== 'http' && scheme !== 'https') || !host) return c.body('That asset address is invalid.', 400, { 'content-type': 'text/plain; charset=utf-8' })
+  const assetQuery = requestUrl.searchParams.get('q')
+  const target = normalizeSiteUrl(`${scheme}://${host}${assetPath}${assetQuery ? `?${assetQuery}` : ''}`)
+  if (!target) return c.body('That asset is not on a public website.', 400, { 'content-type': 'text/plain; charset=utf-8' })
+  const proxyOrigin = proxyOriginFor(c.env, c.req.raw)
+  const proxyUrl = new URL(webProxyPath(token), proxyOrigin).href
+  try {
+    const asset = await fetchSiteAsset(target, c.req.raw.signal)
+    return c.body(rewriteAssetContent(asset.body, asset.contentType, target, proxyUrl), 200, {
+      ...ASSET_HEADERS,
+      'content-type': asset.contentType,
+    })
+  } catch (error) {
+    const failure = error instanceof SiteError ? error : new SiteError(502, 'The asset could not be loaded.')
+    if (!(error instanceof SiteError)) console.error(error)
+    return c.body(failure.message, failure.status === 413 ? 413 : failure.status === 504 ? 504 : 502, {
+      'content-type': 'text/plain; charset=utf-8',
+      ...ASSET_HEADERS,
+    })
+  }
+})
+
+/**
  * A token-scoped live-site proxy. The token is the capability: it lets a
- * sandboxed preview load a saved site, follow its public links and submit its
- * GET forms, all without sending the signed-in app's cookies. Private hosts
- * and non-HTML responses are refused.
+ * sandboxed preview load a saved site, follow its public links, load its
+ * embedded frames and submit its GET forms, all without sending the signed-in
+ * app's cookies. Private hosts and non-HTML responses are refused.
  */
 app.get('/api/web-proxy/:token', requireDb, async (c) => {
   const token = c.req.param('token')
@@ -59,7 +200,7 @@ app.get('/api/web-proxy/:token', requireDb, async (c) => {
   // preview. normalizeSiteUrl keeps private hosts and non-web schemes out.
   const target = resolveProxyTarget(storedUrl, c.req.query('url'))
   if (!target) return c.body('That page is not available.', 400, { 'content-type': 'text/plain; charset=utf-8' })
-  const proxyOrigin = appOrigin(c.env, c.req.raw)
+  const proxyOrigin = proxyOriginFor(c.env, c.req.raw)
   const proxyUrl = new URL(webProxyPath(token), proxyOrigin).href
   // Codespaces requires its own authorisation for navigations started in a
   // sandboxed frame. Let Quill's parent page perform them instead.
@@ -77,14 +218,20 @@ app.get('/api/web-proxy/:token', requireDb, async (c) => {
             },
           ]
         : []
-      return c.body(renderProxyPage(renderSearchResults(query, target, results), target, proxyUrl, parentNavigation), 200, PROXY_HEADERS)
+      return c.body(renderProxyPage(renderSearchResults(query, target, results), target, proxyUrl, parentNavigation, isIsolatedPreviewRequest(c.req.raw)), 200, proxyPageHeaders(c.req.raw))
     }
     const page = await fetchSitePage(target, c.req.raw.signal)
-    let html = page.html
-    if (isPokiPage(page.finalUrl)) {
-      html = installPokiGameBridge(html, token, proxyOrigin, parentNavigation)
-    }
-    return c.body(renderProxyPage(html, page.finalUrl, proxyUrl, parentNavigation), 200, PROXY_HEADERS)
+    // Every page gets the frame bridge, not only Poki. Any iframe a site
+    // creates is moved behind the same capability proxy, so a game, map,
+    // video or docs frame cannot escape into a new browser tab. The wrapper
+    // resolver is only used for hosts whose game assets reject our referrer.
+    const html = installFrameBridge(page.html, {
+      proxyUrl,
+      gameStartUrl: new URL(`/api/poki-game/start/${token}`, proxyOrigin).href,
+      gameHosts: ['games.poki.com'],
+      parentNavigation,
+    })
+    return c.body(renderProxyPage(html, page.finalUrl, proxyUrl, parentNavigation, isIsolatedPreviewRequest(c.req.raw)), 200, proxyPageHeaders(c.req.raw))
   } catch (error) {
     if (!(error instanceof SiteError)) console.error(error)
     const failure = error instanceof SiteError ? error : new SiteError(502, 'The site could not be loaded.')
@@ -109,7 +256,7 @@ app.get('/api/poki-game/start/:token', requireDb, async (c) => {
   }
   const row = await c.get('db').prepare(`SELECT token FROM build_embeds WHERE token = ?`).bind(token).first<{ token: string }>()
   if (!row) return c.body('Game preview not found.', 404, { 'content-type': 'text/plain; charset=utf-8' })
-  const start = await pokiGameStartUrl(wrapperUrl, token, appOrigin(c.env, c.req.raw), c.req.raw.signal)
+  const start = await pokiGameStartUrl(wrapperUrl, token, proxyOriginFor(c.env, c.req.raw), c.req.raw.signal)
   if (!start) return c.body('Game unavailable.', 502, { 'content-type': 'text/plain; charset=utf-8' })
   c.header('cache-control', 'private, no-store')
   return c.redirect(start, 302)
@@ -120,7 +267,7 @@ app.get('/api/poki-game/:token/:gameId/:version/:path{.*}', requireDb, async (c)
   if (!isWebProxyToken(token)) return c.body('Game preview not found.', 404, { 'content-type': 'text/plain; charset=utf-8' })
   const gameId = c.req.param('gameId')
   const version = c.req.param('version')
-  if (!isPokiGameId(gameId) || !isPokiGameId(version)) {
+  if (!isPokiGameId(gameId) || !isSafeGameSegment(version)) {
     return c.body('Game not found.', 400, { 'content-type': 'text/plain; charset=utf-8' })
   }
   const row = await c.get('db').prepare(`SELECT token FROM build_embeds WHERE token = ?`).bind(token).first<{ token: string }>()

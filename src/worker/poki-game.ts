@@ -17,6 +17,11 @@ export function isPokiGameId(value: string): boolean {
   return UUID.test(value)
 }
 
+/** A path segment inside a game wrapper or its asset host. */
+export function isSafeGameSegment(value: string): boolean {
+  return value.length > 0 && value.length <= 100 && value !== '.' && value !== '..' && /^[a-z0-9][a-z0-9._-]*$/i.test(value)
+}
+
 export function isPokiPage(finalUrl: string): boolean {
   try {
     const url = new URL(finalUrl)
@@ -29,11 +34,13 @@ export function isPokiPage(finalUrl: string): boolean {
 export function isPokiGameWrapperUrl(value: string): boolean {
   try {
     const url = new URL(value)
-    return (
-      url.protocol === 'https:' &&
-      url.hostname === 'games.poki.com' &&
-      /^\/(?:\d+\/)?[0-9a-f-]{36}$/i.test(url.pathname)
-    )
+    if (url.protocol !== 'https:' || url.hostname !== 'games.poki.com') return false
+    const path = url.pathname.replace(/^\/+|\/+$/g, '')
+    if (!path || path.length > 300) return false
+    const parts = path.split('/')
+    // Poki has used both /<uuid> and /<content-id>/<game-slug> wrappers.
+    // Keep the shape exact and reject traversal or encoded separators.
+    return parts.length > 0 && parts.length <= 3 && parts.every(isSafeGameSegment)
   } catch {
     return false
   }
@@ -57,7 +64,7 @@ function gameTarget(value: string): GameTarget | undefined {
   const host = /^([0-9a-f-]{36})\.gdn\.poki\.com$/i.exec(url.hostname)
   if (!host || !isPokiGameId(host[1])) return undefined
   const parts = url.pathname.split('/').filter(Boolean)
-  if (parts.length < 2 || !isPokiGameId(parts[0])) return undefined
+  if (parts.length < 2 || !isSafeGameSegment(parts[0])) return undefined
   const path = parts.slice(1).join('/')
   if (!isSafeGamePath(path)) return undefined
   return { gameId: host[1], version: parts[0], path, search: url.search }
@@ -266,7 +273,7 @@ export async function proxyPokiGameAsset(
   accept: string | undefined,
   signal?: AbortSignal,
 ): Promise<Response> {
-  if (!isPokiGameId(gameId) || !isPokiGameId(version) || !isSafeGamePath(path)) {
+  if (!isPokiGameId(gameId) || !isSafeGameSegment(version) || !isSafeGamePath(path)) {
     return new Response('Game not found.', { status: 400, headers: textHeaders() })
   }
   const upstream = new URL(`https://${gameId}.gdn.poki.com/${version}/${path}`)
