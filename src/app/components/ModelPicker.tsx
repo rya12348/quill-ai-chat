@@ -2,26 +2,15 @@ import { AnimatePresence, motion } from 'motion/react'
 import { Check, ChevronDown } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
-import { MODELS } from '../../shared/config'
+import { MODELS, PICKER_MODEL_LIMIT } from '../../shared/config'
 import { modelTrait } from '../../shared/model-traits'
 import type { ProviderStatus } from '../../shared/types'
 import { useModels, useProviders } from '../lib/api'
 import { cx } from '../lib/cx'
 import { MODEL_PRESET_OPTIONS, type ModelChoice, type ModelPreset } from '../lib/model-presets'
 
-const STATUS_COLOR: Record<ProviderStatus, string> = {
-  healthy: '#3f9d6a',
-  degraded: '#c98a2e',
-  down: '#c04b4b',
-  unknown: '#b9b2a6',
-}
-
-const STATUS_LABEL: Record<ProviderStatus, string> = {
-  healthy: 'Healthy',
-  degraded: 'Degraded',
-  down: 'Down',
-  unknown: 'Not checked yet',
-}
+/** Every row in the shortlist is offered, so its dot reads as ready. */
+const READY_DOT = '#3f9d6a'
 
 const SHORT_BRANDS: [RegExp, string][] = [
   [/^gpt/i, 'GPT'],
@@ -49,8 +38,8 @@ function shortModelName(name: string): string {
   return SHORT_BRANDS.find(([pattern]) => pattern.test(name))?.[1] ?? name.trim().split(/\s+/)[0] ?? name
 }
 
-function StatusDot({ status }: { status: ProviderStatus }) {
-  return <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: STATUS_COLOR[status] }} />
+function ReadyDot() {
+  return <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: READY_DOT }} />
 }
 
 /** A quiet pill naming the model; opens a compact list with short model names. */
@@ -110,9 +99,14 @@ export function ModelPicker({
   const options = (usable.length ? usable : available).sort(
     (a, b) => statusOrder[statusFor(a)] - statusOrder[statusFor(b)],
   )
-  const hiddenCount = models.length - options.length
-  const current = options.find((m) => m.id === value) ?? options[0] ?? models[0]
-  const currentStatus = current ? statusFor(current) : 'unknown'
+  // Five choices, full stop. Keep the current choice visible if a conversation
+  // still points at a family that has slipped out of the top five.
+  const visible = options.slice(0, PICKER_MODEL_LIMIT)
+  const selected = options.find((model) => model.id === value)
+  if (selected && !visible.some((model) => model.id === selected.id)) {
+    visible.splice(PICKER_MODEL_LIMIT - 1, 1, selected)
+  }
+  const current = visible.find((m) => m.id === value) ?? visible[0] ?? models[0]
   const currentTrait = current ? modelTrait(current) : ''
   const presets = onPreset ? MODEL_PRESET_OPTIONS : []
   const presetLabel = preset === 'auto' ? 'Auto' : preset === 'fast' ? 'Fast' : preset === 'best' ? 'Best' : null
@@ -144,11 +138,11 @@ export function ModelPicker({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={current ? `${current.name} — best at ${currentTrait}${presetLabel ? ` · ${presetLabel} preset` : ''} · ${STATUS_LABEL[currentStatus]}` : undefined}
+        title={current ? `${current.name} — best at ${currentTrait}${presetLabel ? ` · ${presetLabel} preset` : ''}` : undefined}
         onClick={() => setOpen((v) => !v)}
         className="inline-flex h-8 min-w-0 max-w-[132px] items-center gap-1.5 rounded-tile px-2.5 text-[12.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg disabled:opacity-50"
       >
-        <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: STATUS_COLOR[currentStatus] }} />
+        <ReadyDot />
         <span className="truncate">{presetLabel ?? shortModelName(current?.name ?? value)}</span>
         <ChevronDown className="size-3.5 shrink-0 text-faint" />
       </button>
@@ -193,11 +187,11 @@ export function ModelPicker({
                 </li>
                 <li role="presentation" className="mx-1 mb-1 border-t border-line" />
                 <li role="presentation" className="px-2.5 pb-1 pt-0.5 text-[10px] font-medium uppercase tracking-[0.1em] text-faint">
-                  Or choose a model
+                  Models
                 </li>
               </>
             )}
-            {options.map((model) => {
+            {visible.map((model) => {
               const status = statusFor(model)
               const trait = modelTrait(model)
               return (
@@ -206,8 +200,8 @@ export function ModelPicker({
                     type="button"
                     role="option"
                     aria-selected={model.id === value && (preset === undefined || preset === 'manual')}
-                    aria-label={`${model.name} — best at ${trait} — ${STATUS_LABEL[status]}`}
-                    title={`${model.name} — best at ${trait} — ${STATUS_LABEL[status]}`}
+                    aria-label={`${model.name} — best at ${trait}`}
+                    title={`${model.name} — best at ${trait}`}
                     disabled={!model.available || status === 'down'}
                     onClick={() => {
                       onChange(model.id)
@@ -215,7 +209,7 @@ export function ModelPicker({
                     }}
                     className={cx('flex w-full items-center gap-2.5 rounded-tile px-2.5 py-1.5 text-left transition-colors hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-transparent')}
                   >
-                    <StatusDot status={status} />
+                    <ReadyDot />
                     <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{shortModelName(model.name)}</span>
                     <span aria-hidden className="shrink-0 rounded-full bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium leading-none text-faint">{trait}</span>
                     {model.id === value && (preset === undefined || preset === 'manual') && <Check className="size-4 shrink-0 text-fg" />}
@@ -223,11 +217,7 @@ export function ModelPicker({
                 </li>
               )
             })}
-            {hiddenCount > 0 && (
-              <li className="px-2.5 pb-1.5 pt-1 text-[11px] leading-relaxed text-faint">
-                {hiddenCount} {hiddenCount === 1 ? 'family' : 'families'} hidden — no working model right now
-              </li>
-            )}
+
           </motion.ul>
         )}
       </AnimatePresence>

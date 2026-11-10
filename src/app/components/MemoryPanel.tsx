@@ -84,7 +84,7 @@ export function MemoryPanel({ conversationId }: { conversationId: string }) {
                   type="button"
                   onClick={persist}
                   disabled={!draft.trim() || save.isPending}
-                  className="inline-flex items-center gap-1.5 rounded-[8px] bg-accent px-2.5 py-1.5 text-[11px] font-medium text-white transition-opacity disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-[8px] bg-accent px-2.5 py-1.5 text-[11px] font-medium text-bg transition-opacity disabled:opacity-50"
                 >
                   <Check className="size-3" />
                   {save.isPending ? 'Saving…' : 'Save memory'}

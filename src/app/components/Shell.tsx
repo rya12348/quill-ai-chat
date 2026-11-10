@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { Menu as MenuIcon, Library as LibraryIcon, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Menu as MenuIcon, FileText, Library as LibraryIcon, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, X } from 'lucide-react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 
 import { BRAND } from '../../shared/config'
@@ -24,7 +24,7 @@ export function Logo({ className, size = 28 }: { className?: string; size?: numb
 /** The brand mark: a quill nib. */
 export function Mark({ size = 28, className }: { size?: number; className?: string }) {
   return (
-    <span className={cx('grid shrink-0 place-items-center rounded-[9px] bg-fg text-white', className)} style={{ width: size, height: size }} aria-hidden>
+    <span className={cx('grid shrink-0 place-items-center rounded-[9px] bg-fg text-bg', className)} style={{ width: size, height: size }} aria-hidden>
       <svg viewBox="0 0 64 64" width={size * 0.62} height={size * 0.62} fill="currentColor">
         <path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z" />
       </svg>
@@ -32,11 +32,16 @@ export function Mark({ size = 28, className }: { size?: number; className?: stri
   )
 }
 
+/** Lets the chat page own the mobile top bar instead of stacking a second header. */
+const MobileNavContext = createContext<() => void>(() => {})
+export const useMobileNav = () => useContext(MobileNavContext)
+
 export function Shell() {
   const [drawer, setDrawer] = useState(false)
   // Remembered between visits; the drawer is separate and always starts closed.
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar') === 'closed')
   const location = useLocation()
+  const isChatSurface = location.pathname === '/' || location.pathname.startsWith('/c/')
   useEffect(() => setDrawer(false), [location.pathname, location.search])
   useEffect(() => {
     localStorage.setItem('sidebar', collapsed ? 'closed' : 'open')
@@ -56,7 +61,7 @@ export function Shell() {
       )}
       <AnimatePresence>
         {drawer && (
-          <motion.div key="drawer" className="fixed inset-0 z-40 bg-fg/30 md:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }} onMouseDown={() => setDrawer(false)}>
+          <motion.div key="drawer" className="fixed inset-0 z-40 bg-black/40 md:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }} onMouseDown={() => setDrawer(false)}>
             <motion.aside
               className="absolute inset-y-0 left-0 flex w-[284px] flex-col bg-bg shadow-dialog"
               initial={{ x: -40, opacity: 0 }}
@@ -70,15 +75,19 @@ export function Shell() {
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 shrink-0 items-center gap-2 px-3 md:hidden">
-          <Button variant="ghost" size="icon" aria-label="Open menu" onClick={() => setDrawer(true)}>
-            <MenuIcon />
-          </Button>
-          <Logo size={24} />
-        </header>
-        <Outlet />
-      </div>
+      <MobileNavContext.Provider value={() => setDrawer(true)}>
+        <div className="flex min-w-0 flex-1 flex-col">
+          {!isChatSurface && (
+            <header className="flex h-12 shrink-0 items-center gap-2 px-3 md:hidden">
+              <Button variant="ghost" size="icon" aria-label="Open menu" onClick={() => setDrawer(true)}>
+                <MenuIcon />
+              </Button>
+              <Logo size={24} />
+            </header>
+          )}
+          <Outlet />
+        </div>
+      </MobileNavContext.Provider>
     </div>
   )
 }
@@ -133,6 +142,15 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
         >
           <LibraryIcon className="size-4" />
           Library
+        </NavLink>
+        <NavLink
+          to="/tools/pdf"
+          className={({ isActive }) =>
+            cx('mt-1 flex h-9 items-center gap-2 rounded-control px-3 text-[13.5px] font-medium transition-colors', isActive ? 'bg-surface text-fg shadow-card' : 'text-muted hover:bg-surface hover:text-fg')
+          }
+        >
+          <FileText className="size-4" />
+          PDF Studio
         </NavLink>
         <label className="relative mt-2 block">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-faint" />

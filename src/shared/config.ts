@@ -21,6 +21,8 @@ export const MODELS = [
 ] as const
 export type ModelId = (typeof MODELS)[number]['id']
 export const DEFAULT_MODEL: ModelId = 'deepseek-v4.1-flash'
+/** The picker is a short shortlist, not the whole fallback chain. */
+export const PICKER_MODEL_LIMIT = 5
 
 /** Per-user limits. Messages are counted per UTC day. */
 export const DAILY_MESSAGE_LIMIT = 50
@@ -32,6 +34,9 @@ export const ANALYZE_DAILY_LIMIT = 3
 export const BUILD_DAILY_LIMIT = 3
 /** A generated page is stored beside the reply, so keep it bounded. */
 export const MAX_BUILD_HTML_CHARS = 80_000
+/** Agent runs are bounded: at most three tool steps and one final answer. */
+export const AGENT_MAX_STEPS = 4
+export const AGENT_MAX_TOOL_STEPS = 3
 /** Canvas keeps study sets small enough to review in one sitting. */
 export const MAX_CANVAS_CARDS = 24
 export const MAX_CANVAS_QUESTIONS = 10

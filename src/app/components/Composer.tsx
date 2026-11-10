@@ -49,6 +49,7 @@ export function Composer({
   busy,
   disabled,
   openFilePicker,
+  focusRequest,
   placeholder,
   autoFocus,
 }: {
@@ -76,12 +77,15 @@ export function Composer({
   busy: boolean
   disabled?: boolean
   openFilePicker?: number
+  /** Increment to move focus back into the textarea, e.g. after a starter prompt. */
+  focusRequest?: number
   placeholder?: string
   autoFocus?: boolean
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const filePickerRequestRef = useRef(openFilePicker ?? 0)
+  const focusRequestRef = useRef(0)
   const effortTriggerRef = useRef<HTMLButtonElement>(null)
   const effortPanelRef = useRef<HTMLDivElement>(null)
   const toolsRef = useRef<HTMLDivElement>(null)
@@ -104,6 +108,11 @@ export function Composer({
     filePickerRequestRef.current = openFilePicker
     if (!disabled && !busy) fileRef.current?.click()
   }, [openFilePicker, disabled, busy])
+  useEffect(() => {
+    if (!focusRequest || focusRequest === focusRequestRef.current) return
+    focusRequestRef.current = focusRequest
+    if (!disabled && !busy) ref.current?.focus()
+  }, [focusRequest, disabled, busy])
   useEffect(() => {
     if (!effortOpen) return
     const onDown = (event: MouseEvent) => {
@@ -233,7 +242,7 @@ export function Composer({
                   type="button"
                   onClick={() => onRemoveAttachment(attachment.id)}
                   aria-label={`Remove ${attachment.name}`}
-                  className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-line bg-fg text-white shadow-sm transition-transform hover:scale-105"
+                  className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-line bg-fg text-bg shadow-sm transition-transform hover:scale-105"
                 >
                   <X className="size-3" />
                 </button>
@@ -304,12 +313,12 @@ export function Composer({
                 onClick={() => setToolsOpen((open) => !open)}
                 className={cx(
                   'inline-flex h-7 shrink-0 items-center gap-1 rounded-tile px-2 text-[12px] font-medium transition-colors',
-                  toolsOpen ? 'bg-surface-2 text-fg' : activeTool ? 'bg-fg text-white hover:bg-[#2e2c27]' : 'text-muted hover:bg-surface-2 hover:text-fg',
+                  toolsOpen ? 'bg-surface-2 text-fg' : activeTool ? 'bg-fg text-bg hover:bg-fg/90' : 'text-muted hover:bg-surface-2 hover:text-fg',
                 )}
               >
                 <TriggerIcon className="size-3.5" />
                 <span className="whitespace-nowrap">Tools{activeTool ? ` · ${activeTool.label}` : ''}</span>
-                <ChevronDown className={cx('size-3 transition-transform', activeTool && !toolsOpen ? 'text-white/60' : 'text-faint', toolsOpen && 'rotate-180')} />
+                <ChevronDown className={cx('size-3 transition-transform', activeTool && !toolsOpen ? 'text-bg/60' : 'text-faint', toolsOpen && 'rotate-180')} />
               </button>
               {toolsOpen && (
                 <div
@@ -407,7 +416,7 @@ export function Composer({
           </div>
         )}
         {busy ? (
-          <button type="button" onClick={onStop} aria-label="Stop" className="grid size-8 place-items-center rounded-full bg-fg text-white transition-transform active:scale-95">
+          <button type="button" onClick={onStop} aria-label="Stop" className="grid size-8 place-items-center rounded-full bg-fg text-bg transition-transform active:scale-95">
             <Square className="size-3.5 fill-current" />
           </button>
         ) : (
@@ -416,7 +425,7 @@ export function Composer({
             onClick={onSend}
             disabled={!canSend}
             aria-label="Send"
-            className="grid size-8 place-items-center rounded-full bg-fg text-white transition-[opacity,transform] active:scale-95 disabled:opacity-25"
+            className="grid size-8 place-items-center rounded-full bg-fg text-bg transition-[opacity,transform] active:scale-95 disabled:opacity-25"
           >
             <ArrowUp className="size-4" />
           </button>

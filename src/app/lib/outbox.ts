@@ -12,7 +12,7 @@ export type PendingMessage = {
   projectId: string | null
   content: string
   model: string
-  strategy: 'fast' | 'blend' | 'proof' | 'research' | 'analyze' | 'build' | 'canvas'
+  strategy: 'fast' | 'blend' | 'proof' | 'research' | 'analyze' | 'build' | 'canvas' | 'agent'
   reasoning: boolean
   effort?: ReasoningEffort
   createdAt: number
@@ -32,7 +32,7 @@ function parsePending(value: string | null): PendingMessage | null {
       projectId: typeof raw.projectId === 'string' ? raw.projectId : null,
       content: raw.content,
       model: typeof raw.model === 'string' ? raw.model : '',
-      strategy: raw.strategy === 'fast' ? 'fast' : raw.strategy === 'proof' ? 'proof' : raw.strategy === 'research' ? 'research' : raw.strategy === 'analyze' ? 'analyze' : raw.strategy === 'build' ? 'build' : raw.strategy === 'canvas' ? 'canvas' : 'blend',
+      strategy: raw.strategy === 'fast' ? 'fast' : raw.strategy === 'proof' ? 'proof' : raw.strategy === 'research' ? 'research' : raw.strategy === 'analyze' ? 'analyze' : raw.strategy === 'build' ? 'build' : raw.strategy === 'canvas' ? 'canvas' : raw.strategy === 'agent' ? 'agent' : 'blend',
       reasoning: raw.reasoning === true,
       ...(raw.effort === 'low' || raw.effort === 'default' || raw.effort === 'max' ? { effort: raw.effort } : {}),
       createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),

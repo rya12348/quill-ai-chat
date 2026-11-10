@@ -15,6 +15,9 @@ export interface Env {
   POLLINATIONS_API_KEY?: string
   // Optional override of the free lane's model id.
   PUBLIC_AI_MODEL?: string
+  // Optional free AIHubMix key (aihubmix.com). Adds its zero-cost Kimi K3
+  // coding route, limited to 100 requests/day and 5/minute per account.
+  AIHUBMIX_API_KEY?: string
   // Optional free Groq key (console.groq.com). GROQ_MODEL adds a preferred
   // model before the free defaults; the person chatting still needs no key.
   GROQ_API_KEY?: string
@@ -27,8 +30,9 @@ export interface Env {
   // model before the free defaults.
   MISTRAL_API_KEY?: string
   MISTRAL_MODEL?: string
-  // Optional free NVIDIA NIM key (build.nvidia.com). Defaults to DeepSeek V4.1
-  // Flash plus GLM-5.3 Flash and Nemotron 3 Ultra, free to prototype with.
+  // Optional free NVIDIA NIM key (build.nvidia.com). Defaults to Step 5
+  // Preview, DeepSeek V4.1 Flash, GLM-5.3 Flash, MiniMax M3.1 Flash,
+  // Nemotron 3.5 Super VL and Nemotron 3 Ultra, free to prototype with.
   NVIDIA_API_KEY?: string
   NVIDIA_MODEL?: string
   // Optional free LLM7 token (dash.llm7.io). Free tokens reach LLM7's "turbo"
@@ -38,6 +42,12 @@ export interface Env {
   // Optional free ModelScope token (modelscope.cn). Adds its hosted DeepSeek.
   MODELSCOPE_API_KEY?: string
   MODELSCOPE_MODEL?: string
+  // Optional Alibaba Cloud Model Studio key (Singapore, no card). Adds Qwen 3.8
+  // Max, DeepSeek V4 Pro and GLM 5.3. New accounts get 1M free tokens per model
+  // for 90 days; enable "Free Quota Only" so an exhausted quota cannot bill.
+  // DASHSCOPE_MODELS overrides the comma-separated list.
+  DASHSCOPE_API_KEY?: string
+  DASHSCOPE_MODELS?: string
   // Optional Cohere trial key (cohere.com). Adds Command A+ through Cohere's
   // OpenAI-compatible endpoint; trial keys have limited credits, not unlimited
   // free usage. COHERE_MODEL overrides the model.
@@ -72,11 +82,14 @@ export interface Env {
   CLOUDFLARE_ACCOUNT_ID?: string
   CLOUDFLARE_AI_TOKEN?: string
   CLOUDFLARE_AI_MODEL?: string
-  // Enables the free-only Research mode. Off by default while it is evaluated.
+  // Enables the free-only Research mode. Off by default; Codespaces enables it
+  // automatically for the development origin.
   RESEARCH_ENABLED?: string
-  // Enables the free-only Analyze mode. Off by default while it is evaluated.
+  // Enables the free-only Analyze mode. Off by default; Codespaces enables it
+  // automatically for the development origin.
   ANALYZE_ENABLED?: string
-  // Enables the free-only Build mode. Off by default while it is evaluated.
+  // Enables the free-only Build mode. Off by default; Codespaces enables it
+  // automatically for the development origin.
   BUILD_ENABLED?: string
   // Optional Exa key (exa.ai). Upgrades grounding quality; without it the app
   // uses keyless Wikipedia, DuckDuckGo, news, Stack Overflow and Hacker News.

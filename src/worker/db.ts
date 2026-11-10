@@ -1,6 +1,6 @@
 import type { MiddlewareHandler } from 'hono'
 
-import type { AnalysisInfo, BuildInfo, CanvasInfo, Conversation, Message, Project, ProofCheck, ProofInfo, ResearchClaim, ResearchInfo, Source, TeamInfo } from '../shared/types'
+import type { AgentInfo, AgentStep, AgentTool, AnalysisInfo, BuildInfo, CanvasInfo, Conversation, Message, Project, ProofCheck, ProofInfo, ResearchClaim, ResearchInfo, Source, TeamInfo } from '../shared/types'
 import type { AppContext } from './env'
 
 // Schema lives with the Worker: D1 has no migration tool on Freebuff Sites, so
@@ -269,6 +269,25 @@ const SCHEMA = [
     PRIMARY KEY (owner_sub, message_id, card_index)
   )`,
   `CREATE INDEX IF NOT EXISTS canvas_reviews_owner_due ON canvas_reviews(owner_sub, due_at)`,
+  // Private lane keys for one blended reply, so a later helpful/not-helpful
+  // rating can be attributed to the models that actually contributed. No
+  // prompt or answer text is stored here.
+  `CREATE TABLE IF NOT EXISTS message_lane_routes (
+    message_id TEXT PRIMARY KEY,
+    owner_sub TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS message_lane_routes_owner ON message_lane_routes(owner_sub, created_at DESC)`,
+  // One row per Agent reply: the plan, each step's outcome and the run's
+  // receipt. Artifacts stay in their own tables beside the same message.
+  `CREATE TABLE IF NOT EXISTS message_agent (
+    message_id TEXT PRIMARY KEY,
+    owner_sub TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS message_agent_owner_created ON message_agent(owner_sub, created_at DESC)`,
 ]
 
 let ready: Promise<void> | undefined
@@ -658,6 +677,83 @@ export function parseBuild(value: unknown): BuildInfo | undefined {
   }
 }
 
+export function parseAgent(value: unknown): AgentInfo | undefined {
+  if (typeof value !== 'string' || !value) return undefined
+  try {
+    const parsed = JSON.parse(value) as { info?: Record<string, unknown> }
+    const info = parsed?.info
+    if (!info || typeof info !== 'object') return undefined
+    const goal = typeof info.goal === 'string' ? info.goal.replace(/\s+/g, ' ').trim().slice(0, 2_000) : ''
+    if (!goal) return undefined
+    const status =
+      info.status === 'planning' || info.status === 'running' || info.status === 'done' || info.status === 'partial' || info.status === 'failed'
+        ? info.status
+        : 'done'
+    const steps: AgentStep[] = Array.isArray(info.steps)
+      ? info.steps
+          .flatMap((step, index) => {
+            if (!step || typeof step !== 'object') return []
+            const row = step as Record<string, unknown>
+            const tool: AgentTool | null =
+              row.tool === 'research' || row.tool === 'build' || row.tool === 'canvas' || row.tool === 'answer' ? row.tool : null
+            if (!tool) return []
+            const state: AgentStep['status'] | null =
+              row.status === 'pending' || row.status === 'running' || row.status === 'done' || row.status === 'skipped' || row.status === 'failed'
+                ? row.status
+                : null
+            if (!state) return []
+            const title = typeof row.title === 'string' ? row.title.replace(/\s+/g, ' ').trim().slice(0, 80) : ''
+            if (!title) return []
+            const instruction = typeof row.instruction === 'string' ? row.instruction.replace(/\s+/g, ' ').trim().slice(0, 700) : ''
+            const id = typeof row.id === 'string' && row.id.trim() ? row.id.trim().slice(0, 40) : `step-${index + 1}`
+            const model = typeof row.model === 'string' && row.model.trim() ? row.model.trim().slice(0, 80) : undefined
+            const detail = typeof row.detail === 'string' && row.detail.trim() ? row.detail.trim().slice(0, 200) : undefined
+            const artifactMessageId = typeof row.artifactMessageId === 'string' ? row.artifactMessageId.slice(0, 80) : undefined
+            const startedAt = Number(row.startedAt)
+            const finishedAt = Number(row.finishedAt)
+            return [{
+              id,
+              tool,
+              title,
+              instruction,
+              status: state,
+              ...(Number.isFinite(startedAt) ? { startedAt } : {}),
+              ...(Number.isFinite(finishedAt) ? { finishedAt } : {}),
+              ...(model ? { model } : {}),
+              ...(detail ? { detail } : {}),
+              ...(artifactMessageId ? { artifactMessageId } : {}),
+            }]
+          })
+          .slice(0, 6)
+      : []
+    if (!steps.length) return undefined
+    const models = Array.isArray(info.models)
+      ? info.models
+          .filter((model): model is string => typeof model === 'string' && Boolean(model.trim()))
+          .map((model) => model.trim().slice(0, 80))
+          .slice(0, 6)
+      : []
+    const receipt = typeof info.receipt === 'string' ? info.receipt.replace(/\s+/g, ' ').trim().slice(0, 400) : ''
+    const asOf = Number.isFinite(Number(info.asOf)) ? Number(info.asOf) : Date.now()
+    const stale = (status === 'planning' || status === 'running') && Date.now() - asOf > 15 * 60_000
+    return {
+      goal,
+      status: stale ? 'partial' : status,
+      steps,
+      receipt: stale ? 'Run stopped before it finished.' : receipt,
+      models,
+      asOf,
+      ...(stale
+        ? { reason: 'the run stopped before it finished' }
+        : typeof info.reason === 'string' && info.reason
+          ? { reason: info.reason.slice(0, 200) }
+          : {}),
+    }
+  } catch {
+    return undefined
+  }
+}
+
 export function mapMessage(r: Row): Message {
   return {
     id: r.id as string,
@@ -676,6 +772,7 @@ export function mapMessage(r: Row): Message {
     analysis: parseAnalysis(r.analysis),
     build: parseBuild(r.build),
     canvas: parseCanvas(r.canvas),
+    agent: parseAgent(r.agent),
     feedback: r.feedback === 'up' ? 'up' : r.feedback === 'down' ? 'down' : undefined,
   }
 }

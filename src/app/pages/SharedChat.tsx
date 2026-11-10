@@ -76,6 +76,7 @@ export function SharedChat() {
                     analysis={message.analysis}
                     build={message.build}
                     canvas={message.canvas}
+                    agent={message.agent}
                     model={message.modelName ?? message.model ?? ''}
                     interrupted={message.interrupted}
                   />

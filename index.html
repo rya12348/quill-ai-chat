@@ -3,8 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#f7f6f2" />
+    <script>
+      (() => {
+        try {
+          const saved = localStorage.getItem('theme')
+          const dark = saved === 'dark' || (saved !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.classList.toggle('dark', dark)
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+          document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#141310' : '#f7f6f2')
+        } catch {
+          /* keep the light default when storage is unavailable */
+        }
+      })()
+    </script>
     <title>Quill</title>
     <meta name="description" content="A thoughtful assistant for everyday questions." />
     <link rel="icon" href="/favicon.ico" sizes="32x32" />

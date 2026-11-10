@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { isSameOriginRequest } from '@freebuff/auth'
 
-import { allowsMutation, appOrigin, authMode, buildEnabledFor, isCodespacesRequest } from '../src/worker/auth'
+import { allowsMutation, analyzeEnabledFor, appOrigin, authMode, buildEnabledFor, currentUser, isCodespacesRequest, researchEnabledFor } from '../src/worker/auth'
 import type { Env } from '../src/worker/env'
 
 const development = {} as Env
@@ -43,6 +43,34 @@ test('auth mode still requires sign in when Freebuff auth is configured', () => 
     authMode({ FREEBUFF_CLIENT_ID: 'client-id', APP_ORIGIN: 'https://quill.example' } as Env, request),
     'freebuff',
   )
+})
+
+test('a Codespace with the loopback auth example uses the development identity', async () => {
+  const request = codespacesRequest()
+  const env = { FREEBUFF_CLIENT_ID: 'client-id', APP_ORIGIN: 'http://127.0.0.1:5180' } as Env
+  assert.equal(authMode(env, request), 'development')
+  assert.equal(appOrigin(env, request), 'https://bright-otter-5180.app.github.dev')
+  assert.equal(isCodespacesRequest(env, request), true)
+  assert.equal((await currentUser(env, request))?.sub, 'dev-user')
+})
+
+test('all free-only modes default on for a Codespaces development origin', () => {
+  const codespaces = new Request('https://bright-otter-5180.app.github.dev/api/me')
+  assert.equal(researchEnabledFor(development, codespaces), true)
+  assert.equal(analyzeEnabledFor(development, codespaces), true)
+  assert.equal(buildEnabledFor(development, codespaces), true)
+
+  const ordinary = new Request('https://quill.example/api/me')
+  assert.equal(researchEnabledFor(development, ordinary), false)
+  assert.equal(analyzeEnabledFor(development, ordinary), false)
+  assert.equal(buildEnabledFor(development, ordinary), false)
+
+  assert.equal(researchEnabledFor({ RESEARCH_ENABLED: '0' } as Env, codespaces), false)
+  assert.equal(analyzeEnabledFor({ ANALYZE_ENABLED: '0' } as Env, codespaces), false)
+  assert.equal(buildEnabledFor({ BUILD_ENABLED: '0' } as Env, codespaces), false)
+  assert.equal(researchEnabledFor({ RESEARCH_ENABLED: '1' } as Env, ordinary), true)
+  assert.equal(analyzeEnabledFor({ ANALYZE_ENABLED: '1' } as Env, ordinary), true)
+  assert.equal(buildEnabledFor({ BUILD_ENABLED: '1' } as Env, ordinary), true)
 })
 
 test('uses the Codespaces public origin for development requests', () => {

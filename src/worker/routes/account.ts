@@ -3,10 +3,10 @@ import { Hono } from 'hono'
 import { ANALYZE_DAILY_LIMIT, BUILD_DAILY_LIMIT, DAILY_MESSAGE_LIMIT, MODELS, RESEARCH_DAILY_LIMIT } from '../../shared/config'
 import type { Me, ModelInfo } from '../../shared/types'
 import { aiConfigured, availableModels } from '../ai'
-import { authMode, buildEnabledFor, isOwner, privateJson } from '../auth'
+import { analyzeEnabledFor, authMode, buildEnabledFor, isOwner, privateJson, researchEnabledFor } from '../auth'
 import { now, utcDay, usageToday } from '../db'
 import type { AppContext } from '../env'
-import { pickModelFamilies, publicLanes } from '../public-ai'
+import { pickPickerFamilies, publicLanes } from '../public-ai'
 import { healthRows } from '../provider-health'
 import { searchConfigured } from '../search'
 import { seedStatements } from '../seed'
@@ -36,11 +36,13 @@ account.get('/me', async (c) => {
       search: searchConfigured(c.env),
       // The free chain can expose reasoning when a lane supports it.
       reasoning: lanes.length > 1,
-      research: !aiConfigured(c.env) && (c.env.RESEARCH_ENABLED === '1' || c.env.RESEARCH_ENABLED === 'true'),
-      analyze: !aiConfigured(c.env) && (c.env.ANALYZE_ENABLED === '1' || c.env.ANALYZE_ENABLED === 'true'),
+      research: !aiConfigured(c.env) && researchEnabledFor(c.env, c.req.raw),
+      analyze: !aiConfigured(c.env) && analyzeEnabledFor(c.env, c.req.raw),
       build: !aiConfigured(c.env) && buildEnabledFor(c.env, c.req.raw),
       // Canvas uses one free-lane completion, so it needs no extra flag.
       canvas: !aiConfigured(c.env),
+      // Agent orchestrates the free-mode engines, so it needs at least one lane.
+      agent: !aiConfigured(c.env) && lanes.length > 0,
       database: true,
       auth: mode === 'freebuff' ? 'freebuff' : 'development',
     },
@@ -70,17 +72,17 @@ account.get('/models', async (c) => {
     c.header('Cache-Control', 'private, max-age=60')
     return c.json({ items })
   }
-  // No key: one row per model family, named just "Nemotron", "GPT" and so on.
-  // Each family is represented by its best currently working lane — healthy
-  // before merely strong — so the picker stays short and the site chooses the
-  // variant instead of making people compare provider suffixes.
+  // No key: five rows, one per model family, named just "Nemotron", "GPT" and
+  // so on. Each family is represented by its best currently working lane —
+  // healthy before merely strong — so the picker stays short and the site
+  // chooses the variant instead of making people compare provider suffixes.
   let statuses = new Map<string, string>()
   try {
     statuses = new Map((await healthRows(c.get('db'), c.get('user').sub)).map((row) => [row.provider_id, row.status]))
   } catch {
     // A fresh deployment has no health rows yet; strength alone still works.
   }
-  const items: ModelInfo[] = pickModelFamilies(publicLanes(c.env), statuses).map(({ family, lane }) => ({
+  const items: ModelInfo[] = pickPickerFamilies(publicLanes(c.env), statuses).map(({ family, lane }) => ({
     id: lane.model,
     name: family,
     description: lane.description,
@@ -99,11 +101,13 @@ account.delete('/account/conversations', async (c) => {
     db.prepare(`DELETE FROM message_sources WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM message_feedback WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM message_team WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM message_lane_routes WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM message_proof WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM message_research WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM message_analysis WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM message_build WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM message_canvas WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM message_agent WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM canvas_reviews WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM build_embeds WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM message_attachments WHERE owner_sub = ?`).bind(owner),

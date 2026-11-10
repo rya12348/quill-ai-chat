@@ -31,5 +31,13 @@ export default defineConfig(({ mode }) => {
       // Benchmark runs update these artifacts; they must not reload the app mid-turn.
       watch: { ignored: ['**/bench/**'] },
     },
+    preview: {
+      // `vite preview` needs the same forwarded-host treatment as the dev
+      // server when someone opens the built app in a Codespace.
+      host: codespaces ? '0.0.0.0' : '127.0.0.1',
+      port: 4173,
+      strictPort: true,
+      allowedHosts: ['.app.github.dev', '.githubpreview.dev'],
+    },
   }
 })

@@ -4,17 +4,19 @@
 // next instead of failing the message.
 //
 // Keyed lanes cover OpenRouter's rotating free variants, NVIDIA NIM, LLM7,
-// ModelScope, Cohere trial credits, Groq, Mistral, Google AI Studio, Workers AI
-// and Z.ai. OVHcloud, Kilo, Pollinations and BlockRun add keyless lanes, and
-// LLM7's anonymous gateway is the last-resort free option. Keys stay on the
-// server.
+// ModelScope, Alibaba Model Studio, Cohere trial credits, Groq, Mistral, Google
+// AI Studio, Workers AI and Z.ai. OVHcloud, Kilo, Pollinations and BlockRun add
+// keyless lanes, and LLM7's anonymous gateway is the last-resort free option.
+// Keys stay on the server.
 
-import { MAX_OUTPUT_TOKENS } from '../shared/config'
+import { MAX_OUTPUT_TOKENS, PICKER_MODEL_LIMIT } from '../shared/config'
+import { splitThinking } from '../shared/thinking'
 import { AiError, readSse, textFromContent, type ChatMessage, type StreamPiece } from './ai'
 import type { Env } from './env'
 
 const POLLINATIONS_KEYED_URL = 'https://gen.pollinations.ai/v1/chat/completions'
 const POLLINATIONS_KEYLESS_URL = 'https://text.pollinations.ai/openai'
+const AIHUBMIX_URL = 'https://aihubmix.com/v1/chat/completions'
 const LLM7_URL = 'https://api.llm7.io/v1/chat/completions'
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
@@ -22,6 +24,7 @@ const MISTRAL_URL = 'https://api.mistral.ai/v1/chat/completions'
 const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions'
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
 const MODELSCOPE_URL = 'https://api-inference.modelscope.cn/v1/chat/completions'
+const DASHSCOPE_URL = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions'
 const COHERE_URL = 'https://api.cohere.ai/compatibility/v1/chat/completions'
 const ZAI_URL = 'https://api.z.ai/api/paas/v4/chat/completions'
 const BLOCKRUN_URL = 'https://blockrun.ai/api/v1/chat/completions'
@@ -50,12 +53,18 @@ const LLM7_MODELS = ['gpt-oss:20b', 'codestral-latest', 'mistral-Nemo-Instruct-2
 const GROQ_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b']
 const MISTRAL_MODELS = ['mistral-large-4', 'codestral-latest', 'ministral-14b-latest']
 const NVIDIA_MODELS = [
+  'stepfun-ai/step-5-preview',
+  'minimaxai/minimax-m3.1-flash',
+  'nvidia/nemotron-3.5-super-vl-120b-a12b',
   'deepseek-ai/deepseek-v4.1-flash',
   'z-ai/glm-5.3-flash',
   'nvidia/nemotron-3-ultra-550b-a55b',
   'openai/gpt-oss-20b',
   'google/gemma-4-31b-it',
 ]
+// Alibaba's Singapore free quota is per model (1M tokens for 90 days), so each
+// model gets its own lane; one exhausted quota must not hide the other two.
+const DASHSCOPE_MODELS = ['qwen3.8-max', 'deepseek-v4-pro', 'glm-5.3']
 // Ollama Cloud's free plan is a monthly starter-credit allowance, so these are
 // not guaranteed forever; they are tried only when the owner adds a key.
 const OLLAMA_MODELS = ['deepseek-v4-pro:0813', 'kimi-k3', 'glm-5.3', 'minimax-m3', 'deepseek-v4-flash:0731']
@@ -137,6 +146,12 @@ type LaneInput = {
   maxTokens?: number
   /** Reports the outcome so the Worker can persist provider health. */
   onLaneResult?: (result: LaneResult) => void
+  /** Forward reasoning pieces while the lane is working. */
+  onReasoning?: (text: string) => Promise<unknown> | unknown
+  /** Keep a reasoning-only reply instead of treating it as empty. */
+  fallbackToReasoning?: boolean
+  /** Override the streaming deadline for short internal calls. */
+  timeoutMs?: number
 }
 
 /** One lane's outcome, for the persisted provider-health table. */
@@ -168,6 +183,17 @@ const cool = (lane: PublicLane, ms: number) => {
 export function activeLanes(lanes: PublicLane[]): PublicLane[] {
   const active = lanes.filter((lane) => !isCooling(lane))
   return active.length ? active : lanes
+}
+
+/**
+ * Every lane worth attempting, active first and cooling lanes last. An engine
+ * that used activeLanes alone could be left with one candidate and no fallback
+ * as soon as the others were resting; Build especially needs a second family.
+ */
+export function candidateLanes(lanes: PublicLane[]): PublicLane[] {
+  const active = lanes.filter((lane) => !isCooling(lane))
+  const cooling = lanes.filter((lane) => isCooling(lane))
+  return active.length ? [...active, ...cooling] : lanes
 }
 
 /** OpenAI-compatible body; OpenRouter and Z.ai take explicit reasoning switches. */
@@ -224,6 +250,8 @@ function labelFor(id: string): string {
     return size ? `Qwen2.5 Coder ${size.toUpperCase()}` : 'Qwen2.5 Coder'
   }
   if (lower.includes('qwen2.5-vl')) return 'Qwen 2.5 VL 72B'
+  if (lower.includes('qwen3.8-max')) return 'Qwen 3.8 Max'
+  if (lower.includes('qwen3.8-2.4t')) return 'Qwen 3.8 2.4T'
   if (lower.includes('qwen3.8')) return 'Qwen 3.8 27B'
   if (lower.includes('qwen3.6')) return 'Qwen 3.6 27B'
   if (lower.includes('qwen3.5-397b')) return 'Qwen 3.5 397B'
@@ -246,6 +274,7 @@ function labelFor(id: string): string {
   if (lower.includes('nemotron-3-super')) return 'Nemotron 3 Super 120B'
   if (lower.includes('ultra')) return 'Nemotron 3 Ultra 550B'
   if (lower.includes('nemotron')) return 'Nemotron 3 Nano 30B'
+  if (lower.includes('step-5')) return 'Step 5 Preview'
   if (lower.includes('muse-glimmer')) return 'Muse Glimmer 30B'
   if (lower.includes('dots')) return 'Dots3 Note'
   if (lower.includes('liquid')) return 'Liquid LFM3 1.7B'
@@ -297,6 +326,7 @@ const FAMILY_RULES: [RegExp, string][] = [
   [/xing/i, 'Xing'],
   [/openrouter/i, 'OpenRouter'],
   [/kimi/i, 'Kimi'],
+  [/stepfun|step-5/i, 'Step'],
   [/claude/i, 'Claude'],
   [/gemini/i, 'Gemini'],
   [/minimax/i, 'MiniMax'],
@@ -339,6 +369,14 @@ export function pickModelFamilies(
     .map(({ family, lane }) => ({ family, lane }))
 }
 
+/** The five strongest working families shown in the model picker. */
+export function pickPickerFamilies(
+  lanes: PublicLane[],
+  statusById: ReadonlyMap<string, string> = new Map(),
+): { family: string; lane: PublicLane }[] {
+  return pickModelFamilies(lanes, statusById).slice(0, PICKER_MODEL_LIMIT)
+}
+
 export function laneStrength(model: string, url?: string): number {
   const id = model.toLowerCase()
   let host = ''
@@ -349,7 +387,7 @@ export function laneStrength(model: string, url?: string): number {
   }
   const optionalCloudflare = host === 'api.cloudflare.com'
   let base = 60
-  if (/gpt-6|claude-opus|claude-sonnet-5|gemini-4|deepseek-v4-pro|kimi-k3|glm-5\.3(?!-flash)/.test(id)) base = 92
+  if (/gpt-6|claude-opus|claude-sonnet-5|gemini-4|deepseek-v4-pro|kimi-k3|glm-5\.3(?!-flash)|qwen3\.8-max|qwen3\.8-2\.4t|step-5/.test(id)) base = 92
   // BlockRun's keyless Nemotron 3 Super 120B is a known-working lane and is
   // deliberately ranked above the rate-limited free router variants. A 120B
   // model that answers beats a 550B model that returns 429.
@@ -388,7 +426,7 @@ export function laneSupportsVision(lane: Pick<PublicLane, 'url' | 'model'>): boo
   if (host === 'blockrun.ai') return /nemotron-3-nano-omni/.test(model)
   if (host === 'oai.endpoints.kepler.ai.cloud.ovh.net') return /qwen2\.5-vl/.test(model)
   if (host === 'generativelanguage.googleapis.com') return true
-  if (host === 'integrate.api.nvidia.com') return /gemma-4-31b/.test(model)
+  if (host === 'integrate.api.nvidia.com') return /gemma-4-31b|step-5-preview|nemotron-3.5-super-vl/.test(model)
   if (host === 'api.cloudflare.com') return /gemma-4-26b|llama-4-scout/.test(model)
   return false
 }
@@ -426,6 +464,35 @@ export function publicLanes(env: Env): PublicLane[] {
       description: 'Free with your Pollinations key',
       key: env.POLLINATIONS_API_KEY,
     })
+  }
+
+  if (env.AIHUBMIX_API_KEY) {
+    // AIHubMix's zero-cost Kimi K3 variant. The paid `kimi-k3` id is deliberately
+    // not used here: this lane should never spend the owner's balance.
+    lanes.push({
+      url: AIHUBMIX_URL,
+      model: 'coding-kimi-k3-free',
+      label: labelFor('coding-kimi-k3-free'),
+      description: 'Free, no card, 100 requests/day via AIHubMix',
+      key: env.AIHUBMIX_API_KEY,
+    })
+  }
+
+  if (env.DASHSCOPE_API_KEY) {
+    // Alibaba's free quota is granted per model, so an override list is useful
+    // for trying the 2.4T Qwen checkpoint without changing code.
+    const overrides = (env.DASHSCOPE_MODELS?.split(',') ?? [])
+      .map((model) => model.trim())
+      .filter(Boolean)
+    for (const model of overrides.length ? overrides : DASHSCOPE_MODELS) {
+      lanes.push({
+        url: DASHSCOPE_URL,
+        model,
+        label: labelFor(model),
+        description: 'Free 90-day trial via Alibaba Model Studio',
+        key: env.DASHSCOPE_API_KEY,
+      })
+    }
   }
 
   if (env.OPENROUTER_API_KEY) {
@@ -682,6 +749,15 @@ async function laneFailure(lane: PublicLane, response: Response): Promise<AiErro
     return new AiError('busy', `${lane.label} is busy right now.`, 429)
   }
   if (status === 401 || status === 403) {
+    // AIHubMix answers a second simultaneous request on its free tier with
+    // 403 "concurrent request limit". That is a busy lane, not a bad key; a
+    // health probe must not cool the lane for half an hour because a chat was
+    // already in flight.
+    const detail = status === 403 ? await response.clone().text().catch(() => '') : ''
+    if (/concurrent|rate.?limit|too many requests|capacity|busy/i.test(detail)) {
+      cool(lane, 15_000)
+      return new AiError('busy', `${lane.label} is busy right now.`, 429)
+    }
     cool(lane, COOLDOWN_AUTH)
     return new AiError('invalid_key', `${lane.label} refused its key. Check the configured key.`, 503)
   }
@@ -697,7 +773,7 @@ async function laneFailure(lane: PublicLane, response: Response): Promise<AiErro
 async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<StreamPiece> {
   if (isCooling(lane)) throw new AiError('busy', `${lane.label} is taking a short break.`, 429)
   const startedAt = Date.now()
-  const timeout = AbortSignal.timeout(240_000)
+  const timeout = AbortSignal.timeout(input.timeoutMs ?? 240_000)
   const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout
 
   let response: Response
@@ -726,9 +802,11 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
   }
 
   let text = ''
+  let reasoning = ''
   try {
     for await (const piece of readSse(response, { client: input.signal, timeout })) {
       if (piece.type === 'text') text += piece.text
+      else reasoning += piece.text
       yield piece
     }
   } catch (error) {
@@ -739,10 +817,14 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
     throw error
   }
   if (!text.trim()) {
-    cool(lane, COOLDOWN_ERROR)
-    const failure = new AiError('empty', `${lane.label} returned an empty reply.`, 502)
-    input.onLaneResult?.(failureResult(lane, failure, startedAt))
-    throw failure
+    if (input.fallbackToReasoning && reasoning.trim()) {
+      yield { type: 'text', text: reasoning }
+    } else {
+      cool(lane, COOLDOWN_ERROR)
+      const failure = new AiError('empty', `${lane.label} returned an empty reply.`, 502)
+      input.onLaneResult?.(failureResult(lane, failure, startedAt))
+      throw failure
+    }
   }
   input.onLaneResult?.({ lane, ok: true, latencyMs: Date.now() - startedAt })
 }
@@ -750,6 +832,16 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
 /** One complete answer from a lane, used as a draft, a plan or a review. */
 export async function laneText(lane: PublicLane, input: LaneInput): Promise<string> {
   if (isCooling(lane)) throw new AiError('busy', `${lane.label} is taking a short break.`, 429)
+  // The visible-thinking path must stream, not wait for a JSON response. It
+  // forwards only reasoning to the caller; the final content is still returned.
+  if (input.onReasoning) {
+    let text = ''
+    for await (const piece of streamLane(lane, { ...input, fallbackToReasoning: true, timeoutMs: 90_000 })) {
+      if (piece.type === 'text') text += piece.text
+      else await input.onReasoning(piece.text)
+    }
+    return text
+  }
   const startedAt = Date.now()
   const timeout = AbortSignal.timeout(90_000)
   const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout
@@ -784,10 +876,12 @@ export async function laneText(lane: PublicLane, input: LaneInput): Promise<stri
   const message = body?.choices?.[0]?.message
   // A reasoning model can spend its whole budget thinking; keep that instead of
   // throwing the draft away when the visible content is empty.
-  const text =
+  const raw =
     textFromContent(message?.content) ||
     (typeof message?.reasoning === 'string' ? message.reasoning : '') ||
     (typeof message?.reasoning_content === 'string' ? message.reasoning_content : '')
+  const split = splitThinking(raw)
+  const text = split.text || split.reasoning
   if (!text.trim()) {
     cool(lane, COOLDOWN_ERROR)
     const failure = new AiError('empty', `${lane.label} returned an empty reply.`, 502)

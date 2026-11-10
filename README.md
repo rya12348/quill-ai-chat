@@ -33,7 +33,8 @@ text-only, as described below.
 ## Analyze
 
 Analyze is a fourth free-only composer mode, enabled with `ANALYZE_ENABLED=1`
-(add it to `.env.local` locally). Attach one CSV, TSV or XLSX, then ask a
+(add it to `.env.local` locally; Codespaces enables it automatically for the
+development origin). Attach one CSV, TSV or XLSX, then ask a
 question. The browser keeps the full table in IndexedDB and sends only the
 column names, row count and a small sample; the free lanes write a short pandas
 program. The browser runs it in an opaque, sandboxed Pyodide iframe against the
@@ -54,8 +55,10 @@ follow-up Build message in the same chat edits the current page: the previous
 HTML is sent back with the change request, and the model returns the complete
 updated document. Games and interactive tools get a game-specific brief
 (canvas loop, keyboard and touch input, collision, score and restart) and a
-larger output budget; a static mock-up is rejected instead of being shown as a
-game. Generated pages are previewed in a sandboxed iframe with no same-origin
+compact 6–10 KB output target, so the reply finishes before a free lane is cut
+off; a static mock-up is rejected instead of being shown as a game. Build picks
+the fastest recently healthy lanes and races them in parallel, so one slow
+model no longer holds the whole reply until its timeout. Generated pages are previewed in a sandboxed iframe with no same-origin
 access or cookies. Interactive builds start with scripts on, and every generated
 preview has **Pause scripts** and **Restart** controls. Pages may load HTTPS
 images, but cannot use external scripts, fonts, fetch/XHR/WebSocket, storage or
@@ -66,12 +69,20 @@ Build also has a live-site path. If the request asks to show, run, open, play or
 address (for example “run poki.com” or “show poki.com live”),
 Build fetches the real HTML and serves it through a token-scoped, read-only
 preview proxy. This is a live page, not a screenshot or emulator: the page's own
-scripts and assets load in a sandboxed iframe without app cookies or same-origin
-access. Links and GET forms stay inside the preview. Google's full results page needs its
+scripts and assets load in a sandboxed iframe without app cookies. On loopback
+development the frame uses a second `.localhost` hostname, so games that need
+same-origin frames and storage still work without access to Quill's origin;
+deployed hosts keep the opaque sandbox. Links, GET forms and embedded frames stay inside the preview: every
+iframe a page creates is moved behind the same capability proxy, and Poki's
+current UUID and slug game wrappers both work. Any public domain can be opened
+this way, not only a fixed list. Google's full results page needs its
 own cookies and JavaScript, so a Google query resolves to Google's top result and
 shows it as a sandboxed result card; opening that result stays inside the
-preview. The proxy blocks private hosts, non-public redirects, non-HTML responses
-and form submission. Sign-in, payments, service
+preview. The proxy blocks private hosts, non-public redirects, non-HTML responses and form
+submission. Scripts, stylesheets and lazy module chunks are loaded through the
+same proxy with CORS headers, so Vite and React sites can boot in the sandbox.
+Same-site fetch/XHR calls go through a network route too, so sites that load
+their own data at runtime keep working. Sign-in, payments, service
 workers and some cross-origin APIs may not work, and the original site should be
 used for those. A live preview is reachable by anyone with its capability URL
 and is included in a shared chat. The full-screen **Expand** button opens either
@@ -106,7 +117,8 @@ already-scheduled deck is idempotent and never resets existing due dates.
 ## Verified Research
 
 Research is a third free-only composer mode, enabled for a deployment with
-`RESEARCH_ENABLED=1` (add it to `.env.local` locally). It plans searches, opens
+`RESEARCH_ENABLED=1` (add it to `.env.local` locally; Codespaces enables it
+automatically for the development origin). It plans searches, opens
 public pages, writes a cited brief and checks each key finding against the
 opened text. Reports show claim-level receipts with source links and statuses
 (`supported`, `single-source`, `unsupported`). A report is **verified** only when
@@ -132,10 +144,11 @@ The repository includes a dev container. Create a Codespace from the repository,
 wait for `npm ci` to finish, run `npm run dev`, and open the forwarded **5180**
 port if the browser does not open it. No `.env` or API key is needed. The app
 signs in as the development user, uses a local D1 database, and accepts the
-`*.app.github.dev` host. Build is enabled automatically for that development
-origin. If you copied a local `.env.local`, remove `FREEBUFF_CLIENT_ID` and
-`APP_ORIGIN` so Codespaces can use the development identity and forwarded
-origin. Keep the forwarded port private if you add API keys.
+`*.app.github.dev` host. Research, Analyze and Build are enabled automatically
+for that development origin. A loopback `APP_ORIGIN` and `FREEBUFF_CLIENT_ID`
+(the local auth example) still fall back to the development identity; remove a
+public `APP_ORIGIN` to use the development identity there too. Keep the
+forwarded port private if you add API keys.
 
 Local development uses **http://127.0.0.1:5180**. In a Codespace, the forwarded
 HTTPS URL replaces it; Vite binds to all interfaces and sends HMR over HTTPS
@@ -148,7 +161,7 @@ come from the free chain in `src/worker/public-ai.ts`: OVHcloud's anonymous
 GPT-OSS and Qwen lanes, Kilo's keyless free routes, BlockRun's six keyless
 free models, OpenRouter free variants, LLM7 turbo models, Cohere trial, Groq,
 Mistral, Workers AI, Z.ai, and keyless LLM7 and Pollinations fallbacks. The chain is ordered by a capability prior, not by provider order, so
-the best reachable lane answers first. The picker lists every configured lane.
+the best reachable lane answers first. The picker shows the five strongest working families, one row each; the remaining lanes stay available to the automatic fallback chain.
 Every key is optional, and every keyed lane is free to create; Cohere uses trial
 credits rather than unlimited free usage. A rate limit makes that lane rest
 while the next one answers, so one busy provider does not fail the message.The thread shows a **Free model** badge, or **Proof** when Proof is on; the
@@ -196,6 +209,14 @@ that answers:
   fallback referee missed.
 - **Pollinations** — keyless GPT-OSS 20B; `POLLINATIONS_API_KEY` adds Kimi K3
   (or `PUBLIC_AI_MODEL`) through the keyed endpoint.
+- **AIHubMix** — `AIHUBMIX_API_KEY` adds its zero-cost `coding-kimi-k3-free`
+  route: Kimi K3 with 100 requests/day and 5/minute on a free account with no
+  card. The paid `kimi-k3` id is never used, so this lane cannot spend balance.
+- **Alibaba Model Studio** — `DASHSCOPE_API_KEY` adds Qwen 3.8 Max, DeepSeek V4
+  Pro and GLM 5.3 through the Singapore OpenAI-compatible endpoint. New accounts
+  get 1M free tokens per model for 90 days; enable **Free Quota Only** in the
+  console so an exhausted quota cannot bill you. `DASHSCOPE_MODELS` overrides the
+  comma-separated list.
 - **Optional** — NVIDIA NIM (`NVIDIA_API_KEY`), Ollama Cloud
   (`OLLAMA_API_KEY`), SambaNova (`SAMBANOVA_API_KEY`), ModelScope
   (`MODELSCOPE_API_KEY`) and Google AI Studio (`GEMINI_API_KEY`).
@@ -214,9 +235,12 @@ rests for a few minutes before it is tried again. LLM7's anonymous quota and
 Pollinations' 30-second rule still apply, so a burst of messages can be refused;
 the app says so instead of pretending the model failed.
 
-A free key from <https://enter.pollinations.ai> adds **Kimi K3**. A free NVIDIA
-NIM key (<https://build.nvidia.com>) adds **DeepSeek V4.1 Flash**, **GLM-5.3
-Flash** and **Nemotron 3 Ultra** at up to 40 requests a minute. A free Ollama
+A free key from <https://aihubmix.com/token> adds **Kimi K3** on AIHubMix's
+zero-cost coding route (100 requests/day, 5/minute, no card). A free key from
+<https://enter.pollinations.ai> also adds **Kimi K3**. A free NVIDIA
+NIM key (<https://build.nvidia.com>) adds **Step 5 Preview**, **DeepSeek V4.1
+Flash**, **GLM-5.3 Flash**, **MiniMax M3.1 Flash**, **Nemotron 3.5 Super VL**
+and **Nemotron 3 Ultra** at up to 40 requests a minute. A free Ollama
 Cloud key (<https://ollama.com/settings/keys>, no card) adds its hosted
 DeepSeek V4 Pro, Kimi K3, GLM-5.3, MiniMax M3 and DeepSeek V4 Flash while the
 monthly starter credits last. SambaNova
@@ -272,10 +296,13 @@ compute per question instead of extra money:
   available lane: the sub-questions, the facts or calculations needed, and the
   likely pitfalls. Every draft starts from that plan instead of improvising its
   own.
-- **Adaptive depth.** A greeting goes to one model. Ordinary questions get two
-  independent drafts. Long, technical or multi-part questions get a plan, three
-  drafts and a review pass. **Effort** sets the reasoning budget without forcing
-  every message through the deep pass.
+- **Adaptive depth.** Short questions go straight to the strongest available
+  lane. Medium questions get two independent drafts. Long, technical, code or
+  multi-part questions get a plan, three drafts and a review pass. **Effort**
+  sets the reasoning budget without forcing every message through the deep pass.
+- **Visible thinking.** When a free lane exposes its reasoning, the thinking
+  panel streams that real reasoning as the lane works. The short progress lines
+  remain only as a fallback for lanes that do not expose reasoning.
 - **Proof mode.** The **Proof** switch runs the answer through checks instead
   of opinions. Code gets an independently written test suite (the solver never
   sees it), and that suite must first reject deliberately wrong programs before
@@ -303,6 +330,15 @@ compute per question instead of extra money:
   checks the finished answer; if it finds a material error, the referee repairs
   it before anything is shown. This catches mistakes introduced during synthesis,
   which the old draft-only review could not see.
+- **Measured routing.** Proof outcomes and your helpful/not-helpful ratings
+  adjust which lanes get the drafting and referee seats. Ratings also teach the
+  router whether a quick, standard or deep pass earned better results for the
+  same task family and request length; until there are enough observations, the
+  existing length/code/question heuristic remains the prior. The adjustment is
+  deliberately conservative: a lane needs several observations before it can
+  move far, so one lucky answer cannot promote a weak model. Ratings are linked
+  to lanes and depth through a private route record; no prompt text becomes
+  training data.
 - **Reliability.** A rate-limited or broken lane rests while the next one
   answers, so one free provider's daily cap does not fail a message.
 

@@ -2,7 +2,7 @@
 // rendered only inside a sandboxed iframe; the Worker never opens it.
 
 import type { PublicLane } from './public-ai'
-import { activeLanes, familyForLane, laneKey, laneStrength, laneText, type LaneResult } from './public-ai'
+import { candidateLanes, familyForLane, laneKey, laneStrength, laneText, type LaneResult } from './public-ai'
 import type { BuildInfo, BuildPage } from '../shared/types'
 import { AiError, type ChatMessage } from './ai'
 import { MAX_BUILD_HTML_CHARS } from '../shared/config'
@@ -10,14 +10,20 @@ import { repairDocument } from '../shared/html'
 import { escapeHtml, fetchSitePage, SiteError } from './site-proxy'
 import { findPhotos, photoQuery } from './photos'
 
+export type LaneHealth = {
+  status: string
+  /** Last measured round trip for this lane, in milliseconds. */
+  latencyMs?: number | null
+}
+
 export type BuildIntent = {
   lanes: PublicLane[]
   question: string
   signal?: AbortSignal
   onStatus?: (text: string) => Promise<void> | void
   onLaneResult?: (result: LaneResult) => void
-  /** Persisted provider health by lane key, so healthy lanes are tried first. */
-  health?: Map<string, string>
+  /** Persisted provider health by lane key, so healthy and fast lanes are tried first. */
+  health?: Map<string, LaneHealth>
   /** The page this request is editing, on a follow-up in a Build chat. */
   previous?: BuildInfo
 }
@@ -35,6 +41,14 @@ const PROMPT_ECHO =
 
 const GAME_NOUN =
   'game|platformer|arcade|snake|tetris|breakout|pong|pac-?man|flappy|maze|shooter|runner|racer|rpg|tic-?tac-?toe|2048|minesweeper|solitaire|wordle|physics sandbox'
+
+/** How many lanes one Build may try, including the parallel second attempt. */
+const MAX_BUILD_LANES = 4
+/** A second lane starts after this head start if the first is still writing. */
+const BUILD_STAGGER = 8_000
+/** Page builds race two lanes; games race three because they are the riskiest. */
+const BUILD_PARALLEL = 2
+const GAME_PARALLEL = 3
 
 /**
  * A request to make a game, rather than a site that merely mentions one.
@@ -248,13 +262,6 @@ export function buildMessages(question: string, system: string, previous?: Build
 }
 
 export async function buildComplete(input: BuildIntent): Promise<BuildOutcome> {
-  // Prefer lanes the health table says are working, then the strongest model.
-  // A lane that returns junk is recorded as a failure below, so it moves down
-  // on the next attempt instead of being trusted again.
-  const healthRank = (lane: PublicLane) => {
-    const status = input.health?.get(laneKey(lane))
-    return status === 'healthy' ? 0 : status === 'down' ? 2 : 1
-  }
   // One keyless search for the subject, so the page gets real photographs with
   // a licence and a photographer to credit. This runs before the page lanes so
   // photo time never eats into the page-writing budget.
@@ -276,15 +283,50 @@ export async function buildComplete(input: BuildIntent): Promise<BuildOutcome> {
             .join('\n')}`
         : '\n\nNo photographs were found for this subject. Use inline SVG illustrations or CSS gradients instead of stock photos.'
 
-  // Build is the one mode that prefers DeepSeek explicitly: it is the strongest
-  // family for complete, self-contained pages, so a healthy DeepSeek lane goes
-  // first. Health still outranks the family, which keeps a degraded DeepSeek
-  // lane from stalling a build ahead of a lane that actually answers.
-  const buildRank = (lane: PublicLane) =>
-    healthRank(lane) * 10 + (familyForLane(lane) === 'DeepSeek' ? 0 : 1)
-  const ranked = [...activeLanes(input.lanes)].sort(
-    (a, b) => buildRank(a) - buildRank(b) || laneStrength(b.model, b.url) - laneStrength(a.model, a.url),
-  )
+  // Build is slow because a page is thousands of tokens, not because the model
+  // is thinking hard. Prefer lanes that recently answered quickly over the ones
+  // with the biggest model name: a 550B lane that takes a minute is worse here
+  // than a fast lane that finishes in half the time. Health still comes first,
+  // so a degraded lane never outranks one that actually answers.
+  const statusRank = (status: string | undefined) =>
+    status === 'healthy' ? 0 : status === 'degraded' ? 2 : status === 'down' ? 3 : 1
+  // Latency is only a rough guide, so bucket it by order of magnitude.
+  const speedRank = (latencyMs: number | null | undefined) => {
+    if (!latencyMs || latencyMs <= 0) return 2
+    if (latencyMs <= 12_000) return 0
+    if (latencyMs <= 30_000) return 1
+    if (latencyMs <= 60_000) return 3
+    return 4
+  }
+  const candidates = candidateLanes(input.lanes).map((lane) => {
+    const health = input.health?.get(laneKey(lane))
+    const family = familyForLane(lane)
+    return {
+      lane,
+      status: health?.status,
+      speed: speedRank(health?.latencyMs),
+      family,
+      // DeepSeek is still the most reliable free family for a complete page,
+      // but only as a tie-break after health and measured speed.
+      score: laneStrength(lane.model, lane.url) + (family === 'DeepSeek' ? 3 : 0),
+    }
+  })
+  candidates.sort((a, b) => statusRank(a.status) - statusRank(b.status) || a.speed - b.speed || b.score - a.score)
+  // Fastest healthy lane first, then the best lane from a different family so
+  // the parallel attempt survives a provider-wide stall. The rest are fallbacks.
+  const launchOrder: typeof candidates = []
+  if (candidates[0]) launchOrder.push(candidates[0])
+  const families = new Set(launchOrder.map((candidate) => candidate.family))
+  for (const candidate of candidates.slice(1)) {
+    if (families.has(candidate.family)) continue
+    families.add(candidate.family)
+    launchOrder.push(candidate)
+    if (launchOrder.length === 2) break
+  }
+  for (const candidate of candidates) {
+    if (!launchOrder.some((chosen) => laneKey(chosen.lane) === laneKey(candidate.lane))) launchOrder.push(candidate)
+  }
+  const lanesToTry = launchOrder.slice(0, MAX_BUILD_LANES).map((candidate) => candidate.lane)
   const pageSystem = `You are a senior product designer and front-end engineer. Build one complete, polished, self-contained HTML website.
 
 Start your reply with <!doctype html> and end it with </html>. Output nothing before or after the document: no Markdown fences, no plan, no explanation, and never repeat these instructions.
@@ -319,103 +361,210 @@ The game must actually work, not just look like a game:
 - Draw all art with canvas, CSS or inline SVG. Do not use photographs, external images, scripts, stylesheets, fonts or sound files. WebAudio beeps are optional.
 - Do not use fetch/XHR/WebSocket, storage or API calls.
 - Never use placeholder mechanics, TODO comments, fake buttons or described-but-missing features.
-- Keep the page 18–30 KB, one page, no page markers, and do not turn it into a multi-page site.
+- Keep the page 6–10 KB, one page, no page markers, and do not turn it into a multi-page site.
+- A compact, complete game beats an ambitious one that gets cut off: prioritize the playable loop over extra polish, commentary, unused CSS or repeated code.
 - Do not claim to have tested it. Return the complete document, ready to play.`
 
   const system = game ? gameSystem : pageSystem
 
-  // A page takes tens of seconds on a free lane. Cap the whole attempt so a
-  // busy model cannot leave the reply spinning for minutes, and report the
-  // wait while a lane writes, since there is no partial HTML to show yet.
-  const deadline = Date.now() + (game ? 150_000 : 120_000)
-  for (const lane of ranked.slice(0, 5)) {
-    const remaining = deadline - Date.now()
-    if (remaining < 12_000) break
-    const startedAt = Date.now()
-    const timeout = AbortSignal.timeout(Math.min(game ? 65_000 : 50_000, remaining))
-    let heartbeat: ReturnType<typeof setInterval> | undefined
-    try {
-      await input.onStatus?.(`Building a self-contained page with ${lane.label}…`)
-      heartbeat = setInterval(() => {
-        const seconds = Math.round((Date.now() - startedAt) / 1_000)
-        void input.onStatus?.(`Still writing the page… ${seconds}s`)
-      }, 15_000)
-      const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout
-      const raw = await laneText(lane, {
-        messages: buildMessages(input.question, `${system}${photoBrief}`, input.previous),
-        signal,
-        temperature: game ? 0.15 : input.previous ? 0.1 : 0.2,
-        maxTokens: game ? 6_500 : 5_000,
-        // laneText reports its own failures; a success only counts once the
-        // page passes validation, so junk output cannot mark a lane healthy.
-        onLaneResult: (result) => {
-          if (!result.ok) input.onLaneResult?.(result)
-        },
-      })
-      const pages = extractPages(raw, { requireInteractive: game })
-      const first = pages[0]
-      if (!first) {
-        console.log('build.rejected', {
+  if (!lanesToTry.length) {
+    throw new AiError('unavailable', 'Build has no free model lanes available right now. Try again in a minute.', 503)
+  }
+
+  // A page takes tens of seconds on a free lane, so the budget is generous but
+  // bounded. Two lanes write in parallel after a short head start; whichever
+  // returns a valid page first wins and the other is cancelled. This replaces
+  // the old sequential retries, where one slow lane could hold the build for a
+  // full minute before the next lane was even tried.
+  const deadline = Date.now() + (game ? 155_000 : 100_000)
+  const startedAt = Date.now()
+  const heartbeat = setInterval(() => {
+    const seconds = Math.round((Date.now() - startedAt) / 1_000)
+    void input.onStatus?.(game ? `Still building the game… ${seconds}s` : `Still building the page… ${seconds}s`)
+  }, 5_000)
+
+  type Attempt = {
+    lane: PublicLane
+    ok: boolean
+    pages?: BuildPage[]
+    timedOut: boolean
+    elapsed: number
+  }
+  const running = new Map<string, () => void>()
+  let pending: { key: string; promise: Promise<Attempt> }[] = []
+  let nextLane = 0
+  let lastLaunchAt = 0
+  let launched = 0
+  let timeouts = 0
+
+  const launch = (lane: PublicLane) => {
+    const key = laneKey(lane)
+    const laneStartedAt = Date.now()
+    const controller = new AbortController()
+    let cancelledByUs = false
+    running.set(key, () => {
+      cancelledByUs = true
+      controller.abort()
+    })
+    const remaining = Math.max(15_000, deadline - Date.now())
+    const timeout = AbortSignal.timeout(Math.min(game ? 90_000 : 48_000, remaining))
+    const signal = input.signal
+      ? AbortSignal.any([input.signal, controller.signal, timeout])
+      : AbortSignal.any([controller.signal, timeout])
+    void input.onStatus?.(
+      launched === 0
+        ? `Building the ${game ? 'game' : 'page'} with ${lane.label ?? lane.model}…`
+        : `Also trying ${lane.label ?? lane.model} in parallel…`,
+    )
+    launched += 1
+    lastLaunchAt = Date.now()
+    const promise = (async (): Promise<Attempt> => {
+      try {
+        const raw = await laneText(lane, {
+          messages: buildMessages(input.question, `${system}${photoBrief}`, input.previous),
+          signal,
+          temperature: game ? 0.15 : input.previous ? 0.1 : 0.2,
+          maxTokens: game ? 4_000 : 5_000,
+          // laneText reports its own failures; a success only counts once the
+          // page passes validation, so junk output cannot mark a lane healthy.
+          onLaneResult: (result) => {
+            if (result.ok) return
+            // Losing a race, a timeout, or a user stop is not the lane's fault.
+            if (cancelledByUs || timeout.aborted || input.signal?.aborted) return
+            input.onLaneResult?.(result)
+          },
+        })
+        const pages = extractPages(raw, { requireInteractive: game })
+        if (!pages[0]) {
+          console.log('build.rejected', {
+            lane: lane.label,
+            chars: raw.length,
+            echo: PROMPT_ECHO.test(raw),
+            head: raw.slice(0, 90).replace(/\s+/g, ' '),
+            tail: raw.slice(-70).replace(/\s+/g, ' '),
+          })
+          // The model answered but not with a page: count it as a lane failure
+          // so the health table stops putting it first on the next build.
+          if (!cancelledByUs) {
+            input.onLaneResult?.({
+              lane,
+              ok: false,
+              code: 'empty',
+              message: 'The model did not return a usable page.',
+              latencyMs: Date.now() - laneStartedAt,
+            })
+          }
+          return { lane, ok: false, timedOut: false, elapsed: Date.now() - laneStartedAt }
+        }
+        return { lane, ok: true, pages, timedOut: false, elapsed: Date.now() - laneStartedAt }
+      } catch (error) {
+        const timedOut = timeout.aborted && !cancelledByUs
+        console.log('build.lane_failed', {
           lane: lane.label,
-          chars: raw.length,
-          echo: PROMPT_ECHO.test(raw),
-          head: raw.slice(0, 90).replace(/\s+/g, ' '),
-          tail: raw.slice(-70).replace(/\s+/g, ' '),
+          ms: Date.now() - laneStartedAt,
+          error: cancelledByUs
+            ? 'cancelled: another lane finished first.'
+            : timedOut
+              ? 'timeout: the lane was too slow.'
+              : error instanceof AiError
+                ? `${error.code}: ${error.message}`
+                : String(error).slice(0, 200),
         })
-        // The model answered but not with a page: count it as a lane failure
-        // so the health table stops putting it first on the next build.
-        input.onLaneResult?.({
-          lane,
-          ok: false,
-          code: 'empty',
-          message: 'The model did not return a usable page.',
-          latencyMs: Date.now() - startedAt,
-        })
+        return { lane, ok: false, timedOut, elapsed: Date.now() - laneStartedAt }
+      } finally {
+        running.delete(key)
+      }
+    })()
+    pending.push({ key, promise })
+  }
+
+  let winner: Attempt | undefined
+  try {
+    launch(lanesToTry[0]!)
+    nextLane = 1
+    // Keep going while another lane can still start, not only while one is
+    // running. A lane that fails before the stagger used to empty `pending` and
+    // end the build with a single attempt, leaving every fallback unused.
+    while (pending.length || nextLane < lanesToTry.length) {
+      if (input.signal?.aborted) break
+      const remaining = deadline - Date.now()
+      // Nothing is running and there is no time for another useful attempt.
+      if (!pending.length && remaining <= 12_000) break
+      // Start the second lane after a head start, or immediately when the lanes
+      // already running have failed. Never start a lane with too little budget
+      // left for it to plausibly finish.
+      const parallel = game ? GAME_PARALLEL : BUILD_PARALLEL
+      const canStart = nextLane < lanesToTry.length && pending.length < parallel && remaining > 12_000
+      if (canStart && (pending.length === 0 || Date.now() - lastLaunchAt >= BUILD_STAGGER)) {
+        launch(lanesToTry[nextLane]!)
+        nextLane += 1
+      }
+      const untilStagger = BUILD_STAGGER - (Date.now() - lastLaunchAt)
+      const wait = canStart && untilStagger > 0 ? Math.min(untilStagger, Math.max(0, remaining)) : Math.max(0, remaining)
+      let wake: ReturnType<typeof setTimeout> | undefined
+      const settled = await Promise.race([
+        ...pending.map((entry) => entry.promise),
+        new Promise<undefined>((resolve) => {
+          wake = setTimeout(() => resolve(undefined), wait)
+        }),
+      ])
+      if (wake) clearTimeout(wake)
+      if (!settled) {
+        // The stagger or the deadline elapsed with no answer.
+        if (Date.now() >= deadline) break
         continue
       }
-      input.onLaneResult?.({ lane, ok: true, latencyMs: Date.now() - startedAt })
-      const intro = input.previous
-        ? pages.length > 1
-          ? `Updated your ${pages.length}-page site. Preview it below, switch pages with the tabs above the frame, then download the pages you want.`
-          : 'Updated the page. Preview it below, then ask for another change if something still needs work.'
-        : game
-          ? 'Here is your game. Preview it below and play it, then ask for a change to iterate.'
-          : pages.length > 1
-            ? `Here is your ${pages.length}-page site. Preview it below, switch pages with the tabs above the frame, then download the pages you want.`
-            : 'Here is your page. Preview it below, then download it when it looks right.'
-      return {
-        text: intro,
-        build: {
-          status: 'ready',
-          kind: 'page',
-          title: titleOf(first.html),
-          html: first.html,
-          ...(pages.length > 1 ? { pages } : {}),
-          ...(interactive ? { interactive } : {}),
-          models: [lane.label ?? lane.model],
-          asOf: Date.now(),
-        },
+      pending = pending.filter((entry) => entry.key !== laneKey(settled.lane))
+      if (settled.ok && settled.pages) {
+        winner = settled
+        break
       }
-    } catch (error) {
-      if (input.signal?.aborted) break
-      console.log('build.lane_failed', {
-        lane: lane.label,
-        error: timeout.aborted
-          ? 'timeout: the lane was too slow.'
-          : error instanceof AiError
-            ? `${error.code}: ${error.message}`
-            : String(error).slice(0, 200),
-      })
-      // Try another free lane within the remaining budget.
-    } finally {
-      if (heartbeat) clearInterval(heartbeat)
+      if (settled.timedOut) timeouts += 1
+      // A failed lane frees its slot; the next loop starts a replacement now.
+    }
+  } finally {
+    clearInterval(heartbeat)
+    // The race is over: stop the lane that lost instead of leaving it writing.
+    for (const cancel of running.values()) cancel()
+  }
+
+  if (winner?.ok && winner.pages) {
+    const pages = winner.pages
+    const lane = winner.lane
+    input.onLaneResult?.({ lane, ok: true, latencyMs: winner.elapsed })
+    const first = pages[0]!
+    const intro = input.previous
+      ? pages.length > 1
+        ? `Updated your ${pages.length}-page site. Preview it below, switch pages with the tabs above the frame, then download the pages you want.`
+        : 'Updated the page. Preview it below, then ask for another change if something still needs work.'
+      : game
+        ? 'Here is your game. Preview it below and play it, then ask for a change to iterate.'
+        : pages.length > 1
+          ? `Here is your ${pages.length}-page site. Preview it below, switch pages with the tabs above the frame, then download the pages you want.`
+          : 'Here is your page. Preview it below, then download it when it looks right.'
+    return {
+      text: intro,
+      build: {
+        status: 'ready',
+        kind: 'page',
+        title: titleOf(first.html),
+        html: first.html,
+        ...(pages.length > 1 ? { pages } : {}),
+        ...(interactive ? { interactive } : {}),
+        models: [lane.label ?? lane.model],
+        asOf: Date.now(),
+      },
     }
   }
+
+  if (input.signal?.aborted) throw new AiError('stopped', 'The build was stopped.', 499)
+  const tried = Math.max(1, launched)
+  const slow = timeouts ? ` ${timeouts} timed out.` : ''
   throw new AiError(
     'unavailable',
     game
-      ? 'Build could not get a playable game from a free model. Free models may be busy right now — try again, or simplify the game idea.'
-      : 'Build could not finish a page from a free model. Free models may be busy right now — try again, or ask for something smaller.',
+      ? `Build tried ${tried} free ${tried === 1 ? 'model' : 'models'} and none returned a playable game.${slow} Free models may be busy right now — try again, or simplify the game idea.`
+      : `Build tried ${tried} free ${tried === 1 ? 'model' : 'models'} and none returned a usable page.${slow} Free models may be busy right now — try again, or ask for something smaller.`,
     503,
   )
 }

@@ -327,6 +327,40 @@ export interface TeamInfo {
   confidence: TeamConfidence
 }
 
+export type AgentTool = 'research' | 'build' | 'canvas' | 'answer'
+export type AgentStepStatus = 'pending' | 'running' | 'done' | 'skipped' | 'failed'
+
+/** One planned step of an Agent run. */
+export interface AgentStep {
+  id: string
+  tool: AgentTool
+  title: string
+  /** The self-contained task given to this tool. */
+  instruction: string
+  status: AgentStepStatus
+  startedAt?: number
+  finishedAt?: number
+  /** Model display name used for this step, when it ran. */
+  model?: string
+  /** A short result note, such as "5 sources · 4 supported". */
+  detail?: string
+  /** The saved reply that carries this step's artifact. */
+  artifactMessageId?: string
+}
+
+/** The plan, progress and receipt of one Agent run. */
+export interface AgentInfo {
+  goal: string
+  status: 'planning' | 'running' | 'done' | 'partial' | 'failed'
+  steps: AgentStep[]
+  /** Plain-language summary of what actually happened. */
+  receipt: string
+  /** Display names only, never keys. */
+  models: string[]
+  asOf: number
+  reason?: string
+}
+
 export interface Message {
   id: string
   conversationId: string
@@ -354,6 +388,8 @@ export interface Message {
   build?: BuildInfo
   /** The generated study set, when Canvas mode produced it. */
   canvas?: CanvasInfo
+  /** The orchestrated run, when Agent mode produced this reply. */
+  agent?: AgentInfo
   /** The person's rating of this reply. */
   feedback?: FeedbackRating
   /** Files the person attached to this user message. */
@@ -381,6 +417,7 @@ export interface SharedMessage {
   analysis?: AnalysisInfo
   build?: BuildInfo
   canvas?: CanvasInfo
+  agent?: AgentInfo
   attachments?: MessageAttachment[]
 }
 
@@ -463,6 +500,8 @@ export interface Me {
     build: boolean
     /** Canvas (flashcards and quizzes) is available on the free hosted models. */
     canvas: boolean
+    /** Agent can plan and run the free-mode tools on this deployment. */
+    agent: boolean
     database: boolean
     auth: 'freebuff' | 'development'
   }
@@ -485,6 +524,7 @@ export type ChatEvent =
   | { type: 'analysis'; analysis: AnalysisInfo; job?: AnalysisJob }
   | { type: 'build'; build: BuildInfo }
   | { type: 'canvas'; canvas: CanvasInfo }
+  | { type: 'agent'; agent: AgentInfo }
   | { type: 'notice'; text: string }
   | { type: 'done'; message: Message; usage: Me['usage'] }
   | { type: 'error'; code: string; message: string }

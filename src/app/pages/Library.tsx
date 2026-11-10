@@ -1,12 +1,14 @@
-import { ArrowUpRight, Brain, Copy, Download, FileSpreadsheet, Hammer, Layers, MessageCircle, Pin, Search, Share2, Shuffle } from 'lucide-react'
-import { useState } from 'react'
+import { ArrowUpRight, Brain, Copy, Download, FileSpreadsheet, FileText, Hammer, HardDrive, Layers, MessageCircle, Pin, Search, Share2, Shuffle, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 
 import type { ArtifactKind, ArtifactStatus, ArtifactSummary } from '../../shared/types'
+import { formatBytes } from '../../shared/pdf'
 import { ShareDialog } from '../components/ShareDialog'
 import { Badge, Spinner, useToast } from '../components/ui'
 import { downloadArtifact, useArtifacts, useDuplicateArtifact, usePinArtifact, useReviewSummary } from '../lib/api'
 import { cx } from '../lib/cx'
+import { deleteSavedPdf, downloadBlob, listSavedPdfs, type SavedPdfFile } from '../lib/pdf-store'
 
 type Filter = 'all' | 'pinned' | ArtifactKind
 
@@ -155,10 +157,29 @@ export function Library() {
   const [filter, setFilter] = useState<Filter>('all')
   const [shareFor, setShareFor] = useState<string | null>(null)
   const [downloading, setDownloading] = useState<string | null>(null)
+  const [localFiles, setLocalFiles] = useState<SavedPdfFile[]>([])
   const toast = useToast()
   const navigate = useNavigate()
   const pin = usePinArtifact()
   const duplicate = useDuplicateArtifact()
+  useEffect(() => {
+    void listSavedPdfs()
+      .then(setLocalFiles)
+      .catch(() => {
+        /* Local history is optional when storage is unavailable. */
+      })
+  }, [])
+
+  const removeLocal = async (file: SavedPdfFile) => {
+    try {
+      await deleteSavedPdf(file.id)
+      setLocalFiles((current) => current.filter((item) => item.id !== file.id))
+      toast('Removed from this device')
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : 'Could not remove this file', 'danger')
+    }
+  }
+
   const items = data?.items ?? []
   const filtered =
     filter === 'all' ? items : filter === 'pinned' ? items.filter((item) => item.pinned) : items.filter((item) => item.kind === filter)
@@ -210,6 +231,56 @@ export function Library() {
           {items.length > 0 && <span className="text-[11.5px] tabular-nums text-faint">{items.length} saved</span>}
         </div>
 
+        <Link
+          to="/tools/pdf"
+          className="mt-5 flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3 shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-colors hover:border-line-strong hover:bg-surface-2/40"
+        >
+          <span className="grid size-8 shrink-0 place-items-center rounded-tile bg-fg text-bg">
+            <FileText className="size-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[12.5px] font-medium">PDF Studio</span>
+            <span className="mt-0.5 block text-[11.5px] text-muted">Merge, split, compress, sign and convert documents privately.</span>
+          </span>
+          <span className="inline-flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-muted">
+            Open
+            <ArrowUpRight className="size-3.5" />
+          </span>
+        </Link>
+
+        {localFiles.length > 0 && (
+          <section className="mt-5" aria-labelledby="local-pdf-heading">
+            <div className="flex items-center justify-between gap-3">
+              <h2 id="local-pdf-heading" className="inline-flex items-center gap-1.5 text-[12px] font-semibold">
+                <HardDrive className="size-3.5 text-faint" />
+                PDF Studio files
+              </h2>
+              <span className="text-[10.5px] text-faint">On this device · {localFiles.length}</span>
+            </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {localFiles.map((file) => (
+                <article key={file.id} className="flex min-w-0 items-center gap-2.5 rounded-tile border border-line bg-surface px-3 py-2.5">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-[9px] bg-surface-2 text-fg">
+                    <FileText className="size-3.5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[12px] font-medium" title={file.name}>{file.name}</p>
+                    <p className="mt-0.5 text-[10.5px] text-faint">
+                      {formatBytes(file.size)}{file.pages ? ` · ${file.pages} page${file.pages === 1 ? '' : 's'}` : ''} · {when(file.createdAt)}
+                    </p>
+                  </div>
+                  <button type="button" className={ACTION} onClick={() => downloadBlob(file.blob, file.name)} aria-label={`Download ${file.name}`}>
+                    <Download /> Download
+                  </button>
+                  <button type="button" className={cx(ACTION, 'hover:text-danger')} onClick={() => void removeLocal(file)} aria-label={`Remove ${file.name}`}>
+                    <Trash2 />
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
         {review && review.total > 0 ? (
           <Link
             to="/review"
@@ -243,11 +314,11 @@ export function Library() {
                   onClick={() => setFilter(option.id)}
                   className={cx(
                     'inline-flex h-8 items-center gap-1.5 rounded-tile px-3 text-[12.5px] font-medium transition-colors',
-                    selected ? 'bg-fg text-white' : 'text-muted hover:bg-surface-2 hover:text-fg',
+                    selected ? 'bg-fg text-bg' : 'text-muted hover:bg-surface-2 hover:text-fg',
                   )}
                 >
                   {option.label}
-                  <span className={cx('text-[10.5px] tabular-nums', selected ? 'text-white/60' : 'text-faint')}>{count(option.id)}</span>
+                  <span className={cx('text-[10.5px] tabular-nums', selected ? 'text-bg/60' : 'text-faint')}>{count(option.id)}</span>
                 </button>
               )
             })}

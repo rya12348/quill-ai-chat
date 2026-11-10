@@ -7,6 +7,7 @@ import { Spinner, ToastProvider } from './components/ui'
 import { ApiError, useMe } from './lib/api'
 import { Chat } from './pages/Chat'
 import { Library } from './pages/Library'
+import { PdfWorkbench } from './pages/PdfWorkbench'
 import { Review } from './pages/Review'
 import { Settings } from './pages/Settings'
 import { SharedChat } from './pages/SharedChat'
@@ -33,6 +34,7 @@ function Gate() {
         <Route index element={<Chat />} />
         <Route path="c/:id" element={<Chat />} />
         <Route path="library" element={<Library />} />
+        <Route path="tools/pdf" element={<PdfWorkbench />} />
         <Route path="review" element={<Review />} />
         <Route path="settings" element={<Settings />} />
       </Route>

@@ -4,9 +4,10 @@ import { normalizeMemory } from '../../shared/memory'
 import { groupAttachmentMeta } from '../attachments'
 import { aiConfigured, isModelId } from '../ai'
 import { privateJson } from '../auth'
-import { mapConversation, mapMessage, now } from '../db'
+import { mapConversation, mapMessage, now, titleFrom } from '../db'
 import type { AppContext } from '../env'
 import { publicLanes } from '../public-ai'
+import { generateConversationTitle } from '../title'
 
 export const conversations = new Hono<AppContext>()
 
@@ -50,7 +51,7 @@ conversations.get('/:id', async (c) => {
       )
       .bind(owner, conversationId),
     db
-      .prepare(`SELECT m.*, r.content AS reasoning, r.duration_ms AS reasoning_ms, s.content AS sources, f.rating AS feedback, tm.content AS team, mp.content AS proof, mr.content AS research, ma.content AS analysis, mb.content AS build, mc.content AS canvas FROM messages m LEFT JOIN message_reasoning r ON r.message_id = m.id AND r.owner_sub = m.owner_sub LEFT JOIN message_sources s ON s.message_id = m.id AND s.owner_sub = m.owner_sub LEFT JOIN message_feedback f ON f.message_id = m.id AND f.owner_sub = m.owner_sub LEFT JOIN message_team tm ON tm.message_id = m.id AND tm.owner_sub = m.owner_sub LEFT JOIN message_proof mp ON mp.message_id = m.id AND mp.owner_sub = m.owner_sub LEFT JOIN message_research mr ON mr.message_id = m.id AND mr.owner_sub = m.owner_sub LEFT JOIN message_analysis ma ON ma.message_id = m.id AND ma.owner_sub = m.owner_sub LEFT JOIN message_build mb ON mb.message_id = m.id AND mb.owner_sub = m.owner_sub LEFT JOIN message_canvas mc ON mc.message_id = m.id AND mc.owner_sub = m.owner_sub WHERE m.owner_sub = ? AND m.conversation_id = ? AND NOT (m.role = 'assistant' AND m.content = '') ORDER BY m.created_at ASC`)
+      .prepare(`SELECT m.*, r.content AS reasoning, r.duration_ms AS reasoning_ms, s.content AS sources, f.rating AS feedback, tm.content AS team, mp.content AS proof, mr.content AS research, ma.content AS analysis, mb.content AS build, mc.content AS canvas, mg.content AS agent FROM messages m LEFT JOIN message_reasoning r ON r.message_id = m.id AND r.owner_sub = m.owner_sub LEFT JOIN message_sources s ON s.message_id = m.id AND s.owner_sub = m.owner_sub LEFT JOIN message_feedback f ON f.message_id = m.id AND f.owner_sub = m.owner_sub LEFT JOIN message_team tm ON tm.message_id = m.id AND tm.owner_sub = m.owner_sub LEFT JOIN message_proof mp ON mp.message_id = m.id AND mp.owner_sub = m.owner_sub LEFT JOIN message_research mr ON mr.message_id = m.id AND mr.owner_sub = m.owner_sub LEFT JOIN message_analysis ma ON ma.message_id = m.id AND ma.owner_sub = m.owner_sub LEFT JOIN message_build mb ON mb.message_id = m.id AND mb.owner_sub = m.owner_sub LEFT JOIN message_canvas mc ON mc.message_id = m.id AND mc.owner_sub = m.owner_sub LEFT JOIN message_agent mg ON mg.message_id = m.id AND mg.owner_sub = m.owner_sub WHERE m.owner_sub = ? AND m.conversation_id = ? AND NOT (m.role = 'assistant' AND m.content = '') ORDER BY m.created_at ASC`)
       .bind(owner, conversationId),
     db
       .prepare(`SELECT id, message_id, name, mime, size, kind FROM message_attachments WHERE owner_sub = ? AND conversation_id = ? ORDER BY message_id, position, created_at`)
@@ -75,6 +76,9 @@ conversations.get('/:id', async (c) => {
         .prepare(`DELETE FROM message_team WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
         .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
       db
+        .prepare(`DELETE FROM message_lane_routes WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
+        .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
+      db
         .prepare(`DELETE FROM message_proof WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
         .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
       db
@@ -88,6 +92,9 @@ conversations.get('/:id', async (c) => {
         .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
       db
         .prepare(`DELETE FROM message_canvas WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
+        .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
+      db
+        .prepare(`DELETE FROM message_agent WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
         .bind(owner, owner, conversationId, now() - ORPHAN_AFTER),
       db
         .prepare(`DELETE FROM canvas_reviews WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content = '' AND created_at < ?)`)
@@ -111,6 +118,56 @@ conversations.get('/:id', async (c) => {
       return files?.length ? { ...message, attachments: files } : message
     }),
   })
+})
+
+/**
+ * Replace the first-message placeholder with a short model-written title.
+ * The placeholder check makes this idempotent and prevents overwriting a
+ * conversation the person has renamed themselves.
+ */
+conversations.post('/:id/title', async (c) => {
+  const db = c.get('db')
+  const owner = c.get('user').sub
+  const conversationId = c.req.param('id')
+  const conversation = await db
+    .prepare(`SELECT title, model FROM conversations WHERE owner_sub = ? AND id = ?`)
+    .bind(owner, conversationId)
+    .first<{ title: string; model: string }>()
+  if (!conversation) return c.json({ error: 'Not found.' }, 404)
+
+  const firstUser = await db
+    .prepare(`SELECT content FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'user' ORDER BY created_at ASC LIMIT 1`)
+    .bind(owner, conversationId)
+    .first<{ content: string }>()
+  if (!firstUser || conversation.title !== titleFrom(firstUser.content)) {
+    return privateJson(c, { title: conversation.title })
+  }
+
+  const firstAssistant = await db
+    .prepare(`SELECT content FROM messages WHERE owner_sub = ? AND conversation_id = ? AND role = 'assistant' AND content <> '' ORDER BY created_at ASC LIMIT 1`)
+    .bind(owner, conversationId)
+    .first<{ content: string }>()
+  if (!firstAssistant) return privateJson(c, { title: conversation.title })
+
+  const title = await generateConversationTitle({
+    env: c.env,
+    model: conversation.model,
+    user: firstUser.content,
+    assistant: firstAssistant.content,
+    signal: AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(20_000)]),
+  })
+  if (!title || title === conversation.title) return privateJson(c, { title: conversation.title })
+
+  // The title predicate makes two tabs racing on the same chat harmless.
+  await db
+    .prepare(`UPDATE conversations SET title = ? WHERE owner_sub = ? AND id = ? AND title = ?`)
+    .bind(title, owner, conversationId, conversation.title)
+    .run()
+  const saved = await db
+    .prepare(`SELECT title FROM conversations WHERE owner_sub = ? AND id = ?`)
+    .bind(owner, conversationId)
+    .first<{ title: string }>()
+  return privateJson(c, { title: saved?.title ?? title })
 })
 
 /** The condensed memory carried from earlier turns, when one exists. */
@@ -262,11 +319,13 @@ conversations.delete('/:id', async (c) => {
     db.prepare(`DELETE FROM message_sources WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_feedback WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_team WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
+    db.prepare(`DELETE FROM message_lane_routes WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_proof WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_research WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_analysis WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_build WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_canvas WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
+    db.prepare(`DELETE FROM message_agent WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM canvas_reviews WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM build_embeds WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_attachments WHERE owner_sub = ? AND conversation_id = ?`).bind(owner, conversationId),

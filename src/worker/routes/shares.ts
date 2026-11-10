@@ -34,7 +34,7 @@ shares.get('/:token', async (c) => {
     db.prepare(`SELECT title, model, created_at, updated_at FROM conversations WHERE owner_sub = ? AND id = ?`).bind(share.owner_sub, share.conversation_id),
     db
       .prepare(
-        `SELECT m.*, r.content AS reasoning, r.duration_ms AS reasoning_ms, s.content AS sources, tm.content AS team, mp.content AS proof, mr.content AS research, ma.content AS analysis, mb.content AS build, mc.content AS canvas
+        `SELECT m.*, r.content AS reasoning, r.duration_ms AS reasoning_ms, s.content AS sources, tm.content AS team, mp.content AS proof, mr.content AS research, ma.content AS analysis, mb.content AS build, mc.content AS canvas, mg.content AS agent
          FROM messages m
          LEFT JOIN message_reasoning r ON r.message_id = m.id AND r.owner_sub = m.owner_sub
          LEFT JOIN message_sources s ON s.message_id = m.id AND s.owner_sub = m.owner_sub
@@ -44,6 +44,7 @@ shares.get('/:token', async (c) => {
          LEFT JOIN message_analysis ma ON ma.message_id = m.id AND ma.owner_sub = m.owner_sub
          LEFT JOIN message_build mb ON mb.message_id = m.id AND mb.owner_sub = m.owner_sub
          LEFT JOIN message_canvas mc ON mc.message_id = m.id AND mc.owner_sub = m.owner_sub
+         LEFT JOIN message_agent mg ON mg.message_id = m.id AND mg.owner_sub = m.owner_sub
          WHERE m.owner_sub = ? AND m.conversation_id = ? AND NOT (m.role = 'assistant' AND m.content = '')
          ORDER BY m.created_at ASC`,
       )
@@ -79,6 +80,7 @@ shares.get('/:token', async (c) => {
       ...(message.analysis ? { analysis: message.analysis } : {}),
       ...(message.build ? { build: message.build } : {}),
       ...(message.canvas ? { canvas: message.canvas } : {}),
+      ...(message.agent ? { agent: message.agent } : {}),
       ...(files?.length ? { attachments: files } : {}),
     }
   })

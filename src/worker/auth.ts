@@ -5,7 +5,7 @@ import type { Context, MiddlewareHandler } from 'hono'
 import type { AppContext, Env } from './env'
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
-const CODESPACES_HOST = /\.github\.dev$/i
+const CODESPACES_HOST = /\.(?:app\.github\.dev|githubpreview\.dev)$/i
 
 /** Whether a configured origin points back at this machine. */
 function isLoopbackOrigin(value: string): boolean {
@@ -16,11 +16,57 @@ function isLoopbackOrigin(value: string): boolean {
   }
 }
 
+function isCodespacesOrigin(value: string): boolean {
+  try {
+    return CODESPACES_HOST.test(new URL(value).hostname)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Codespaces terminates TLS at its proxy and forwards the request to the
+ * loopback dev server. Use the public host the browser actually visited so
+ * same-origin mutation checks and generated preview URLs do not point at
+ * 127.0.0.1.
+ */
+function forwardedCodespacesOrigin(request: Request): string | undefined {
+  const host = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
+  if (!host) return undefined
+  let url: URL
+  try {
+    url = new URL(`https://${host}`)
+  } catch {
+    return undefined
+  }
+  if (!CODESPACES_HOST.test(url.hostname)) return undefined
+  const proto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase()
+  if (proto && proto !== 'https') return undefined
+  return url.origin
+}
+
+function isCodespacesHost(request: Request): boolean {
+  return CODESPACES_HOST.test(new URL(request.url).hostname) || Boolean(forwardedCodespacesOrigin(request))
+}
+
+/**
+ * Codespaces is a development origin. Use the development identity when no
+ * client ID is configured, or when the auth config still points at loopback
+ * (the usual local `.env.local` auth example). A deliberately public
+ * `APP_ORIGIN` with a client ID stays real auth.
+ */
+function codespacesDevelopment(env: Env, request: Request): boolean {
+  if (!isCodespacesHost(request)) return false
+  if (!env.FREEBUFF_CLIENT_ID) return true
+  const configured = env.APP_ORIGIN?.trim()
+  return !configured || isLoopbackOrigin(configured) || isCodespacesOrigin(configured)
+}
+
 // One development identity, honoured only on loopback or a GitHub Codespaces
-// preview origin when no client ID is configured. It lets the template run
-// before auth is provisioned and can never activate on a normal deployed
-// origin. That matters here: every message spends the owner's API credits, so
-// a deployed app without Sign in with Freebuff answers nobody.
+// preview origin. That includes a Codespace carrying the local loopback auth
+// example, but never a normal deployed origin or a public APP_ORIGIN. This
+// matters here: every message spends the owner's API credits, so a deployed
+// app without Sign in with Freebuff answers nobody.
 export const DEV_USER: FreebuffUser = {
   sub: 'dev-user',
   name: 'Alex Morgan',
@@ -33,10 +79,10 @@ export function isLoopback(request: Request): boolean {
 }
 
 export function authMode(env: Env, request: Request): 'freebuff' | 'development' | 'off' {
+  if (codespacesDevelopment(env, request)) return 'development'
   if (env.FREEBUFF_CLIENT_ID) return 'freebuff'
   if (isLoopback(request)) return 'development'
-  if (CODESPACES_HOST.test(new URL(request.url).hostname)) return 'development'
-  return forwardedDevelopmentOrigin(env, request) ? 'development' : 'off'
+  return 'off'
 }
 
 /**
@@ -53,7 +99,7 @@ let cached: { key: string; auth: FreebuffAuth } | undefined
 
 /** One auth instance per isolate; recreated only if the config changes. */
 export function getAuth(env: Env, request: Request): FreebuffAuth | null {
-  if (!env.FREEBUFF_CLIENT_ID) return null
+  if (!env.FREEBUFF_CLIENT_ID || authMode(env, request) !== 'freebuff') return null
   const baseUrl = appOrigin(env, request)
   const key = `${env.FREEBUFF_CLIENT_ID}|${env.FREEBUFF_ISSUER ?? ''}|${baseUrl}`
   if (cached?.key !== key) {
@@ -71,37 +117,19 @@ export function getAuth(env: Env, request: Request): FreebuffAuth | null {
 }
 
 export async function currentUser(env: Env, request: Request): Promise<FreebuffUser | null> {
+  const mode = authMode(env, request)
+  if (mode === 'development') return DEV_USER
+  if (mode !== 'freebuff') return null
   const auth = getAuth(env, request)
-  if (auth) return auth.getUser(request)
-  return authMode(env, request) === 'development' ? DEV_USER : null
-}
-
-/**
- * Codespaces terminates TLS at its proxy and forwards the request to the
- * loopback dev server. Use the public host the browser actually visited so
- * same-origin mutation checks and generated preview URLs do not point at
- * 127.0.0.1. Only trust this for the unauthenticated development server on a
- * Codespaces host; a configured public APP_ORIGIN stays authoritative.
- */
-function forwardedDevelopmentOrigin(env: Env, request: Request): string | undefined {
-  if (env.FREEBUFF_CLIENT_ID) return undefined
-  const host = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
-  if (!host) return undefined
-  let url: URL
-  try {
-    url = new URL(`https://${host}`)
-  } catch {
-    return undefined
-  }
-  if (!CODESPACES_HOST.test(url.hostname)) return undefined
-  const proto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase()
-  if (proto && proto !== 'https') return undefined
-  return url.origin
+  return auth ? auth.getUser(request) : null
 }
 
 export function appOrigin(env: Env, request: Request): string {
   const configured = env.APP_ORIGIN?.trim()
-  const forwarded = forwardedDevelopmentOrigin(env, request)
+  const forwarded = forwardedCodespacesOrigin(request)
+  // A loopback origin is what the auth example writes locally. In Codespaces
+  // the browser is on the forwarded HTTPS origin, so use that instead. A
+  // configured public APP_ORIGIN stays authoritative.
   if (forwarded && (!configured || isLoopbackOrigin(configured))) return forwarded
   return configured || new URL(request.url).origin
 }
@@ -116,11 +144,24 @@ export function isCodespacesRequest(env: Env, request: Request): boolean {
   }
 }
 
+function featureFlag(value: string | undefined): boolean | undefined {
+  if (value === '1' || value === 'true') return true
+  if (value === '0' || value === 'false') return false
+  return undefined
+}
+
+/** Free-only modes are on by default in the Codespaces development preview. */
+export function researchEnabledFor(env: Env, request: Request): boolean {
+  return featureFlag(env.RESEARCH_ENABLED) ?? isCodespacesRequest(env, request)
+}
+
+export function analyzeEnabledFor(env: Env, request: Request): boolean {
+  return featureFlag(env.ANALYZE_ENABLED) ?? isCodespacesRequest(env, request)
+}
+
 /** Build is opt-in, except on the Codespaces development preview. */
 export function buildEnabledFor(env: Env, request: Request): boolean {
-  if (env.BUILD_ENABLED === '1' || env.BUILD_ENABLED === 'true') return true
-  if (env.BUILD_ENABLED) return false
-  return isCodespacesRequest(env, request)
+  return featureFlag(env.BUILD_ENABLED) ?? isCodespacesRequest(env, request)
 }
 
 /**

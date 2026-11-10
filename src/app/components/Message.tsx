@@ -6,9 +6,11 @@ import { useNavigate } from 'react-router'
 
 import { repairDocument } from '../../shared/html'
 import { elapsedLabel } from '../../shared/receipt'
-import type { AnalysisInfo, BuildInfo, CanvasInfo, FeedbackRating, MessageAttachment, ProofInfo, ResearchInfo, Source, TeamInfo } from '../../shared/types'
+import { splitThinking } from '../../shared/thinking'
+import type { AgentInfo, AnalysisInfo, BuildInfo, CanvasInfo, FeedbackRating, MessageAttachment, ProofInfo, ResearchInfo, Source, TeamInfo } from '../../shared/types'
 import { cx } from '../lib/cx'
 import { useEnrollReviewDeck } from '../lib/api'
+import { AgentNote } from './AgentNote'
 import { Markdown } from './Markdown'
 import { Mark } from './Shell'
 import { useToast } from './ui'
@@ -481,7 +483,9 @@ function BuildNote({ build }: { build: BuildInfo }) {
   // game's assets are redirected to the port sign-in page and it stays on its
   // loading screen. Give only the game document same-origin access there; the
   // proxied site itself and every other live page stay opaque. The key makes
-  // the new sandbox apply when the bridge hands over to the game.
+  // the new sandbox apply when the bridge hands over to the game. On loopback
+  // the frame's own `.localhost` host already isolates it, so it can keep a
+  // real origin for sites whose frames and storage need one.
   const liveGame =
     typeof window !== 'undefined' &&
     /\.app\.github\.dev$/i.test(window.location.hostname) &&
@@ -919,23 +923,23 @@ function CanvasNote({ canvas, messageId }: { canvas: CanvasInfo; messageId?: str
                     </span>
                     <span
                       style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
-                      className="relative col-start-1 row-start-1 flex min-h-[144px] flex-col overflow-hidden rounded-[14px] border border-fg/80 bg-fg p-3.5 text-white shadow-[0_12px_28px_-18px_rgb(27_26_23/0.8)]"
+                      className="relative col-start-1 row-start-1 flex min-h-[144px] flex-col overflow-hidden rounded-[14px] border border-fg/80 bg-fg p-3.5 text-bg shadow-[0_12px_28px_-18px_rgb(27_26_23/0.8)]"
                     >
                       <span className="relative flex items-center justify-between gap-2">
-                        <span className="flex items-center gap-1.5 text-[9.5px] font-semibold uppercase tracking-[0.12em] text-white/50">
-                          <span className="grid size-5 place-items-center rounded-full bg-white/10 text-[9px] font-semibold tabular-nums text-white/70">
+                        <span className="flex items-center gap-1.5 text-[9.5px] font-semibold uppercase tracking-[0.12em] text-bg/50">
+                          <span className="grid size-5 place-items-center rounded-full bg-bg/10 text-[9px] font-semibold tabular-nums text-bg/70">
                             {String(index + 1).padStart(2, '0')}
                           </span>
                           Answer
                         </span>
-                        <span className="rounded-full bg-accent px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-white">
+                        <span className="rounded-full bg-accent px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-bg">
                           Back
                         </span>
                       </span>
-                      <span className="relative mt-4 flex-1 break-words text-[13px] font-medium leading-relaxed text-white">{card.back}</span>
-                      <span className="relative mt-3 flex items-center justify-between border-t border-white/10 pt-2 text-[9.5px] font-medium uppercase tracking-[0.1em] text-white/45">
+                      <span className="relative mt-4 flex-1 break-words text-[13px] font-medium leading-relaxed text-bg">{card.back}</span>
+                      <span className="relative mt-3 flex items-center justify-between border-t border-bg/10 pt-2 text-[9.5px] font-medium uppercase tracking-[0.1em] text-bg/45">
                         Tap to hide
-                        <span className="grid size-6 place-items-center rounded-full bg-white/10 text-white/70">
+                        <span className="grid size-6 place-items-center rounded-full bg-bg/10 text-bg/70">
                           <RefreshCw className="size-3" />
                         </span>
                       </span>
@@ -1022,7 +1026,7 @@ function CanvasNote({ canvas, messageId }: { canvas: CanvasInfo; messageId?: str
               disabled={enroll.isPending}
               onClick={startReview}
               title="Rate these cards and see them again when they are due"
-              className="inline-flex items-center gap-1.5 rounded-[8px] bg-fg px-2.5 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-[#2e2c27] disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-[8px] bg-fg px-2.5 py-1.5 text-[11px] font-medium text-bg transition-colors hover:bg-fg/90 disabled:opacity-50"
             >
               <Brain className="size-3" />
               {enroll.isPending ? 'Starting…' : 'Review'}
@@ -1199,6 +1203,7 @@ export function AssistantMessage({
   content,
   reasoning,
   reasoningMs,
+  showThoughts = true,
   sources,
   statusText,
   statusLog,
@@ -1209,6 +1214,7 @@ export function AssistantMessage({
   analysis,
   build,
   canvas,
+  agent,
   onRerun,
   messageId,
   feedback,
@@ -1225,6 +1231,8 @@ export function AssistantMessage({
   reasoning?: string
   /** How long the model reasoned before the first answer token. */
   reasoningMs?: number
+  /** Move inline thinking tags in saved text into the thoughts panel. */
+  showThoughts?: boolean
   /** Web results retrieved for this reply. */
   sources?: Source[]
   /** What the free models are doing before the first token arrives. */
@@ -1245,6 +1253,8 @@ export function AssistantMessage({
   build?: BuildInfo
   /** The generated study set, when Canvas mode produced this reply. */
   canvas?: CanvasInfo
+  /** The plan, steps and receipt of an Agent reply. */
+  agent?: AgentInfo
   /** Rerun a saved analysis using the browser-local dataset. */
   onRerun?: () => void
   /** The saved reply id, when feedback is available. */
@@ -1261,9 +1271,14 @@ export function AssistantMessage({
   /** Time from the question that prompted this reply, when known. */
   elapsedMs?: number
 }) {
+  const inline = splitThinking(content)
+  const visibleContent = inline.text
+  const thoughts = showThoughts
+    ? [reasoning, inline.reasoning].filter((part): part is string => Boolean(part)).join('\n\n')
+    : ''
   const [copied, setCopied] = useState(false)
   const sourceKeys = new Set((sources ?? []).map((source) => normalizeUrl(source.url)))
-  const unverified = sources?.length ? citedUrls(content).filter((url) => !sourceKeys.has(normalizeUrl(url))).length : 0
+  const unverified = sources?.length ? citedUrls(visibleContent).filter((url) => !sourceKeys.has(normalizeUrl(url))).length : 0
   const [rating, setRating] = useState<FeedbackRating | undefined>(feedback)
   useEffect(() => setRating(feedback), [feedback])
   const rate = (next: FeedbackRating) => {
@@ -1272,25 +1287,35 @@ export function AssistantMessage({
   }
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(content)
+      await navigator.clipboard.writeText(visibleContent)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
     } catch {
       /* clipboard unavailable */
     }
   }
-  const waiting = streaming && !content
+  const waiting = streaming && !visibleContent
   return (
     <div id={messageId ? `message-${messageId}` : undefined} className="group flex scroll-mt-4 gap-3.5">
       <Mark size={26} className="mt-0.5 rounded-[8px]" />
       <div className="min-w-0 flex-1 pt-0.5">
-        {reasoning && <Thoughts text={reasoning} ms={reasoningMs} live={Boolean(waiting)} />}
+        {thoughts && <Thoughts text={thoughts} ms={reasoningMs} live={Boolean(waiting)} />}
         {!waiting && (
           <Receipt model={model} elapsedMs={elapsedMs} sources={sources} team={team} proof={proof} research={research} analysis={analysis} />
         )}
-        {waiting ? reasoning ? null : <Progress statusLog={statusLog} statusText={statusText} /> : <Markdown className={cx('prose-chat', streaming && 'streaming')}>{content}</Markdown>}
+        {agent && <AgentNote agent={agent} live={Boolean(streaming)} />}
+        {waiting ? thoughts ? null : <Progress statusLog={statusLog} statusText={statusText} /> : <Markdown className={cx('prose-chat', streaming && 'streaming')}>{visibleContent}</Markdown>}
         {!research && <Sources sources={sources} unverified={unverified} />}
-        {!streaming && !error && (build ? <BuildNote build={build} /> : canvas ? <CanvasNote canvas={canvas} messageId={messageId} /> : analysis ? <AnalysisNote analysis={analysis} content={content} onRerun={onRerun} /> : research ? <ResearchNote research={research} sources={sources} content={content} /> : proof ? <ProofNote proof={proof} /> : team ? <TeamNote team={team} /> : null)}
+        {!streaming && !error && (
+          <>
+            {build ? <BuildNote build={build} /> : null}
+            {canvas ? <CanvasNote canvas={canvas} messageId={messageId} /> : null}
+            {analysis ? <AnalysisNote analysis={analysis} content={visibleContent} onRerun={onRerun} /> : null}
+            {research ? <ResearchNote research={research} sources={sources} content={visibleContent} /> : null}
+            {proof ? <ProofNote proof={proof} /> : null}
+            {team ? <TeamNote team={team} /> : null}
+          </>
+        )}
         {error && (
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-danger">
             <span>{error}</span>

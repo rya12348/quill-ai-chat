@@ -4,6 +4,7 @@
 // The key is read from env here and nowhere else.
 
 import { FREEBUFF_API_URL, MAX_OUTPUT_TOKENS, MODELS, type ModelId } from '../shared/config'
+import { ThinkingSplitter, splitThinking } from '../shared/thinking'
 import type { Env } from './env'
 
 export type ChatContentPart =
@@ -136,7 +137,9 @@ export async function* complete(env: Env, input: { model: ModelId; messages: Cha
 
   if (!stream) {
     const body = (await response.json()) as { choices?: { message?: { content?: unknown } }[] }
-    const text = textFromContent(body.choices?.[0]?.message?.content)
+    const split = splitThinking(textFromContent(body.choices?.[0]?.message?.content))
+    if (split.reasoning) yield { type: 'reasoning', text: split.reasoning }
+    const text = split.text || split.reasoning
     if (!text) throw new AiError('malformed', 'The model returned an empty reply.', 502)
     yield { type: 'text', text }
     return
@@ -170,7 +173,8 @@ export async function completeText(
   }
   if (!response.ok) throw await failure(response)
   const body = (await response.json().catch(() => null)) as { choices?: { message?: { content?: unknown } }[] } | null
-  const text = textFromContent(body?.choices?.[0]?.message?.content)
+  const split = splitThinking(textFromContent(body?.choices?.[0]?.message?.content))
+  const text = split.text || split.reasoning
   if (!text.trim()) throw new AiError('malformed', 'The model returned an empty plan.', 502)
   return text
 }
@@ -194,6 +198,7 @@ function reasoningFromDelta(delta: { reasoning?: unknown; reasoning_content?: un
 export async function* readSse(response: Response, signals: { client?: AbortSignal; timeout: AbortSignal }): AsyncGenerator<StreamPiece> {
   if (!response.body) throw new AiError('malformed', 'The model returned no reply.', 502)
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
+  const splitter = new ThinkingSplitter()
   let buffer = ''
   try {
     while (true) {
@@ -225,9 +230,16 @@ export async function* readSse(response: Response, signals: { client?: AbortSign
         const reasoning = reasoningFromDelta(delta)
         if (reasoning) yield { type: 'reasoning', text: reasoning }
         const text = textFromContent(delta.content)
-        if (text) yield { type: 'text', text }
+        if (text) {
+          const split = splitter.push(text)
+          if (split.reasoning) yield { type: 'reasoning', text: split.reasoning }
+          if (split.text) yield { type: 'text', text: split.text }
+        }
       }
     }
+    const tail = splitter.flush()
+    if (tail.reasoning) yield { type: 'reasoning', text: tail.reasoning }
+    if (tail.text) yield { type: 'text', text: tail.text }
   } catch (error) {
     if (error instanceof AiError) throw error
     // The client went away; the caller keeps what arrived.

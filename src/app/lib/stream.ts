@@ -10,7 +10,7 @@ export type ChatRequest = {
   projectId?: string | null
   model?: string
   regenerate?: boolean
-  strategy?: 'fast' | 'blend' | 'proof' | 'research' | 'analyze' | 'build' | 'canvas'
+  strategy?: 'fast' | 'blend' | 'proof' | 'research' | 'analyze' | 'build' | 'canvas' | 'agent'
   reasoning?: boolean
   effort?: ReasoningEffort
   /** Stable id for this send, so an offline retry cannot create a duplicate. */

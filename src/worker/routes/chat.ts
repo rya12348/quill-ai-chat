@@ -6,18 +6,20 @@ import { Hono } from 'hono'
 import { streamSSE, type SSEStreamingApi } from 'hono/streaming'
 
 import { ANALYZE_DAILY_LIMIT, BUILD_DAILY_LIMIT, DAILY_MESSAGE_LIMIT, DEFAULT_MODEL, MAX_CONTEXT_MESSAGES, MAX_INSTRUCTIONS_CHARS, MAX_MESSAGE_CHARS, RESEARCH_DAILY_LIMIT, SYSTEM_PROMPT, type ModelId } from '../../shared/config'
-import type { AnalysisInfo, AnalysisJob, BuildInfo, CanvasInfo, ChatEvent, Message, ProofInfo, ProofJob, ResearchInfo } from '../../shared/types'
+import type { AgentInfo, AgentTool, AnalysisInfo, AnalysisJob, BuildInfo, CanvasInfo, ChatEvent, Message, ProofInfo, ProofJob, ResearchInfo } from '../../shared/types'
+import { agentComplete } from '../agent'
 import { AiError, aiConfigured, complete, isModelId, type ChatMessage } from '../ai'
 import { AttachmentValidationError, attachmentMeta, loadAttachmentsForMessages, messageWithAttachments, parseAttachments, type StoredAttachment } from '../attachments'
-import { buildEnabledFor, isOwner } from '../auth'
-import { blendComplete } from '../blend'
+import { analyzeEnabledFor, buildEnabledFor, isOwner, researchEnabledFor } from '../auth'
+import { blendComplete, depthFor, type Depth } from '../blend'
+import { chooseDepth, depthBucket, loadDepthQuality, loadLaneQuality, type LaneRecord, type LaneRoute, type StoredLaneRoute } from '../lane-routing'
 import { analysisComplete, parseDataset } from '../analysis'
 import { buildComplete, buildEmbed } from '../build'
 import { canvasComplete } from '../canvas'
 import { kindFor, proofComplete, proofSignature, streamChunks } from '../proof'
 import { analysisToday, buildToday, id, mapConversation, mapMessage, now, repliesToday, researchToday, titleFrom, usageToday, utcDay } from '../db'
 import { refreshConversationSummary } from '../memory'
-import { laneKey, orderLanes, publicComplete, publicLanes, type LaneResult } from '../public-ai'
+import { activeLanes, laneKey, orderLanes, publicComplete, publicLanes, type LaneResult } from '../public-ai'
 import { healthRows, recordProviderResult } from '../provider-health'
 import { planAndRetrieve } from '../plan'
 import { researchComplete } from '../research'
@@ -139,8 +141,8 @@ chat.post('/', async (c) => {
   const wantsBuild = input.strategy === 'build'
   const wantsCanvas = input.strategy === 'canvas'
   const analyzeDataset = wantsAnalysis ? parseDataset(input.dataset) : undefined
-  const researchEnabled = !usingApi && (c.env.RESEARCH_ENABLED === '1' || c.env.RESEARCH_ENABLED === 'true')
-  const analyzeEnabled = !usingApi && (c.env.ANALYZE_ENABLED === '1' || c.env.ANALYZE_ENABLED === 'true')
+  const researchEnabled = !usingApi && researchEnabledFor(c.env, c.req.raw)
+  const analyzeEnabled = !usingApi && analyzeEnabledFor(c.env, c.req.raw)
   const buildEnabled = !usingApi && buildEnabledFor(c.env, c.req.raw)
   if (wantsResearch && (usingApi || !researchEnabled)) {
     return c.json({ error: 'research_unavailable', message: 'Research is not enabled on this deployment.' }, 503)
@@ -171,6 +173,16 @@ chat.post('/', async (c) => {
   if (wantsCanvas && !regenerate && !content) {
     return c.json({ error: 'empty', message: 'Describe what the flashcards or quiz should cover.' }, 400)
   }
+  const wantsAgent = input.strategy === 'agent'
+  if (wantsAgent && (usingApi || !allLanes.length)) {
+    return c.json({ error: 'agent_unavailable', message: 'Agent needs the free hosted models.' }, 503)
+  }
+  if (wantsAgent && (attachments.length || input.dataset)) {
+    return c.json({ error: 'attachment', message: 'Agent is text-only in this version. Describe the goal without attachments.' }, 400)
+  }
+  if (wantsAgent && !regenerate && !content) {
+    return c.json({ error: 'empty', message: 'Describe the goal you want Agent to work on.' }, 400)
+  }
   if (wantsBuild && !regenerate && !content) {
     return c.json({ error: 'empty', message: 'Describe the page you want to build.' }, 400)
   }
@@ -186,6 +198,7 @@ chat.post('/', async (c) => {
   const analyze = wantsAnalysis
   const build = wantsBuild
   const canvas = wantsCanvas
+  const agent = wantsAgent
   if (research) {
     const reports = await researchToday(db, owner)
     if (reports >= RESEARCH_DAILY_LIMIT) {
@@ -209,8 +222,8 @@ chat.post('/', async (c) => {
   // 'fast' answers with a single model for people who want the quicker reply.
   // Proof is free-lane only: its checks depend on the lane roster, and the
   // keyed API path has no lanes to write independent tests.
-  const proof = !research && !analyze && !build && !canvas && input.strategy === 'proof' && !usingApi && lanes.length > 0
-  const blend = !proof && !research && !analyze && !build && !canvas && input.strategy !== 'fast' && lanes.length > 1
+  const proof = !research && !analyze && !build && !canvas && !agent && input.strategy === 'proof' && !usingApi && lanes.length > 0
+  const blend = !proof && !research && !analyze && !build && !canvas && !agent && input.strategy !== 'fast' && lanes.length > 1
   const existingModel = conversationRow?.model
   const model: string = usingApi
     ? isModelId(input.model)
@@ -269,6 +282,9 @@ chat.post('/', async (c) => {
       db.prepare(`DELETE FROM message_team WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND created_at > ?)`).bind(owner, owner, conversation.id, lastUser.createdAt),
     )
     statements.push(
+      db.prepare(`DELETE FROM message_lane_routes WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND created_at > ?)`).bind(owner, owner, conversation.id, lastUser.createdAt),
+    )
+    statements.push(
       db.prepare(`DELETE FROM message_proof WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND created_at > ?)`).bind(owner, owner, conversation.id, lastUser.createdAt),
     )
     statements.push(
@@ -282,6 +298,9 @@ chat.post('/', async (c) => {
     )
     statements.push(
       db.prepare(`DELETE FROM message_canvas WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND created_at > ?)`).bind(owner, owner, conversation.id, lastUser.createdAt),
+    )
+    statements.push(
+      db.prepare(`DELETE FROM message_agent WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND created_at > ?)`).bind(owner, owner, conversation.id, lastUser.createdAt),
     )
     statements.push(
       db.prepare(`DELETE FROM canvas_reviews WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ? AND created_at > ?)`).bind(owner, owner, conversation.id, lastUser.createdAt),
@@ -359,9 +378,12 @@ chat.post('/', async (c) => {
     let analysisJob: AnalysisJob | undefined
     let buildInfo: BuildInfo | undefined
     let canvasInfo: CanvasInfo | undefined
+    let agentInfo: AgentInfo | undefined
     let embedToken: string | undefined
     let embedUrl: string | undefined
     let proofJob: ProofJob | undefined
+    let laneRoute: LaneRoute | undefined
+    let chosenDepth: Depth | undefined
     let gone = false
     // Health writes are awaited before the turn ends: a fire-and-forget write
     // can be dropped when the stream closes, and a reload would then show the
@@ -390,6 +412,16 @@ chat.post('/', async (c) => {
       if (results.length) {
         statements.push(
           db.prepare(`INSERT OR REPLACE INTO message_sources (message_id, owner_sub, content, created_at) VALUES (?, ?, ?, ?)`).bind(assistantMessageId, owner, JSON.stringify(results), replyAt),
+        )
+      }
+      if (laneRoute) {
+        const route: StoredLaneRoute = {
+          ...laneRoute,
+          kind: kindFor(userMessage.content),
+          bucket: depthBucket(userMessage.content),
+        }
+        statements.push(
+          db.prepare(`INSERT OR REPLACE INTO message_lane_routes (message_id, owner_sub, content, created_at) VALUES (?, ?, ?, ?)`).bind(assistantMessageId, owner, JSON.stringify(route), replyAt),
         )
       }
       if (analysisInfo) {
@@ -429,6 +461,16 @@ chat.post('/', async (c) => {
             assistantMessageId,
             owner,
             JSON.stringify({ info: canvasInfo }),
+            replyAt,
+          ),
+        )
+      }
+      if (agentInfo) {
+        statements.push(
+          db.prepare(`INSERT OR REPLACE INTO message_agent (message_id, owner_sub, content, created_at) VALUES (?, ?, ?, ?)`).bind(
+            assistantMessageId,
+            owner,
+            JSON.stringify({ info: agentInfo }),
             replyAt,
           ),
         )
@@ -513,11 +555,13 @@ chat.post('/', async (c) => {
         db.prepare(`DELETE FROM message_reasoning WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM message_sources WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM message_team WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
+        db.prepare(`DELETE FROM message_lane_routes WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM message_proof WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM message_research WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM message_analysis WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM message_build WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM message_canvas WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
+        db.prepare(`DELETE FROM message_agent WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM canvas_reviews WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM build_embeds WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM messages WHERE owner_sub = ? AND id = ?`).bind(owner, assistantMessageId),
@@ -530,6 +574,14 @@ chat.post('/', async (c) => {
       await (text ? save(true) : discard())
     }
     stream.onAbort(() => void abandon())
+    // Some proxies close an SSE response that has sent no bytes for ~30s.
+    // Agent can spend longer than that inside one model or build call, so send
+    // a comment every few seconds. Clients ignore SSE comments, and this does
+    // not add a ChatEvent to the reply.
+    const keepalive = setInterval(() => {
+      if (gone || stream.aborted) return
+      void stream.write(': keepalive\n\n')
+    }, 5_000)
 
     try {
       if (!(await send({ type: 'start', conversation, userMessage, assistantMessageId }))) return await abandon()
@@ -541,7 +593,7 @@ chat.post('/', async (c) => {
       // Search after `start`, so the reader sees the plan while results load.
       // Planning is bounded and optional: a slow or broken search still leaves
       // the reply to stream, with a notice instead of an error.
-      if (!research && !analyze && !build && !canvas && searchConfigured(c.env) && shouldSearch(userMessage.content)) {
+      if (!research && !analyze && !build && !canvas && !agent && searchConfigured(c.env) && shouldSearch(userMessage.content)) {
         const retrieval = await planAndRetrieve({
           env: c.env,
           model: model as ModelId,
@@ -556,7 +608,7 @@ chat.post('/', async (c) => {
         if (retrieval.queries.length) console.log('search.plan', { queries: retrieval.queries, results: results.length, notice: retrieval.notice })
         if (retrieval.notice && !(await send({ type: 'notice', text: retrieval.notice }))) return await abandon()
       }
-      if (!research && results.length && !(await send({ type: 'sources', sources: results }))) return await abandon()
+      if (!research && !agent && results.length && !(await send({ type: 'sources', sources: results }))) return await abandon()
       const settings = await db.prepare(`SELECT instructions FROM user_settings WHERE owner_sub = ?`).bind(owner).first<{ instructions?: string }>()
       const customInstructions = typeof settings?.instructions === 'string' ? settings.instructions.trim().slice(0, MAX_INSTRUCTIONS_CHARS) : ''
       // A chat can belong to one project; that project's instructions refine
@@ -642,14 +694,77 @@ chat.post('/', async (c) => {
       // Persisted provider health keeps a lane that just refused its key out of
       // the referee chair; the full list is still used as a fallback chain.
       let avoid: Set<string> | undefined
+      let laneQuality: Map<string, LaneRecord> | undefined
       if (!usingApi && blend) {
         const unhealthy = await db
           .prepare(`SELECT provider_id FROM provider_health WHERE owner_sub = ? AND status IN ('degraded', 'down')`)
           .bind(owner)
           .all<{ provider_id: string }>()
         avoid = new Set(unhealthy.results.map((row) => row.provider_id))
+        const kind = kindFor(userMessage.content)
+        const bucket = depthBucket(userMessage.content)
+        const laneCount = activeLanes(lanes).length
+        const [quality, depthQuality] = await Promise.all([
+          loadLaneQuality(db, owner, lanes, kind),
+          loadDepthQuality(db, owner, kind, bucket),
+        ])
+        laneQuality = quality
+        chosenDepth = input.strategy === 'team'
+          ? 'deep'
+          : laneCount < 2
+            ? 'quick'
+            : chooseDepth(userMessage.content, depthFor(userMessage.content, laneCount), depthQuality)
       }
-      if (analyze) {
+      if (agent) {
+        // Agent reuses the free-mode engines as tools. The plan is untrusted,
+        // so each restricted tool is checked against its daily allowance right
+        // before it runs and is shown as skipped when the allowance is gone.
+        const checkTool = async (tool: AgentTool): Promise<string | null> => {
+          if (tool === 'research') {
+            const reports = await researchToday(db, owner)
+            return reports >= RESEARCH_DAILY_LIMIT ? `Daily research limit reached (${RESEARCH_DAILY_LIMIT}/day)` : null
+          }
+          if (tool === 'build' && !unlimitedBuilds) {
+            const builds = await buildToday(db, owner)
+            return builds >= BUILD_DAILY_LIMIT ? `Daily build limit reached (${BUILD_DAILY_LIMIT}/day)` : null
+          }
+          return null
+        }
+        const outcome = await agentComplete({
+          lanes: orderLanes(lanes, model),
+          question: userMessage.content,
+          owner,
+          model,
+          env: c.env,
+          signal: controller.signal,
+          messageId: assistantMessageId,
+          health: new Map(
+            (await healthRows(db, owner)).map((row) => [row.provider_id, { status: row.status, latencyMs: row.latency_ms }]),
+          ),
+          checkTool,
+          onStatus: (status) => { void send({ type: 'status', text: status }) },
+          onLaneResult: recordLane,
+          onAgent: async (info) => {
+            agentInfo = info
+            return send({ type: 'agent', agent: info })
+          },
+        })
+        if (gone) return
+        agentInfo = outcome.agent
+        researchInfo = outcome.research
+        buildInfo = outcome.build
+        canvasInfo = outcome.canvas
+        results = outcome.sources
+        if (results.length && !(await send({ type: 'sources', sources: results }))) return await abandon()
+        if (researchInfo && !(await send({ type: 'research', research: researchInfo }))) return await abandon()
+        if (buildInfo && !(await send({ type: 'build', build: buildInfo }))) return await abandon()
+        if (canvasInfo && !(await send({ type: 'canvas', canvas: canvasInfo }))) return await abandon()
+        for await (const piece of streamChunks(outcome.text, controller.signal)) {
+          if (gone) return
+          text += piece.text
+          if (!(await send({ type: 'delta', text: piece.text }))) return await abandon()
+        }
+      } else if (analyze) {
         const outcome = await analysisComplete({
           lanes: orderLanes(lanes, model),
           question: userMessage.content || 'Analyze this CSV.',
@@ -715,7 +830,9 @@ chat.post('/', async (c) => {
             })
           : await buildComplete({
               lanes: orderLanes(lanes, model),
-              health: new Map((await healthRows(db, owner)).map((row) => [row.provider_id, row.status])),
+              health: new Map(
+                (await healthRows(db, owner)).map((row) => [row.provider_id, { status: row.status, latencyMs: row.latency_ms }]),
+              ),
               question: userMessage.content,
               signal: controller.signal,
               onStatus: (status) => { void send({ type: 'status', text: status }) },
@@ -813,6 +930,15 @@ chat.post('/', async (c) => {
                 team: input.strategy === 'team',
                 onTeam: (team) => send({ type: 'team', team }),
                 avoid,
+                quality: laneQuality,
+                depth: chosenDepth,
+                onRoute: (route) => { laneRoute = route },
+                onReasoning: async (text) => {
+                  if (!exposeReasoning || gone) return
+                  reasoningStartedAt ??= Date.now()
+                  reasoning += text
+                  await send({ type: 'reasoning', text })
+                },
                 onStatus: (text) => send({ type: 'status', text }),
                 onLaneResult: recordLane,
               })
@@ -839,7 +965,7 @@ chat.post('/', async (c) => {
       if (usingApi) {
         await recordProviderResult(db, owner, 'freebuff-api', { ok: true, latencyMs: Date.now() - startedAt }).catch(() => {})
       }        await Promise.allSettled(healthWrites.splice(0))
-      console.log('chat.done', { model, ms: Date.now() - startedAt, reasoningMs, chars: text.length, sources: results.length, research: researchInfo?.status, analysis: analysisInfo?.status, build: buildInfo?.status })
+      console.log('chat.done', { model, ms: Date.now() - startedAt, reasoningMs, chars: text.length, sources: results.length, research: researchInfo?.status, analysis: analysisInfo?.status, build: buildInfo?.status, agent: agentInfo?.status })
       const message: Message = {
         id: assistantMessageId,
         conversationId: conversation.id,
@@ -856,6 +982,7 @@ chat.post('/', async (c) => {
         ...(analysisInfo ? { analysis: analysisInfo } : {}),
         ...(buildInfo ? { build: buildInfo } : {}),
         ...(canvasInfo ? { canvas: canvasInfo } : {}),
+        ...(agentInfo ? { agent: agentInfo } : {}),
       }
       // The mode counters are read after save(), so the reply just finished is
       // already counted and the composer shows the new allowances immediately.
@@ -885,6 +1012,7 @@ chat.post('/', async (c) => {
       await (text ? save(true) : discard())
       await send({ type: 'error', code: failure.code, message: failure.message })
     } finally {
+      clearInterval(keepalive)
       await Promise.allSettled(healthWrites.splice(0))
       release()
     }

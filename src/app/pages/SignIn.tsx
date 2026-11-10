@@ -15,8 +15,8 @@ export function SignIn() {
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }} className="max-w-md">
           <h1 className="text-balance text-[40px] font-semibold leading-[1.05] tracking-[-0.03em] sm:text-[52px]">Ask {BRAND} anything</h1>
           <p className="mt-4 text-[16px] leading-relaxed text-muted">{TAGLINE} Sign in to keep your conversations.</p>
-          <a href={`/auth/freebuff/signin?returnTo=${returnTo}`} className="mt-8 inline-flex h-12 items-center gap-2 rounded-control bg-fg px-5 text-[15px] font-medium text-white transition-colors hover:bg-[#2e2c27]">
-            <span className="grid size-5 place-items-center rounded-[6px] bg-white text-[11px] font-bold text-fg">F</span>
+          <a href={`/auth/freebuff/signin?returnTo=${returnTo}`} className="mt-8 inline-flex h-12 items-center gap-2 rounded-control bg-fg px-5 text-[15px] font-medium text-bg transition-colors hover:bg-fg/90">
+            <span className="grid size-5 place-items-center rounded-[6px] bg-white text-[11px] font-bold text-[#1b1a17]">F</span>
             Sign in with Freebuff
             <ArrowRight className="size-4" />
           </a>

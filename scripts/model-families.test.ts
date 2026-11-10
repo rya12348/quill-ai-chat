@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import type { Env } from '../src/worker/env'
-import { familyForLane, laneKey, laneSupportsVision, pickModelFamilies, publicLanes } from '../src/worker/public-ai'
+import { familyForLane, laneKey, laneStrength, laneSupportsVision, pickModelFamilies, pickPickerFamilies, publicLanes } from '../src/worker/public-ai'
 
 const lane = (model: string, label: string, url = 'https://free.example/v1/chat/completions') => ({
   model,
@@ -16,6 +16,8 @@ test('family names collapse provider and version suffixes', () => {
     ['nvidia/nemotron-3-ultra-550b-a55b', 'Nemotron 3 Ultra 550B (NVIDIA)', 'Nemotron'],
     ['nvidia/nemotron-3-super-120b', 'Nemotron 3 Super 120B (BlockRun)', 'Nemotron'],
     ['@cf/qwen/qwen3.8-27b', 'Qwen 3.8 27B (Workers AI)', 'Qwen'],
+    ['qwen3.8-max', 'Qwen 3.8 Max', 'Qwen'],
+    ['stepfun-ai/step-5-preview', 'Step 5 Preview', 'Step'],
     ['qwen2.5-coder:7b', 'Qwen2.5 Coder 7B (Local Ollama)', 'Qwen'],
     ['ministral-14b-latest', 'Ministral 14B', 'Ministral'],
     ['codestral-latest', 'Codestral', 'Codestral'],
@@ -52,6 +54,12 @@ test('one row per family, represented by its strongest lane', () => {
   assert.deepEqual(picks.map((pick) => pick.family), ['Nemotron', 'DeepSeek', 'GPT'])
   assert.equal(picks[0]?.lane.model, 'nvidia/nemotron-3-super-120b')
   assert.equal(picks[1]?.lane.model, 'deepseek-ai/deepseek-v4.1-flash')
+})
+
+test('the model picker exposes five families at most', () => {
+  const picks = pickPickerFamilies(publicLanes({} as unknown as Env))
+  assert.equal(picks.length, 5)
+  assert.equal(new Set(picks.map((pick) => pick.family)).size, picks.length)
 })
 
 test('the added keyless lanes are wired into the free chain', () => {
@@ -91,6 +99,53 @@ test('the added keyless lanes are wired into the free chain', () => {
   for (const family of ['Laguna', 'Muse', 'Dots', 'Liquid', 'Kilo', 'Stealth']) {
     assert.ok(families.has(family), family)
   }
+})
+
+test('an Alibaba Model Studio key adds the free-trial frontier lanes', () => {
+  const env = { DASHSCOPE_API_KEY: 'dash-key' } as unknown as Env
+  const lanes = publicLanes(env).filter((lane) => lane.url.includes('dashscope-intl.aliyuncs.com'))
+  assert.deepEqual(lanes.map((lane) => lane.model), ['qwen3.8-max', 'deepseek-v4-pro', 'glm-5.3'])
+  assert.equal(lanes[0]?.label, 'Qwen 3.8 Max')
+  assert.equal(lanes[1]?.label, 'DeepSeek V4 Pro')
+  assert.equal(lanes[2]?.label, 'GLM-5.3')
+  assert.ok(lanes.every((lane) => lane.key === 'dash-key'))
+  assert.ok(lanes.every((lane) => lane.description.includes('Alibaba')))
+  assert.deepEqual(pickModelFamilies(lanes).map((pick) => pick.family).sort(), ['DeepSeek', 'GLM', 'Qwen'])
+  assert.equal(laneStrength('qwen3.8-max', lanes[0]?.url), 92)
+})
+
+test('DASHSCOPE_MODELS overrides the Alibaba model list', () => {
+  const env = { DASHSCOPE_API_KEY: 'dash-key', DASHSCOPE_MODELS: 'qwen3.8-2.4t-a95b, glm-5.3' } as unknown as Env
+  const lanes = publicLanes(env).filter((lane) => lane.url.includes('dashscope-intl.aliyuncs.com'))
+  assert.deepEqual(lanes.map((lane) => lane.model).sort(), ['glm-5.3', 'qwen3.8-2.4t-a95b'])
+  assert.equal(lanes.find((lane) => lane.model === 'qwen3.8-2.4t-a95b')?.label, 'Qwen 3.8 2.4T')
+})
+
+test('Alibaba lanes require an explicit key', () => {
+  const lanes = publicLanes({} as unknown as Env)
+  assert.equal(lanes.some((lane) => lane.url.includes('dashscope-intl.aliyuncs.com')), false)
+})
+
+test('a free NVIDIA key adds Step 5 Preview and the other free NIM lanes', () => {
+  const env = { NVIDIA_API_KEY: 'nvapi-key' } as unknown as Env
+  const lanes = publicLanes(env).filter((lane) => lane.url.includes('integrate.api.nvidia.com'))
+  const step = lanes.find((lane) => lane.model === 'stepfun-ai/step-5-preview')
+  assert.ok(step)
+  assert.equal(step.label, 'Step 5 Preview (NVIDIA)')
+  assert.equal(familyForLane(step), 'Step')
+  assert.equal(laneStrength(step.model, step.url), 92)
+  assert.equal(laneSupportsVision(step), true)
+  assert.ok(lanes.some((lane) => lane.model === 'minimaxai/minimax-m3.1-flash'))
+  assert.ok(lanes.some((lane) => lane.model === 'nvidia/nemotron-3.5-super-vl-120b-a12b'))
+})
+
+test('a free AIHubMix key adds the zero-cost Kimi K3 lane', () => {
+  const env = { AIHUBMIX_API_KEY: 'free-key' } as unknown as Env
+  const kimi = publicLanes(env).find((lane) => lane.model === 'coding-kimi-k3-free')
+  assert.ok(kimi)
+  assert.equal(kimi.label, 'Kimi K3')
+  assert.equal(kimi.key, 'free-key')
+  assert.equal(familyForLane(kimi), 'Kimi')
 })
 
 test('Workers AI DeepSeek R1 stays in the DeepSeek family', () => {

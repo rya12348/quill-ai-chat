@@ -35,6 +35,31 @@
   --shadow-composer: 0 1px 2px rgb(27 26 23 / 0.05), 0 8px 32px -12px rgb(27 26 23 / 0.18), 0 0 0 1px rgb(27 26 23 / 0.06);
 }
 
+html.dark {
+  --color-bg: #141310;
+  --color-surface: #1c1a17;
+  --color-surface-2: #26231e;
+  --color-raised: #322e27;
+  --color-line: #302c26;
+  --color-line-strong: #4a443b;
+  --color-fg: #f2eee5;
+  --color-muted: #b6aea2;
+  --color-faint: #8d857a;
+  --color-accent: #e28b50;
+  --color-accent-soft: #3a2418;
+  --color-success: #64cb93;
+  --color-success-soft: #193326;
+  --color-warning: #e4b06b;
+  --color-warning-soft: #3a2c18;
+  --color-danger: #f07f70;
+  --color-danger-soft: #3b211e;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 12px 40px -12px rgb(0 0 0 / 0.65);
+  --shadow-dialog: 0 0 0 1px rgb(255 255 255 / 0.06), 0 30px 80px -20px rgb(0 0 0 / 0.75);
+  --shadow-composer: 0 1px 2px rgb(0 0 0 / 0.35), 0 8px 32px -12px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.06);
+  color-scheme: dark;
+}
+
 @layer base {
   *,
   *::before,
@@ -176,6 +201,10 @@
   line-height: 1.6;
   overflow-x: auto;
   padding: 14px 16px;
+}
+html.dark .prose-chat pre {
+  background: #0d0c0a;
+  color: #f3f1ea;
 }
 .prose-chat pre code {
   background: none;

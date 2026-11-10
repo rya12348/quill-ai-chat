@@ -14,10 +14,10 @@ type ButtonSize = 'md' | 'sm' | 'icon' | 'icon-sm'
 const buttonBase =
   'inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-control font-medium transition-[background-color,color,box-shadow,transform,opacity] duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0'
 const buttonVariants: Record<ButtonVariant, string> = {
-  primary: 'bg-fg text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.12)] hover:bg-[#2e2c27]',
+  primary: 'bg-fg text-bg shadow-[inset_0_1px_0_rgb(255_255_255/0.12)] hover:bg-fg/90',
   secondary: 'border border-line-strong bg-surface text-fg shadow-[0_1px_1px_rgb(27_26_23/0.04)] hover:bg-surface-2',
   ghost: 'text-muted hover:bg-surface-2 hover:text-fg',
-  danger: 'bg-danger text-white hover:bg-[#b23526]',
+  danger: 'bg-danger text-bg hover:opacity-90',
 }
 const buttonSizes: Record<ButtonSize, string> = {
   md: 'h-9 px-3.5 text-[13.5px]',
@@ -118,7 +118,7 @@ export function Dialog({
       {open && (
         <motion.div
           key="overlay"
-          className="fixed inset-0 z-50 flex items-end justify-center bg-fg/30 p-4 backdrop-blur-[2px] sm:items-center"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 backdrop-blur-[2px] sm:items-center"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -287,7 +287,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               initial={{ opacity: 0, y: 12, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 8, scale: 0.96 }}
-              className={cx('pointer-events-auto rounded-control px-4 py-2.5 text-[13.5px] font-medium shadow-pop', t.tone === 'danger' ? 'bg-danger text-white' : 'bg-fg text-white')}
+              className={cx('pointer-events-auto rounded-control px-4 py-2.5 text-[13.5px] font-medium shadow-pop', t.tone === 'danger' ? 'bg-danger text-bg' : 'bg-fg text-bg')}
             >
               {t.message}
             </motion.div>

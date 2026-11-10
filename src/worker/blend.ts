@@ -14,6 +14,7 @@ import { MAX_OUTPUT_TOKENS } from '../shared/config'
 import type { TeamInfo } from '../shared/types'
 import { textFromContent, type ChatMessage, type StreamPiece } from './ai'
 import { activeLanes, laneKey, laneStrength, laneText, publicComplete, type LaneResult, type PublicLane } from './public-ai'
+import { routingScore, type LaneRecord, type LaneRoute } from './lane-routing'
 
 type Status = (text: string) => Promise<unknown> | unknown
 type BlendInput = {
@@ -28,6 +29,14 @@ type BlendInput = {
   onLaneResult?: (result: LaneResult) => void
   /** Provider ids the last health check marked degraded or down. */
   avoid?: ReadonlySet<string>
+  /** Measured lane quality; absent means the static capability prior only. */
+  quality?: ReadonlyMap<string, LaneRecord>
+  /** A learned depth choice; absent means the regex prior decides. */
+  depth?: Depth
+  /** Real reasoning from the lane doing the current internal step. */
+  onReasoning?: (text: string) => Promise<unknown> | unknown
+  /** Keeps the internal lane keys used for this reply, never sent to the browser. */
+  onRoute?: (route: LaneRoute) => void
 }
 
 export type Depth = 'quick' | 'standard' | 'deep'
@@ -87,15 +96,21 @@ const HARD =
 
 /**
  * How much test-time compute a message deserves. Deep questions get a plan,
- * three drafts, a review and a final check; ordinary ones get two drafts and a
- * merge; greetings get one model.
+ * three drafts, a review and a final check; medium ones get two drafts and a
+ * merge; short questions go straight to the strongest lane, because two extra
+ * round trips rarely improve an answer this small and made chat feel slow.
  */
 export function depthFor(text: string, laneCount: number): Depth {
   if (laneCount < 2) return 'quick'
   const trimmed = text.trim()
   if (TRIVIAL.test(trimmed)) return 'quick'
   const questions = (trimmed.match(/\?/g) ?? []).length
-  if (trimmed.length > 320 || HARD.test(trimmed) || questions > 1) return 'deep'
+  const code = trimmed.includes('```')
+  // A short message gets the strongest model directly, even when it contains a
+  // word like "why" or "compare": one good answer beats two drafts plus a
+  // merge for a one-paragraph question, and it arrives in half the time.
+  if (!code && trimmed.length <= 200) return 'quick'
+  if (code || trimmed.length > 320 || questions > 1 || HARD.test(trimmed)) return 'deep'
   return 'standard'
 }
 
@@ -144,12 +159,19 @@ type TeamPlan = { referee: PublicLane; critic?: PublicLane; drafters: PublicLane
  * behaviour that let `GPT-OSS 20B` referee stronger drafts simply because it
  * was the next unused lane in the list.
  */
-function chooseTeam(lanes: PublicLane[], count: number, withCritic: boolean, avoid?: ReadonlySet<string>): TeamPlan | undefined {
+function chooseTeam(
+  lanes: PublicLane[],
+  count: number,
+  withCritic: boolean,
+  avoid?: ReadonlySet<string>,
+  quality?: ReadonlyMap<string, LaneRecord>,
+): TeamPlan | undefined {
   const all = activeLanes(lanes)
   const knownGood = avoid ? all.filter((lane) => !avoid.has(laneKey(lane))) : all
   // If every lane is degraded, trying the strongest one is still better than
   // refusing to answer; otherwise the team starts from known-working lanes.
-  const active = [...(knownGood.length ? knownGood : all)].sort((a, b) => laneStrength(b.model, b.url) - laneStrength(a.model, a.url))
+  const score = (lane: PublicLane) => routingScore(laneStrength(lane.model, lane.url), quality?.get(laneKey(lane)))
+  const active = [...(knownGood.length ? knownGood : all)].sort((a, b) => score(b) - score(a))
   const referee = active[0]
   if (!referee) return undefined
   const others = active.filter((lane) => laneKey(lane) !== laneKey(referee))
@@ -200,9 +222,12 @@ async function planFor(lane: PublicLane | undefined, input: BlendInput): Promise
     return await laneText(lane, {
       messages: [...input.messages, { role: 'user', content: PLAN }],
       signal: input.signal,
+      reasoning: input.reasoning,
+      reasoningEffort: input.reasoningEffort,
       maxTokens: 500,
       temperature: 0.3,
       onLaneResult: input.onLaneResult,
+      onReasoning: input.onReasoning,
     })
   } catch {
     // The plan is an enhancement; the drafts still work without it.
@@ -224,7 +249,16 @@ async function critiqueDrafts(candidates: (PublicLane | undefined)[], drafts: Dr
       },
     ]
     try {
-      const review = await laneText(lane, { messages: prompt, signal: input.signal, maxTokens: 700, temperature: 0.2, onLaneResult: input.onLaneResult })
+      const review = await laneText(lane, {
+        messages: prompt,
+        signal: input.signal,
+        reasoning: input.reasoning,
+        reasoningEffort: input.reasoningEffort,
+        maxTokens: 700,
+        temperature: 0.2,
+        onLaneResult: input.onLaneResult,
+        onReasoning: input.onReasoning,
+      })
       if (review.trim()) return review
     } catch {
       // Try the next reviewer; the final merge can still proceed without one.
@@ -312,6 +346,7 @@ async function reviseFinal(referee: PublicLane, candidate: string, issues: strin
       maxTokens: MAX_OUTPUT_TOKENS,
       temperature: 0.2,
       onLaneResult: input.onLaneResult,
+      onReasoning: input.onReasoning,
     })
   } catch {
     return ''
@@ -321,14 +356,17 @@ async function reviseFinal(referee: PublicLane, candidate: string, issues: strin
 export async function* blendComplete(lanes: PublicLane[], input: BlendInput): AsyncGenerator<StreamPiece> {
   const question = textFromContent([...input.messages].reverse().find((message) => message.role === 'user')?.content ?? '')
   const teamMode = input.team === true && !TRIVIAL.test(question.trim())
-  const depth = teamMode ? 'deep' : depthFor(question, activeLanes(lanes).length)
+  const depth = teamMode ? 'deep' : (input.depth ?? depthFor(question, activeLanes(lanes).length))
 
   if (depth === 'quick') {
+    // The quick path still records its depth, so later ratings can teach the
+    // router that a standard or deep pass performed better for this context.
+    input.onRoute?.({ depth, drafters: [] })
     yield* publicComplete(lanes, input)
     return
   }
 
-  const selection = chooseTeam(lanes, depth === 'deep' ? 3 : 2, depth === 'deep', input.avoid)
+  const selection = chooseTeam(lanes, depth === 'deep' ? 3 : 2, depth === 'deep', input.avoid, input.quality)
   if (!selection || !selection.drafters.length) {
     yield* publicComplete(lanes, input)
     return
@@ -368,6 +406,12 @@ export async function* blendComplete(lanes: PublicLane[], input: BlendInput): As
   }
 
   const verifier = critic && laneKey(critic) !== laneKey(referee) ? critic : undefined
+  input.onRoute?.({
+    depth,
+    drafters: drafts.map((draft) => laneKey(draft.lane)),
+    referee: laneKey(referee),
+    ...(verifier ? { verifier: laneKey(verifier) } : {}),
+  })
   const teamModels = [...new Set([...drafts.map((draft) => draft.lane.label), ...(referee ? [referee.label] : []), ...(verifier ? [verifier.label] : [])])]
   if (teamMode) {
     await input.onTeam?.({
@@ -422,6 +466,7 @@ export async function* blendComplete(lanes: PublicLane[], input: BlendInput): As
         maxTokens: MAX_OUTPUT_TOKENS,
         temperature: 0.25,
         onLaneResult: input.onLaneResult,
+        onReasoning: input.onReasoning,
       })
     } catch {
       finalText = ''

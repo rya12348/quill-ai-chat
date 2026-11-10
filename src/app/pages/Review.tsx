@@ -144,7 +144,7 @@ export function Review() {
             </p>
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
               {hasOtherDue && (
-                <Link to="/review" className="inline-flex h-9 items-center gap-1.5 rounded-control bg-fg px-3.5 text-[12.5px] font-medium text-white transition-colors hover:bg-[#2e2c27]">
+                <Link to="/review" className="inline-flex h-9 items-center gap-1.5 rounded-control bg-fg px-3.5 text-[12.5px] font-medium text-bg transition-colors hover:bg-fg/90">
                   Review all due
                   <ArrowUpRight className="size-3.5" />
                 </Link>
@@ -182,7 +182,7 @@ export function Review() {
             </div>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
               {hasOtherDue && (
-                <Link to="/review" className="inline-flex h-9 items-center gap-1.5 rounded-control bg-fg px-3.5 text-[12.5px] font-medium text-white transition-colors hover:bg-[#2e2c27]">
+                <Link to="/review" className="inline-flex h-9 items-center gap-1.5 rounded-control bg-fg px-3.5 text-[12.5px] font-medium text-bg transition-colors hover:bg-fg/90">
                   Review more
                   <ArrowUpRight className="size-3.5" />
                 </Link>
@@ -252,11 +252,11 @@ export function Review() {
                       <button
                         type="button"
                         onClick={() => setRevealed(true)}
-                        className="relative mt-8 inline-flex h-10 items-center gap-2 rounded-control bg-fg px-4 text-[12.5px] font-medium text-white transition-colors hover:bg-[#2e2c27]"
+                        className="relative mt-8 inline-flex h-10 items-center gap-2 rounded-control bg-fg px-4 text-[12.5px] font-medium text-bg transition-colors hover:bg-fg/90"
                       >
                         <Eye className="size-4" />
                         Show answer
-                        <kbd className="ml-1 rounded-[5px] border border-white/20 px-1.5 py-0.5 text-[9.5px] font-normal text-white/55">Space</kbd>
+                        <kbd className="ml-1 rounded-[5px] border border-bg/20 px-1.5 py-0.5 text-[9.5px] font-normal text-bg/55">Space</kbd>
                       </button>
                     ) : null}
                   </div>

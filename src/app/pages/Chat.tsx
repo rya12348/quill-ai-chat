@@ -1,15 +1,17 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { motion } from 'motion/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
-import { ArrowUpRight, Brain, Download, FileSpreadsheet, Folder, FolderX, Hammer, Layers, MessageCircle, Search, Share2, ShieldCheck, Sparkles, type LucideIcon } from 'lucide-react'
+import { ArrowUpRight, Bot, Brain, Download, FileSpreadsheet, Folder, FolderX, Hammer, Layers, Menu as MenuIcon, MessageCircle, Search, Share2, ShieldCheck, Sparkles, type LucideIcon } from 'lucide-react'
 
-import { BRAND, DEFAULT_MODEL, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, MODELS } from '../../shared/config'
+import { BRAND, DEFAULT_MODEL, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, MODELS, SUGGESTIONS } from '../../shared/config'
 import type { Conversation, Message, ModeUsage, ReasoningEffort } from '../../shared/types'
 import { Composer, type ComposerToggle } from '../components/Composer'
 import { AssistantMessage, UserMessage } from '../components/Message'
 import { MemoryPanel } from '../components/MemoryPanel'
+import { Mark, useMobileNav } from '../components/Shell'
 import { ShareDialog } from '../components/ShareDialog'
+import { ThemeToggle } from '../components/ThemeToggle'
 import { Menu, Spinner, useToast } from '../components/ui'
 import { ApiError, useConversation, useMe, useMessageFeedback, useModels, useProjects, useProviders, useReviewSummary, useSetConversationModel, useSetConversationProject } from '../lib/api'
 import { cx } from '../lib/cx'
@@ -20,13 +22,13 @@ import { buildDataset, isDataFile, readDataFile } from '../lib/dataset'
 import { getDataset, putDataset } from '../lib/dataset-store'
 import { setOffline, useOffline } from '../lib/offline'
 import { clearPendingMessage, draftKey, queueMessage, readDraft, usePendingMessage, writeDraft } from '../lib/outbox'
-import { dismissTurn, settleAnalysis, startTurn, useTurn } from '../lib/turn'
+import { dismissTurn, refreshConversationTitle, settleAnalysis, startTurn, useTurn } from '../lib/turn'
 
 const MODEL_KEY = 'model'
 const MODEL_PRESET_KEY = 'model:preset'
 const EFFORT_KEY = 'effort:level'
 
-type TaskId = 'research' | 'analyze' | 'build' | 'canvas'
+type TaskId = 'agent' | 'research' | 'analyze' | 'build' | 'canvas'
 
 export function Chat() {
   const { id } = useParams()
@@ -52,6 +54,7 @@ export function Chat() {
   const [draft, setDraft] = useState(() => readDraft(draftStoreKey))
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [filePickerRequest, setFilePickerRequest] = useState(0)
+  const [composerFocusRequest, setComposerFocusRequest] = useState(0)
   const [newModel, setNewModel] = useState(() => localStorage.getItem(MODEL_KEY) ?? DEFAULT_MODEL)
   const [modelPreset, setModelPreset] = useState<ModelChoice>(() => {
     const saved = localStorage.getItem(MODEL_PRESET_KEY)
@@ -65,6 +68,7 @@ export function Chat() {
   const [analyze, setAnalyze] = useState(() => id !== undefined && localStorage.getItem('analyze') === 'on')
   const [build, setBuild] = useState(() => id !== undefined && localStorage.getItem('build') === 'on')
   const [canvas, setCanvas] = useState(() => id !== undefined && localStorage.getItem('canvas') === 'on')
+  const [agentMode, setAgentMode] = useState(() => id !== undefined && localStorage.getItem('agent') === 'on')
   const [effort, setEffort] = useState<ReasoningEffort>(() => {
     const saved = localStorage.getItem(EFFORT_KEY)
     return saved === 'low' || saved === 'default' || saved === 'max' ? saved : 'default'
@@ -145,7 +149,26 @@ export function Chat() {
   const buildOn = build && canBuild && buildLeft !== 0
   const canCanvas = me?.capabilities.canvas === true
   const canvasOn = canvas && canCanvas
-  const strategy: 'proof' | 'blend' | 'fast' | 'research' | 'analyze' | 'build' | 'canvas' = buildOn ? 'build' : analyzeOn ? 'analyze' : researchOn ? 'research' : canvasOn ? 'canvas' : proof ? 'proof' : blend ? 'blend' : 'fast'
+  const canAgent = me?.capabilities.agent === true
+  const agentOn = agentMode && canAgent
+  const strategy: 'proof' | 'blend' | 'fast' | 'research' | 'analyze' | 'build' | 'canvas' | 'agent' =
+    agentOn ? 'agent' : buildOn ? 'build' : analyzeOn ? 'analyze' : researchOn ? 'research' : canvasOn ? 'canvas' : proof ? 'proof' : blend ? 'blend' : 'fast'
+  const modeLabel =
+    strategy === 'agent'
+      ? 'Agent'
+      : strategy === 'proof'
+        ? 'Proof'
+        : strategy === 'research'
+          ? 'Research'
+          : strategy === 'analyze'
+            ? 'Analyze'
+            : strategy === 'build'
+              ? 'Build'
+              : strategy === 'canvas'
+                ? 'Study'
+                : strategy === 'blend'
+                  ? 'Deep'
+                  : 'Chat'
   const presetModel = resolvePresetModel(modelPreset, strategy, presetModels)
   const model = presetModel ?? (conversation?.model && availableModels.some((m) => m.id === conversation.model) ? conversation.model : selectedModel)
   // Fast is the plain chat: hide exposed reasoning, including older replies,
@@ -162,6 +185,10 @@ export function Chat() {
       }
       if (buildOn) {
         toast('Build is text-only. Describe the page without attachments.', 'danger')
+        return
+      }
+      if (agentOn) {
+        toast('Agent is text-only in this version. Describe the goal without attachments.', 'danger')
         return
       }
       if (canvasOn) {
@@ -211,7 +238,7 @@ export function Chat() {
         else if (notice) toast(notice)
       })()
     },
-    [analyzeOn, attachments, buildOn, researchOn, toast],
+    [agentOn, analyzeOn, attachments, buildOn, researchOn, toast],
   )
 
   // Pasting a screenshot should work even when focus is on the page rather
@@ -254,6 +281,14 @@ export function Chat() {
       }
       if (canvasOn && outgoing.length) {
         toast('Canvas is text-only. Remove the attachment first.', 'danger')
+        return
+      }
+      if (agentOn && outgoing.length) {
+        toast('Agent is text-only in this version. Remove the attachment first.', 'danger')
+        return
+      }
+      if (agentOn && !content) {
+        toast('Describe the goal you want Agent to work on.', 'danger')
         return
       }
       if (pending) {
@@ -313,8 +348,8 @@ export function Chat() {
         }
       }
       if (offline || !navigator.onLine) {
-        if (researchOn || buildOn) {
-          toast(`${buildOn ? 'Build' : 'Research'} needs a connection. Reconnect and try again.`, 'danger')
+        if (researchOn || buildOn || agentOn) {
+          toast(`${agentOn ? 'Agent' : buildOn ? 'Build' : 'Research'} needs a connection. Reconnect and try again.`, 'danger')
           return
         }
         if (outgoing.length) {
@@ -349,7 +384,7 @@ export function Chat() {
         toast(error instanceof Error ? error.message : 'Could not send this message', 'danger')
       }
     },
-    [analyzeOn, attachments, buildOn, client, effort, id, model, navigate, offline, openCreated, pending, researchOn, selectedProjectId, strategy, toast],
+    [agentOn, analyzeOn, attachments, buildOn, client, effort, id, model, navigate, offline, openCreated, pending, researchOn, selectedProjectId, strategy, toast],
   )
 
   // A send saved while offline goes out once, when the browser is back online.
@@ -588,12 +623,41 @@ export function Chat() {
     }
   }
 
+  const toggleAgent = () => {
+    if (!canAgent) return
+    const next = !agentMode
+    setAgentMode(next)
+    localStorage.setItem('agent', next ? 'on' : 'off')
+    if (next) {
+      setProof(false)
+      setBlend(false)
+      setResearch(false)
+      setAnalyze(false)
+      setBuild(false)
+      setCanvas(false)
+      setAttachments([])
+      localStorage.setItem('proof', 'off')
+      localStorage.setItem('blend', 'off')
+      localStorage.setItem('research', 'off')
+      localStorage.setItem('analyze', 'off')
+      localStorage.setItem('build', 'off')
+      localStorage.setItem('canvas', 'off')
+    }
+  }
+
   // Only one advanced mode at a time: turning another one on retires Canvas.
   useEffect(() => {
     if (!canvas || (!proof && !blend && !researchOn && !analyzeOn && !buildOn)) return
     setCanvas(false)
     localStorage.setItem('canvas', 'off')
   }, [analyzeOn, blend, buildOn, canvas, proof, researchOn])
+
+  // Agent is also exclusive: choosing another mode retires the run mode.
+  useEffect(() => {
+    if (!agentMode || (!proof && !blend && !researchOn && !analyzeOn && !buildOn && !canvasOn)) return
+    setAgentMode(false)
+    localStorage.setItem('agent', 'off')
+  }, [agentMode, analyzeOn, blend, buildOn, canvasOn, proof, researchOn])
 
   // Returning to Home is an explicit "ask anything": clear the previous tool
   // choice so a plain question is not routed through Build or another mode.
@@ -604,10 +668,12 @@ export function Chat() {
     setAnalyze(false)
     setBuild(false)
     setCanvas(false)
+    setAgentMode(false)
     localStorage.setItem('research', 'off')
     localStorage.setItem('analyze', 'off')
     localStorage.setItem('build', 'off')
     localStorage.setItem('canvas', 'off')
+    localStorage.setItem('agent', 'off')
   }, [id])
 
   const toggleChatOnly = () => {
@@ -617,17 +683,24 @@ export function Chat() {
     setAnalyze(false)
     setBuild(false)
     setCanvas(false)
+    setAgentMode(false)
     localStorage.setItem('proof', 'off')
     localStorage.setItem('blend', 'off')
     localStorage.setItem('research', 'off')
     localStorage.setItem('analyze', 'off')
     localStorage.setItem('build', 'off')
     localStorage.setItem('canvas', 'off')
+    localStorage.setItem('agent', 'off')
   }
 
   const changeEffort = (next: ReasoningEffort) => {
     setEffort(next)
     localStorage.setItem(EFFORT_KEY, next)
+  }
+
+  const chooseSuggestion = (prompt: string) => {
+    setDraft(prompt)
+    setComposerFocusRequest((request) => request + 1)
   }
 
   const composerTools: ComposerToggle[] =
@@ -637,7 +710,7 @@ export function Chat() {
             id: 'chat',
             label: 'Chat only',
             description: 'One direct answer, with no extra mode.',
-            pressed: !proof && !blend && !researchOn && !analyzeOn && !buildOn && !canvasOn,
+            pressed: !proof && !blend && !researchOn && !analyzeOn && !buildOn && !canvasOn && !agentOn,
             onClick: toggleChatOnly,
             icon: MessageCircle,
             title: 'No extra mode',
@@ -660,6 +733,17 @@ export function Chat() {
             icon: Sparkles,
             title: 'Extra drafts and a review for hard questions.',
           },
+          ...(canAgent
+            ? [{
+                id: 'agent',
+                label: 'Agent',
+                description: 'Plans and runs several tools.',
+                pressed: agentOn,
+                onClick: toggleAgent,
+                icon: Bot,
+                title: 'Plan a goal, run Research, Build or Canvas, then report what actually happened.',
+              }]
+            : []),
           ...(canResearch
             ? [{
                 id: 'research',
@@ -713,12 +797,13 @@ export function Chat() {
         ]
       : []
 
-  const activeTask: 'chat' | TaskId = buildOn ? 'build' : analyzeOn ? 'analyze' : researchOn ? 'research' : canvasOn ? 'canvas' : 'chat'
+  const activeTask: 'chat' | TaskId = agentOn ? 'agent' : buildOn ? 'build' : analyzeOn ? 'analyze' : researchOn ? 'research' : canvasOn ? 'canvas' : 'chat'
   const unavailableTasks: Partial<Record<TaskId, string>> = {
     ...(!canResearch ? { research: 'Not available' } : researchLeft === 0 ? { research: 'Used up today' } : {}),
     ...(!canAnalyze ? { analyze: 'Not available' } : analyzeLeft === 0 ? { analyze: 'Used up today' } : {}),
     ...(!canBuild ? { build: 'Not available' } : buildLeft === 0 ? { build: 'Used up today' } : {}),
     ...(!canCanvas ? { canvas: 'Not available' } : {}),
+    ...(!canAgent ? { agent: 'Not available' } : {}),
   }
 
   const assignProject = (projectId: string | null) => {
@@ -756,6 +841,15 @@ export function Chat() {
     return undefined
   }
   const lastSavedAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
+  const hasSavedAssistant = messages.some((message) => message.role === 'assistant' && message.content.trim())
+  const conversationId = conversation?.id
+  // New chats get a title after their first reply; this also backfills an
+  // existing chat the first time it is opened. The server ignores a title that
+  // is no longer the first-message placeholder, so manual names stay put.
+  useEffect(() => {
+    if (!conversationId || !hasSavedAssistant) return
+    void refreshConversationTitle(client, conversationId)
+  }, [client, conversationId, hasSavedAssistant])
   const empty = !id && messages.length === 0 && !mine
   const labelFor = (modelId: string | null | undefined) => (modelId && models?.items.find((model) => model.id === modelId)?.name) || modelId || ''
 
@@ -840,8 +934,11 @@ export function Chat() {
 
   if (id && page.isLoading) {
     return (
-      <div className="grid flex-1 place-items-center">
-        <Spinner />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ChatHeader title="Chat" />
+        <div className="grid flex-1 place-items-center">
+          <Spinner />
+        </div>
       </div>
     )
   }
@@ -851,21 +948,24 @@ export function Chat() {
     const unavailableOffline =
       page.error instanceof ApiError && (page.error.code === 'offline' || page.error.status === 503)
     return (
-      <div className="grid flex-1 place-items-center p-6 text-center">
-        <div>
-          <p className="text-[15px] font-medium">{unavailableOffline ? 'Not available offline' : 'This chat is not here any more.'}</p>
-          <p className="mt-1 text-[13px] leading-relaxed text-muted">
-            {unavailableOffline ? 'Open this conversation once while you are online and it will be kept for offline reading.' : 'It may have been deleted.'}
-          </p>
-          {unavailableOffline ? (
-            <button type="button" onClick={() => void page.refetch()} className="mt-2 text-[13.5px] text-muted underline underline-offset-2 hover:text-fg">
-              Try again
-            </button>
-          ) : (
-            <button type="button" onClick={() => navigate('/')} className="mt-2 text-[13.5px] text-muted underline underline-offset-2 hover:text-fg">
-              Start a new one
-            </button>
-          )}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ChatHeader title="Chat" />
+        <div className="grid flex-1 place-items-center p-6 text-center">
+          <div>
+            <p className="text-[15px] font-medium">{unavailableOffline ? 'Not available offline' : 'This chat is not here any more.'}</p>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted">
+              {unavailableOffline ? 'Open this conversation once while you are online and it will be kept for offline reading.' : 'It may have been deleted.'}
+            </p>
+            {unavailableOffline ? (
+              <button type="button" onClick={() => void page.refetch()} className="mt-2 text-[13.5px] text-muted underline underline-offset-2 hover:text-fg">
+                Try again
+              </button>
+            ) : (
+              <button type="button" onClick={() => navigate('/')} className="mt-2 text-[13.5px] text-muted underline underline-offset-2 hover:text-fg">
+                Start a new one
+              </button>
+            )}
+          </div>
         </div>
       </div>
     )
@@ -873,9 +973,12 @@ export function Chat() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-2 px-3 md:h-14 md:px-5">
-        {(conversation || messages.length > 0) && (
-          <div className="ml-auto flex items-center gap-0.5">
+      <ChatHeader
+        title={conversation?.title ?? 'New chat'}
+        mode={mode !== 'api' ? modeLabel : undefined}
+        home={!conversation}
+        actions={
+          <>
             {conversation && projectItems.length > 0 && (
               <Menu
                 align="end"
@@ -915,12 +1018,13 @@ export function Chat() {
                 <Download className="size-3.5" />
               </button>
             )}
-          </div>
-        )}
-      </div>
+            <ThemeToggle />
+          </>
+        }
+      />
 
       <div ref={scroller} onScroll={onScroll} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[760px] px-4 pb-6 pt-2 md:px-6">
+        <div className={cx('mx-auto w-full max-w-[760px] px-4 pb-6 pt-2 md:px-6', empty && 'flex min-h-full flex-col')}>
           {conversation && messages.length > 0 ? <MemoryPanel conversationId={conversation.id} /> : null}
           {empty ? (
             <EmptyState
@@ -929,7 +1033,13 @@ export function Chat() {
               unavailable={unavailableTasks}
               showTasks={mode !== 'api'}
               onChatOnly={toggleChatOnly}
+              onSuggestion={chooseSuggestion}
               onTask={(task) => {
+                if (task === 'agent') {
+                  if (!canAgent || agentOn) return
+                  toggleAgent()
+                  return
+                }
                 if (task === 'research') {
                   if (!canResearch || researchLeft === 0 || researchOn) return
                   toggleResearch()
@@ -961,6 +1071,7 @@ export function Chat() {
                     content={message.content}
                     reasoning={showReasoning ? message.reasoning : undefined}
                     reasoningMs={showReasoning ? message.reasoningMs : undefined}
+                    showThoughts={showReasoning}
                     sources={message.sources}
                     team={message.team}
                     proof={message.proof}
@@ -968,6 +1079,7 @@ export function Chat() {
                     analysis={message.analysis}
                     build={message.build}
                     canvas={message.canvas}
+                    agent={message.agent}
                     elapsedMs={elapsedFor(message)}
                     model={labelFor(message.model)}
                     interrupted={message.interrupted}
@@ -993,6 +1105,7 @@ export function Chat() {
                   key={turn.assistantMessageId ?? 'pending'}
                   content={turn.text}
                   reasoning={showReasoning ? turn.reasoning : undefined}
+                  showThoughts={showReasoning}
                   sources={turn.sources}
                   team={turn.team}
                   proof={turn.proof}
@@ -1000,6 +1113,7 @@ export function Chat() {
                   analysis={turn.analysis}
                   build={turn.build}
                   canvas={turn.canvas}
+                  agent={turn.agent}
                   elapsedMs={turn.userMessage ? Date.now() - turn.userMessage.createdAt : undefined}
                   statusText={turn.statusText}
                   statusLog={turn.statusLog}
@@ -1043,11 +1157,12 @@ export function Chat() {
             onChangeEffort={changeEffort}
             onAttach={addFiles}
             openFilePicker={filePickerRequest}
+            focusRequest={composerFocusRequest}
             onRemoveAttachment={(attachmentId) => setAttachments((current) => current.filter((item) => item.id !== attachmentId))}
             onSend={() => void send(draft)}
             onStop={() => turn?.stop()}
             busy={busy}
-            placeholder={buildOn ? 'Describe a site, landing page or tool — or paste a public site to show live…' : canvasOn ? 'What should the flashcards or quiz cover?' : analyzeOn ? 'Upload a table, then ask a question…' : researchOn ? 'Ask a question to research…' : `Message ${BRAND}`}
+            placeholder={agentOn ? 'Describe a goal; Agent plans and runs the tools…' : buildOn ? 'Describe a site, landing page or tool — or paste a public site to show live…' : canvasOn ? 'What should the flashcards or quiz cover?' : analyzeOn ? 'Upload a table, then ask a question…' : researchOn ? 'Ask a question to research…' : `Message ${BRAND}`}
             autoFocus
           />
         )}
@@ -1075,6 +1190,54 @@ function Notice({ children }: { children: React.ReactNode }) {
   return <p className="rounded-control bg-surface-2 px-4 py-3 text-center text-[13.5px] text-muted">{children}</p>
 }
 
+function ChatHeader({
+  title,
+  mode,
+  home,
+  actions,
+}: {
+  title: string
+  mode?: string
+  /** The empty home already has the page's h1; use a span there. */
+  home?: boolean
+  actions?: ReactNode
+}) {
+  const openMenu = useMobileNav()
+  return (
+    <header className="flex h-12 shrink-0 items-center px-3 md:h-14 md:px-5">
+      <div className="mx-auto flex min-w-0 w-full max-w-[760px] items-center gap-2">
+        <button
+          type="button"
+          aria-label="Open menu"
+          onClick={openMenu}
+          className="-ml-2 grid size-9 shrink-0 place-items-center rounded-tile text-muted transition-colors hover:bg-surface-2 hover:text-fg md:hidden"
+        >
+          <MenuIcon className="size-5" />
+        </button>
+        <Mark size={22} className="md:hidden" />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            {home ? (
+              <span className="truncate text-[13.5px] font-semibold tracking-[-0.01em]">{title}</span>
+            ) : (
+              <h1 className="truncate text-[13.5px] font-semibold tracking-[-0.01em]">{title}</h1>
+            )}
+            {mode && mode !== 'Chat' ? (
+              <span
+                className="inline-flex h-5 shrink-0 items-center rounded-full bg-surface-2 px-2 text-[10.5px] font-medium text-muted"
+                title={`Current mode: ${mode}. Change it in Tools.`}
+              >
+                {mode}
+              </span>
+            ) : null}
+          </div>
+        </div>
+        {actions ? <div className="ml-auto flex shrink-0 items-center gap-0.5">{actions}</div> : null}
+      </div>
+    </header>
+  )
+}
+
 function EmptyState({
   disabled,
   activeTask,
@@ -1082,6 +1245,7 @@ function EmptyState({
   showTasks,
   onTask,
   onChatOnly,
+  onSuggestion,
 }: {
   disabled: boolean
   activeTask: 'chat' | TaskId
@@ -1089,43 +1253,47 @@ function EmptyState({
   showTasks: boolean
   onTask: (task: TaskId) => void
   onChatOnly: () => void
+  onSuggestion: (prompt: string) => void
 }) {
   const { data: review } = useReviewSummary()
   const tasks: { id: TaskId; title: string; description: string; icon: LucideIcon }[] = [
-    {
-      id: 'research',
-      title: 'Research a question',
-      description: 'A cited web report with claim checks.',
-      icon: Search,
-    },
-    {
-      id: 'analyze',
-      title: 'Analyze a spreadsheet',
-      description: 'CSV, TSV or XLSX, analyzed in your browser.',
-      icon: FileSpreadsheet,
-    },
-    {
-      id: 'build',
-      title: 'Build a page or game',
-      description: 'A self-contained page, tool or game.',
-      icon: Hammer,
-    },
-    {
-      id: 'canvas',
-      title: 'Study a topic',
-      description: 'Flashcards or a quiz from a topic.',
-      icon: Layers,
-    },
+    { id: 'agent', title: 'Agent', description: 'Plans and runs several tools.', icon: Bot },
+    { id: 'research', title: 'Research', description: 'A cited web report with claim checks.', icon: Search },
+    { id: 'analyze', title: 'Analyze', description: 'Run Python on a CSV, TSV or XLSX.', icon: FileSpreadsheet },
+    { id: 'build', title: 'Build', description: 'Make a page, tool or game.', icon: Hammer },
+    { id: 'canvas', title: 'Study', description: 'Turn a topic into flashcards or a quiz.', icon: Layers },
   ]
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="flex flex-col items-center justify-start pb-4 pt-3 text-center">
-      <h1 className="text-balance text-[28px] font-semibold tracking-[-0.02em] md:text-[32px]">What can I help with?</h1>
-      <p className="mt-2 max-w-[430px] text-balance text-[13.5px] leading-relaxed text-faint">
-        {showTasks ? 'Free models, no key needed. Pick a starting point, or just type below.' : 'Ask anything below.'}
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+      className="my-auto flex w-full flex-col items-center justify-start pb-4 pt-3 text-center"
+    >
+      <h1 className="text-balance text-[30px] font-semibold tracking-[-0.025em] md:text-[36px]">Everything you need in one place.</h1>
+      <p className="mt-2 max-w-[490px] text-balance text-[13.5px] leading-relaxed text-muted">
+        Ask anything. Quill shows its sources, checks the hard parts, and keeps what it makes in your Library.
       </p>
+      <div className="mt-5 grid w-full gap-2 min-[520px]:grid-cols-2">
+        {SUGGESTIONS.map((prompt) => (
+          <button
+            key={prompt}
+            type="button"
+            disabled={disabled}
+            onClick={() => onSuggestion(prompt)}
+            className="group flex min-h-[52px] items-center gap-2.5 rounded-card border border-line bg-surface px-3.5 py-2.5 text-left text-[12.5px] leading-snug text-muted shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-[border-color,background-color,color] hover:border-line-strong hover:bg-surface-2/40 hover:text-fg disabled:pointer-events-none disabled:opacity-40"
+          >
+            <span className="grid size-6 shrink-0 place-items-center rounded-tile bg-surface-2 text-faint transition-colors group-hover:text-fg">
+              <ArrowUpRight className="size-3.5" />
+            </span>
+            <span className="min-w-0 flex-1">{prompt}</span>
+          </button>
+        ))}
+      </div>
       {showTasks ? (
-        <>
-          <div className="mt-3 grid w-full gap-2 min-[440px]:grid-cols-2">
+        <div className="mt-4 flex w-full flex-col items-center gap-1.5">
+          <p className="text-[11px] font-medium text-faint">Or start a task</p>
+          <div className="flex flex-wrap items-center justify-center gap-1">
             {tasks.map((task) => {
               const reason = unavailable[task.id]
               const blocked = disabled || Boolean(reason)
@@ -1137,24 +1305,17 @@ function EmptyState({
                   type="button"
                   disabled={blocked}
                   aria-pressed={active}
+                  aria-label={`${task.description}${reason ? ` ${reason}` : ''}`}
+                  title={`${task.description}${reason ? ` · ${reason}` : ''}`}
                   onClick={() => onTask(task.id)}
                   className={cx(
-                    'group flex flex-col justify-between rounded-card border bg-surface p-3 text-left shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-[border-color,background-color,box-shadow]',
-                    active ? 'border-fg/35 ring-1 ring-fg/8' : 'border-line hover:border-line-strong hover:bg-surface-2/40',
-                    blocked && 'cursor-not-allowed opacity-45 hover:border-line hover:bg-surface',
+                    'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[11.5px] font-medium transition-colors',
+                    active ? 'border-fg bg-fg text-bg' : 'border-line bg-surface text-muted hover:border-line-strong hover:text-fg',
+                    blocked && 'cursor-not-allowed opacity-40',
                   )}
                 >
-                  <span className="flex items-start gap-2.5">
-                    <span className="grid size-7 shrink-0 place-items-center rounded-tile bg-surface-2 text-fg">
-                      <Icon className="size-3.5" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-[13px] font-medium leading-snug">{task.title}</span>
-                      <span className="mt-1 block text-[11.5px] leading-snug text-faint">{task.description}</span>
-                    </span>
-                    {active && <span className="mt-1 size-1.5 shrink-0 rounded-full bg-accent" aria-hidden />}
-                  </span>
-                  {reason ? <span className="mt-1.5 block text-[10.5px] leading-snug text-muted">{reason}</span> : null}
+                  <Icon className="size-3.5" />
+                  {task.title}
                 </button>
               )
             })}
@@ -1162,35 +1323,24 @@ function EmptyState({
           {review && review.due > 0 ? (
             <Link
               to="/review"
-              className="mt-2 flex w-full items-center gap-3 rounded-card border border-line bg-surface px-3.5 py-2 text-left shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-colors hover:border-line-strong hover:bg-surface-2/40"
+              className="mt-1 inline-flex items-center gap-1.5 text-[11.5px] font-medium text-muted transition-colors hover:text-fg"
             >
-              <span className="grid size-7 shrink-0 place-items-center rounded-tile bg-accent-soft text-accent">
-                <Brain className="size-3.5" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[12.5px] font-medium">Smart Review</span>
-                <span className="mt-0.5 block text-[11px] text-faint">
-                  {review.due} card{review.due === 1 ? '' : 's'} due today
-                </span>
-              </span>
-              <span className="inline-flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-muted">
-                Review
-                <ArrowUpRight className="size-3.5" />
-              </span>
+              <Brain className="size-3.5 text-accent" />
+              {review.due} card{review.due === 1 ? '' : 's'} due · Review
             </Link>
           ) : null}
-          {activeTask !== 'chat' && (
+          {activeTask !== 'chat' ? (
             <button
               type="button"
               onClick={onChatOnly}
               disabled={disabled}
-              className="mt-1.5 inline-flex items-center gap-1.5 text-[11.5px] text-faint underline-offset-2 transition-colors hover:text-fg hover:underline disabled:opacity-40"
+              className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-faint underline-offset-2 transition-colors hover:text-fg hover:underline disabled:opacity-40"
             >
               <MessageCircle className="size-3.5" />
               Switch to just chat
             </button>
-          )}
-        </>
+          ) : null}
+        </div>
       ) : null}
     </motion.div>
   )
