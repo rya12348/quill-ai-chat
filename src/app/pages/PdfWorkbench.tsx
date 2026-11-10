@@ -294,16 +294,25 @@ export function PdfWorkbench() {
   }
 
   const makePdfOutput = async (bytes: Uint8Array, name: string, note: string): Promise<StudioOutput> => {
-    let preview: string | undefined
     let pages: number | undefined
     try {
-      const meta = await renderPdfPreview(bytes)
-      preview = meta.dataUrl
-      pages = meta.pageCount
+      pages = await pdfPageCount(bytes)
     } catch {
-      // A browser that cannot preview the result can still download it.
+      // The file is still downloadable even when its metadata cannot be read.
     }
-    return { blob: pdfBlob(bytes), name, note, pages, preview, kind: 'pdf' }
+    return { blob: pdfBlob(bytes), name, note, pages, kind: 'pdf' }
+  }
+
+  const attachPreview = (output: StudioOutput) => {
+    void output.blob
+      .arrayBuffer()
+      .then((buffer) => renderPdfPreview(new Uint8Array(buffer)))
+      .then((meta) => {
+        setResult((current) => (current?.blob === output.blob ? { ...current, pages: current.pages ?? meta.pageCount, preview: meta.dataUrl } : current))
+      })
+      .catch(() => {
+        // Preview is optional; the operation and download must not wait for it.
+      })
   }
 
   const run = async (label: string, task: () => Promise<StudioOutput>) => {
@@ -312,7 +321,9 @@ export function PdfWorkbench() {
     setResult(null)
     setSaved(false)
     try {
-      setResult(await task())
+      const output = await task()
+      setResult(output)
+      if (output.kind === 'pdf') attachPreview(output)
     } catch (cause) {
       toast(cause instanceof Error ? cause.message : 'That PDF operation failed.', 'danger')
     } finally {

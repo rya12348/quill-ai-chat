@@ -42,12 +42,12 @@ const PROMPT_ECHO =
 const GAME_NOUN =
   'game|platformer|arcade|snake|tetris|breakout|pong|pac-?man|flappy|maze|shooter|runner|racer|rpg|tic-?tac-?toe|2048|minesweeper|solitaire|wordle|physics sandbox'
 
-/** How many lanes one Build may try, including the parallel second attempt. */
-const MAX_BUILD_LANES = 4
+/** How many lanes one Build may try, including the parallel attempts. */
+const MAX_BUILD_LANES = 6
 /** A second lane starts after this head start if the first is still writing. */
-const BUILD_STAGGER = 8_000
-/** Page builds race two lanes; games race three because they are the riskiest. */
-const BUILD_PARALLEL = 2
+const BUILD_STAGGER = 3_000
+/** Page builds race three lanes; games race three because they are the riskiest. */
+const BUILD_PARALLEL = 3
 const GAME_PARALLEL = 3
 
 /**
@@ -106,9 +106,12 @@ export function extractHtml(raw: string): string | undefined {
     const text = visibleText(visible)
     if (text.length < 40) return false
     // A shell of headings and "..." placeholders is not a page: require enough
-    // actual letters and reject a body made mostly of ellipses.
+    // actual letters, a real paragraph of copy, and reject a body made mostly
+    // of ellipses or the instruction words a model left in the skeleton.
     if ((text.match(/[a-z]/gi) ?? []).length < 50) return false
-    if ((text.match(/\.{3,}/g) ?? []).length > 4) return false
+    if (text.length < 40) return false
+    if ((text.match(/\.{3,}|…/g) ?? []).length > 2) return false
+    if (/\b(?:inline CSS|SVG diagram|form handler|photos? with credits|your (?:copy|content|text) here|lorem ipsum|TODO|TBD|placeholder)\b/i.test(text)) return false
     if (!/<(?:h1|h2|h3|p|div|header|main|section|article|nav|footer|button|form|ul|li|table|img|a)[\s>]/i.test(visible)) return false
     // A stylesheet with unbalanced braces means the page was truncated or the
     // model mangled its CSS; either way it paints a half-styled page.
@@ -290,6 +293,24 @@ export async function buildComplete(input: BuildIntent): Promise<BuildOutcome> {
   // so a degraded lane never outranks one that actually answers.
   const statusRank = (status: string | undefined) =>
     status === 'healthy' ? 0 : status === 'degraded' ? 2 : status === 'down' ? 3 : 1
+  // A known complete-page lane beats a fast probe: short health probes measure
+  // time-to-first-token, not the minute a 550B model can spend writing HTML.
+  // Page builds start with the lane that has already returned a full page; games
+  // keep the ordinary health/speed order because playable code is a different
+  // capability.
+  const pageRank = (model: string) => (game ? 1 : /nemotron-3-super/i.test(model) ? 0 : 1)
+  // Static evidence from live runs, used when health has no row yet. Kimi K3
+  // spends its free HTML quota before writing a page; the reasoning-heavy
+  // Nemotron variants often use the whole budget thinking and return a
+  // truncated skeleton. Fast code-capable lanes get a small boost.
+  const pageReliability = (model: string) => {
+    if (game) return 0
+    if (/nemotron-3-super/i.test(model)) return 8
+    if (/minimax-m3\.1|gpt-oss-120b|deepseek-v4|qwen3\.8/i.test(model)) return 4
+    if (/coding-kimi-k3-free/i.test(model)) return -20
+    if (/nemotron-3\.5-super-vl|nemotron-3-ultra|north-mini-code/i.test(model)) return -8
+    return 0
+  }
   // Latency is only a rough guide, so bucket it by order of magnitude.
   const speedRank = (latencyMs: number | null | undefined) => {
     if (!latencyMs || latencyMs <= 0) return 2
@@ -305,13 +326,23 @@ export async function buildComplete(input: BuildIntent): Promise<BuildOutcome> {
       lane,
       status: health?.status,
       speed: speedRank(health?.latencyMs),
+      page: pageRank(lane.model),
       family,
       // DeepSeek is still the most reliable free family for a complete page,
-      // but only as a tie-break after health and measured speed.
-      score: laneStrength(lane.model, lane.url) + (family === 'DeepSeek' ? 3 : 0),
+      // but only as a tie-break after health and measured speed. Nemotron 3
+      // Super gets a small build-only boost: it has produced complete pages,
+      // while the stronger-sounding Kimi free lane often spends its quota before
+      // writing the HTML. This matters most right after a restart, when health
+      // has no row yet and every lane looks equally unknown.
+      score:
+        laneStrength(lane.model, lane.url) +
+        (family === 'DeepSeek' ? 3 : 0) +
+        pageReliability(lane.model),
     }
   })
-  candidates.sort((a, b) => statusRank(a.status) - statusRank(b.status) || a.speed - b.speed || b.score - a.score)
+  candidates.sort(
+    (a, b) => a.page - b.page || statusRank(a.status) - statusRank(b.status) || a.speed - b.speed || b.score - a.score,
+  )
   // Fastest healthy lane first, then the best lane from a different family so
   // the parallel attempt survives a provider-wide stall. The rest are fallbacks.
   const launchOrder: typeof candidates = []
@@ -329,7 +360,7 @@ export async function buildComplete(input: BuildIntent): Promise<BuildOutcome> {
   const lanesToTry = launchOrder.slice(0, MAX_BUILD_LANES).map((candidate) => candidate.lane)
   const pageSystem = `You are a senior product designer and front-end engineer. Build one complete, polished, self-contained HTML website.
 
-Start your reply with <!doctype html> and end it with </html>. Output nothing before or after the document: no Markdown fences, no plan, no explanation, and never repeat these instructions.
+Do not think out loud, plan, or describe the page. Your first character must be '<'. Start your reply with <!doctype html> and end it with </html>. Output nothing before or after the document: no Markdown fences, no plan, no explanation, and never repeat these instructions.
 
 The request may be a landing page, portfolio, blog, dashboard, storefront, booking page, calculator, game or small interactive tool. Choose a visual direction and layout that fits the subject.
 
@@ -350,7 +381,7 @@ Rules:
 
   const gameSystem = `You are a senior game developer and front-end engineer. Build one complete, polished, playable browser game in a single self-contained HTML document.
 
-Start your reply with <!doctype html> and end it with </html>. Output nothing before or after the document: no Markdown fences, no plan, no explanation, and never repeat these instructions.
+Do not think out loud, plan, or describe the game. Your first character must be '<'. Start your reply with <!doctype html> and end it with </html>. Output nothing before or after the document: no Markdown fences, no plan, no explanation, and never repeat these instructions.
 
 The game must actually work, not just look like a game:
 - Use <canvas> for the playfield. Scale it for devicePixelRatio, handle resize, and fit the frame on phone and desktop.
@@ -372,11 +403,11 @@ The game must actually work, not just look like a game:
   }
 
   // A page takes tens of seconds on a free lane, so the budget is generous but
-  // bounded. Two lanes write in parallel after a short head start; whichever
-  // returns a valid page first wins and the other is cancelled. This replaces
+  // bounded. Three lanes write in parallel after short head starts; whichever
+  // returns a valid page first wins and the others are cancelled. This replaces
   // the old sequential retries, where one slow lane could hold the build for a
   // full minute before the next lane was even tried.
-  const deadline = Date.now() + (game ? 155_000 : 100_000)
+  const deadline = Date.now() + (game ? 180_000 : 130_000)
   const startedAt = Date.now()
   const heartbeat = setInterval(() => {
     const seconds = Math.round((Date.now() - startedAt) / 1_000)
@@ -407,7 +438,7 @@ The game must actually work, not just look like a game:
       controller.abort()
     })
     const remaining = Math.max(15_000, deadline - Date.now())
-    const timeout = AbortSignal.timeout(Math.min(game ? 90_000 : 48_000, remaining))
+    const timeout = AbortSignal.timeout(Math.min(game ? 110_000 : 75_000, remaining))
     const signal = input.signal
       ? AbortSignal.any([input.signal, controller.signal, timeout])
       : AbortSignal.any([controller.signal, timeout])
@@ -424,7 +455,10 @@ The game must actually work, not just look like a game:
           messages: buildMessages(input.question, `${system}${photoBrief}`, input.previous),
           signal,
           temperature: game ? 0.15 : input.previous ? 0.1 : 0.2,
-          maxTokens: game ? 4_000 : 5_000,
+          maxTokens: game ? 4_000 : 8_000,
+          // Build is a bounded race, so let the provider decide whether a lane
+          // is still rate-limited instead of trusting an in-isolate cooldown.
+          allowCooling: true,
           // laneText reports its own failures; a success only counts once the
           // page passes validation, so junk output cannot mark a lane healthy.
           onLaneResult: (result) => {

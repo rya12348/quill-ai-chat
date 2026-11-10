@@ -35,6 +35,15 @@ test('game requests are told apart from sites about games', () => {
   assert.equal(isInteractiveRequest('write a cover letter'), false)
 })
 
+test('a placeholder skeleton is rejected, while real page copy is kept', () => {
+  const skeleton = page('<h1>Proxy Checker</h1><p>...</p><p>...</p><p>SVG diagram form photos with credits</p>')
+  assert.equal(extractPages(skeleton).length, 0)
+  const real = page(
+    '<h1>Proxy Checker</h1><p>Paste an HTTP proxy URL, run a request and see the status, latency and response headers in one place. The tester keeps a short history in this browser.</p><form><input><button>Test proxy</button></form>',
+  )
+  assert.equal(extractPages(real).length, 1)
+})
+
 test('a game must have working code, not just a static mock-up', () => {
   assert.equal(hasInteractiveCode(page(copy, gameScript)), true)
   assert.equal(hasInteractiveCode(page(copy, 'document.addEventListener("scroll", function () {})')), false)

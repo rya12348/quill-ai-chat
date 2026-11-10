@@ -198,11 +198,19 @@ function fallbackAnswer(
     return `I made a ${count}-${canvas.kind === 'quiz' ? 'question quiz' : 'card deck'} called **${canvas.title}**. It is shown below.`
   }
   const ran = steps.filter((step) => step.tool !== 'answer' && step.status === 'done')
+  const failed = steps.filter((step) => step.tool !== 'answer' && step.status === 'failed')
   if (!ran.length) {
-    return 'The run finished, but no free model was available to write the answer. Try again in a minute.'
+    if (failed.length) {
+      const first = failed[0]
+      if (first.tool === 'build') {
+        return "I couldn't finish the page build. The generated pages were incomplete. Try again, or ask for a smaller page."
+      }
+      return `I couldn't finish **${first.title}**. The tool didn't return a usable result. Try again, or ask for something smaller.`
+    }
+    return "I couldn't write an answer this time. Try again in a minute."
   }
   return [
-    'The run finished, but no free model was available to write the final answer. Here is what the steps produced:',
+    "I couldn't write the final summary, but these steps finished:",
     '',
     ...ran.map((step) => `- **${step.title}** (${agentToolLabel(step.tool).toLowerCase()})${step.detail ? `: ${step.detail}` : ''}`),
   ].join('\n')
@@ -375,10 +383,18 @@ export async function agentComplete(input: AgentIntent): Promise<AgentOutcome> {
           ? fallbackAnswer(steps, researchText, buildInfo, canvasInfo)
           : ''
     : ''
+  const allToolsFailed = toolSteps.length > 0 && !toolSteps.some((step) => step.status === 'done')
   let answer = ''
   let answerModel: string | undefined
   let fellBack = false
-  if (direct.trim()) {
+  if (allToolsFailed) {
+    // The tools have already explained what went wrong. Asking another model
+    // to paraphrase that failure adds tens of seconds and can turn a clear
+    // timeout into a vague status message, so finish immediately.
+    await input.onStatus?.('Finishing the answer…')
+    answer = fallbackAnswer(steps, researchText, buildInfo, canvasInfo)
+    fellBack = true
+  } else if (direct.trim()) {
     await input.onStatus?.('Finishing the answer…')
     answer = direct.trim()
     answerModel = onlyTool?.model

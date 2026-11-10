@@ -152,6 +152,8 @@ type LaneInput = {
   fallbackToReasoning?: boolean
   /** Override the streaming deadline for short internal calls. */
   timeoutMs?: number
+  /** Allow a lane to retry after its in-isolate cooldown; the provider's own 429 still applies. */
+  allowCooling?: boolean
 }
 
 /** One lane's outcome, for the persisted provider-health table. */
@@ -771,7 +773,7 @@ async function laneFailure(lane: PublicLane, response: Response): Promise<AiErro
 
 /** One lane, with its failures turned into sentences the app can show. */
 async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<StreamPiece> {
-  if (isCooling(lane)) throw new AiError('busy', `${lane.label} is taking a short break.`, 429)
+  if (isCooling(lane) && !input.allowCooling) throw new AiError('busy', `${lane.label} is taking a short break.`, 429)
   const startedAt = Date.now()
   const timeout = AbortSignal.timeout(input.timeoutMs ?? 240_000)
   const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout
@@ -831,7 +833,7 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
 
 /** One complete answer from a lane, used as a draft, a plan or a review. */
 export async function laneText(lane: PublicLane, input: LaneInput): Promise<string> {
-  if (isCooling(lane)) throw new AiError('busy', `${lane.label} is taking a short break.`, 429)
+  if (isCooling(lane) && !input.allowCooling) throw new AiError('busy', `${lane.label} is taking a short break.`, 429)
   // The visible-thinking path must stream, not wait for a JSON response. It
   // forwards only reasoning to the caller; the final content is still returned.
   if (input.onReasoning) {

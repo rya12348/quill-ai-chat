@@ -25,7 +25,7 @@ export type CompressionLevel = 'balanced' | 'strong'
 type PdfJs = typeof import('pdfjs-dist/legacy/build/pdf.mjs')
 type PdfPage = {
   getViewport: (params: { scale: number }) => { width: number; height: number; transform: number[]; scale: number }
-  render: (params: { canvasContext: CanvasRenderingContext2D; viewport: unknown; canvas?: HTMLCanvasElement }) => { promise: Promise<void> }
+  render: (params: { canvasContext: CanvasRenderingContext2D; viewport: unknown; canvas?: HTMLCanvasElement }) => { promise: Promise<void>; cancel: () => void }
   getTextContent: () => Promise<{ items: unknown[] }>
 }
 type PdfTextFragment = { str: string; transform: number[]; width: number; height: number }
@@ -319,7 +319,28 @@ async function renderPage(page: PdfPage, scale: number): Promise<HTMLCanvasEleme
   if (!context) throw new Error('This browser could not prepare a canvas for the PDF.')
   context.fillStyle = '#ffffff'
   context.fillRect(0, 0, canvas.width, canvas.height)
-  await page.render({ canvasContext: context, viewport, canvas }).promise
+  const task = page.render({ canvasContext: context, viewport, canvas })
+  let settled = false
+  let timer: number | undefined
+  try {
+    await Promise.race([
+      task.promise.finally(() => {
+        settled = true
+      }),
+      new Promise<never>((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error('PDF rendering took too long. Keep this tab visible and try again.')), 20_000)
+      }),
+    ])
+  } finally {
+    if (timer) window.clearTimeout(timer)
+    if (!settled) {
+      try {
+        task.cancel()
+      } catch {
+        /* The task may already have finished between the timeout and cancel. */
+      }
+    }
+  }
   return canvas
 }
 
