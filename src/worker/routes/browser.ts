@@ -26,10 +26,9 @@ const MAX_TEXT = 8_000
 // This is only the outermost transport backstop; it is not a task deadline.
 // A compact step tolerates 12 seconds of silence, a complex form 15, and a
 // long document 20; the first token is what matters, not the total duration.
-const BROWSER_PLAN_MAX_MS = 48_000
-// Deep mode gives one strong reasoning model enough time to finish a plan. The
-// regular budget aborts that model mid-thought, which is why hard tasks were
-// always decided by the quickest small lane instead of the best one.
+// The transport backstop for a plan. Individual steps keep their own shorter
+// deadlines; a hard step gets a longer one so a strong reasoner can finish
+// instead of being aborted mid-thought and replaced by a small model.
 const BROWSER_PLAN_DEEP_MAX_MS = 112_000
 // The recovery pass after a missed window keeps the same lanes and a real
 // budget. It used to get only eight seconds and skip fallbacks, which turned
@@ -844,9 +843,8 @@ function browserLaneScore(lane: PublicLane, preferredModel?: string): number {
   return score
 }
 
-/** Deep mode ranks by capability instead of latency: the opposite trade from
- * the interactive pool. Big free reasoners are preferred even though they take
- * 20–40 seconds to plan. */
+/** Hard-task ranking: capability before latency. Big free reasoners are
+ * preferred even though they take 20–40 seconds to plan. */
 function browserDeepScore(lane: PublicLane): number {
   const id = lane.model.toLowerCase()
   let score = laneStrength(lane.model, lane.url)
@@ -860,6 +858,21 @@ function browserDeepScore(lane: PublicLane): number {
   else if (/qwen3\.8-27b|minimax-m3\.1/.test(id)) score += 24
   if (/nano|9b|20b|lightning|mini|gemma|llama|oss-20b|north|flint|liquid|dots/.test(id)) score -= 30
   return score
+}
+
+/** Decide from the work itself whether this step deserves the slower, stronger
+ * model. The person should never have to choose a mode. */
+function shouldThinkHard(task: string, notes?: string[], recovering = false): boolean {
+  if (recovering) return true
+  if (task.length > 220) return true
+  if (
+    /\b(?:courses?|modules?|quiz(?:zes)?|exams?|tests?|playlists?|entire|whole|research|compare)\b/i.test(task) ||
+    /\b(?:every|each|all)\s+(?:question|video|lesson|assignment|item|row|page|module|task)\b/i.test(task) ||
+    /\b(?:apply|application|submit|checkout|purchase|payment|invoice|booking|reservation|delete|upload)\b/i.test(task)
+  ) {
+    return true
+  }
+  return Boolean(notes?.some((note) => /\b(?:failed|stuck|not visible|did not change|blocked|error)\b/i.test(note)))
 }
 
 const SYSTEM = `You are Ink Browser, a computer-use agent controlling one real browser for the person using Ink.
@@ -984,8 +997,6 @@ async function plan(input: {
   script?: string
   blocked?: string[]
   recovering?: boolean
-  /** Spend a strong reasoning model and a long budget on a hard task. */
-  deep?: boolean
   /** Use one small, short planning pass for a timeout retry. */
   fast?: boolean
   /** Optional public-lane model override; used by the chat's model picker. */
@@ -1027,7 +1038,10 @@ async function plan(input: {
   // pretending there are no lanes at all. Active, fast lanes still sort first,
   // and allowCooling below lets a browser step recover immediately rather than
   // sitting out a provider's two-minute cooldown.
-  const deep = input.deep === true
+  // No mode switch: the step itself decides whether it is worth a slower,
+  // stronger model. Long or repetitive work, account/irreversible actions and
+  // any step after a failure get the reasoner; a single click does not.
+  const deep = shouldThinkHard(input.task, input.notes, input.recovering === true)
   const ranked = candidateLanes(lanes).sort((a, b) => {
     const active = Number(laneIsCooling(a)) - Number(laneIsCooling(b))
     if (active) return active
@@ -1470,12 +1484,11 @@ async function plan(input: {
 }
 
 /** Answer a read-only page question without the full tool-planning context. */
-async function answerPage(env: Env, task: string, state: BrowserSnapshot, deep = false): Promise<{ answer: string; lane: string }> {
+async function answerPage(env: Env, task: string, state: BrowserSnapshot): Promise<{ answer: string; lane: string }> {
   const preferredModel = env.BROWSER_MODEL?.trim() || undefined
   const ranked = candidateLanes(publicLanes(env)).sort((a, b) => {
     const active = Number(laneIsCooling(a)) - Number(laneIsCooling(b))
     if (active) return active
-    if (deep) return browserDeepScore(b) - browserDeepScore(a)
     const tier = browserLaneTier(a, preferredModel) - browserLaneTier(b, preferredModel)
     if (tier) return tier
     return browserLaneScore(b, preferredModel) - laneSpeedPenalty(b) - (browserLaneScore(a, preferredModel) - laneSpeedPenalty(a))
@@ -1483,10 +1496,7 @@ async function answerPage(env: Env, task: string, state: BrowserSnapshot, deep =
   // Six lanes, active and fast first. Four lanes at four seconds of silence
   // was too small a margin: when they all missed, the question paid for the
   // full browser planner as well.
-  // Deep mode reads a question with the same strong model that plans a hard
-  // task. Two lanes instead of six keeps the race cheap; the first correct
-  // answer still wins.
-  const lanes = ranked.slice(0, deep ? 2 : PAGE_ANSWER_LANES)
+  const lanes = ranked.slice(0, PAGE_ANSWER_LANES)
   if (!lanes.length) throw new AiError('browser_unavailable', 'No free browser-capable model is configured right now.', 503)
   const messages: ChatMessage[] = [
     {
@@ -1500,15 +1510,15 @@ async function answerPage(env: Env, task: string, state: BrowserSnapshot, deep =
     },
   ]
   const controller = new AbortController()
-  const attempts = lanes.map(async (lane) => {
+  const attempt = async (lane: PublicLane, idleMs: number, timeoutMs: number) => {
     const startedAt = Date.now()
     const answer = await laneTextStreaming(lane, {
       messages,
       temperature: 0.1,
       maxTokens: 600,
       signal: controller.signal,
-      idleMs: deep ? 22_000 : PAGE_ANSWER_IDLE_MS,
-      timeoutMs: deep ? 40_000 : PAGE_ANSWER_TIMEOUT_MS,
+      idleMs,
+      timeoutMs,
       allowCooling: true,
       keepPartial: true,
     })
@@ -1521,10 +1531,24 @@ async function answerPage(env: Env, task: string, state: BrowserSnapshot, deep =
     }
     recentLaneLatency.set(laneCacheKey(lane), Date.now() - startedAt)
     return { answer: cleaned, lane: lane.label }
-  })
+  }
   try {
-    return await Promise.any(attempts)
+    return await Promise.any(lanes.map((lane) => attempt(lane, PAGE_ANSWER_IDLE_MS, PAGE_ANSWER_TIMEOUT_MS)))
   } catch {
+    // Every quick lane said the answer was not on the page. That is exactly the
+    // moment to spend a stronger model instead of telling the person there is
+    // no answer: retry once with the best free reasoner, then give up.
+    const stronger = ranked
+      .filter((lane) => !lanes.includes(lane))
+      .sort((a, b) => browserDeepScore(b) - browserDeepScore(a))
+      .slice(0, 1)
+    if (stronger.length) {
+      try {
+        return await Promise.any(stronger.map((lane) => attempt(lane, 22_000, 35_000)))
+      } catch {
+        // Fall through to the shared error below.
+      }
+    }
     throw new AiError('browser_answer', 'The page could not be read right now.', 502)
   } finally {
     controller.abort()
@@ -2315,13 +2339,12 @@ browser.post('/answer', async (c) => {
   const raw = (await c.req.json<Record<string, unknown>>().catch(() => null)) as Record<string, unknown> | null
   const state = snapshot(raw?.snapshot)
   const task = text(raw?.task, 2_000)
-  const deep = raw?.deep === true
   if (!state || !task) return privateJson(c, { error: 'invalid_request', message: 'Browser task and page state are required.' }, 400)
   if ((state.text ?? '').trim().length < 40) {
     return privateJson(c, { error: 'page_empty', message: 'This page has no readable text yet.' }, 422)
   }
   try {
-    return privateJson(c, await answerPage(c.env, task, state, deep))
+    return privateJson(c, await answerPage(c.env, task, state))
   } catch (error) {
     return errorResponse(c, error)
   }
@@ -2364,7 +2387,6 @@ browser.post('/plan', async (c) => {
   const blocked = stringList(raw.blocked, 8, 500)
   const recovering = raw.recovering === true
   const fast = raw.fast === true
-  const deep = raw.deep === true
   const assistantModel = text(raw.assistantModel, 120)
   const history = Array.isArray(raw.history)
     ? raw.history
@@ -2394,7 +2416,9 @@ browser.post('/plan', async (c) => {
   let planTimer: ReturnType<typeof setTimeout> | undefined
   try {
     const planAbort = new AbortController()
-    const planBudget = fast ? BROWSER_PLAN_FAST_MAX_MS : deep ? BROWSER_PLAN_DEEP_MAX_MS : BROWSER_PLAN_MAX_MS
+    // The step's own deadline is the real limit; this is only the transport
+    // backstop, so a hard step that escalates to a reasoner can finish.
+    const planBudget = fast ? BROWSER_PLAN_FAST_MAX_MS : BROWSER_PLAN_DEEP_MAX_MS
     const planDeadline = new Promise<never>((_, reject) => {
       planTimer = setTimeout(() => {
         planAbort.abort()
@@ -2422,7 +2446,6 @@ browser.post('/plan', async (c) => {
       ...(blocked.length ? { blocked } : {}),
       ...(recovering ? { recovering } : {}),
       ...(fast ? { fast: true } : {}),
-      ...(deep ? { deep: true } : {}),
       ...(assistantModel ? { assistantModel } : {}),
       history,
       signal: AbortSignal.any([c.req.raw.signal, planAbort.signal]),
