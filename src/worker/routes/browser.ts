@@ -1464,11 +1464,12 @@ async function plan(input: {
 }
 
 /** Answer a read-only page question without the full tool-planning context. */
-async function answerPage(env: Env, task: string, state: BrowserSnapshot): Promise<{ answer: string; lane: string }> {
+async function answerPage(env: Env, task: string, state: BrowserSnapshot, deep = false): Promise<{ answer: string; lane: string }> {
   const preferredModel = env.BROWSER_MODEL?.trim() || undefined
   const ranked = candidateLanes(publicLanes(env)).sort((a, b) => {
     const active = Number(laneIsCooling(a)) - Number(laneIsCooling(b))
     if (active) return active
+    if (deep) return browserDeepScore(b) - browserDeepScore(a)
     const tier = browserLaneTier(a, preferredModel) - browserLaneTier(b, preferredModel)
     if (tier) return tier
     return browserLaneScore(b, preferredModel) - laneSpeedPenalty(b) - (browserLaneScore(a, preferredModel) - laneSpeedPenalty(a))
@@ -1476,7 +1477,10 @@ async function answerPage(env: Env, task: string, state: BrowserSnapshot): Promi
   // Six lanes, active and fast first. Four lanes at four seconds of silence
   // was too small a margin: when they all missed, the question paid for the
   // full browser planner as well.
-  const lanes = ranked.slice(0, PAGE_ANSWER_LANES)
+  // Deep mode reads a question with the same strong model that plans a hard
+  // task. Two lanes instead of six keeps the race cheap; the first correct
+  // answer still wins.
+  const lanes = ranked.slice(0, deep ? 2 : PAGE_ANSWER_LANES)
   if (!lanes.length) throw new AiError('browser_unavailable', 'No free browser-capable model is configured right now.', 503)
   const messages: ChatMessage[] = [
     {
@@ -1497,8 +1501,8 @@ async function answerPage(env: Env, task: string, state: BrowserSnapshot): Promi
       temperature: 0.1,
       maxTokens: 600,
       signal: controller.signal,
-      idleMs: PAGE_ANSWER_IDLE_MS,
-      timeoutMs: PAGE_ANSWER_TIMEOUT_MS,
+      idleMs: deep ? 22_000 : PAGE_ANSWER_IDLE_MS,
+      timeoutMs: deep ? 40_000 : PAGE_ANSWER_TIMEOUT_MS,
       allowCooling: true,
       keepPartial: true,
     })
@@ -2305,12 +2309,13 @@ browser.post('/answer', async (c) => {
   const raw = (await c.req.json<Record<string, unknown>>().catch(() => null)) as Record<string, unknown> | null
   const state = snapshot(raw?.snapshot)
   const task = text(raw?.task, 2_000)
+  const deep = raw?.deep === true
   if (!state || !task) return privateJson(c, { error: 'invalid_request', message: 'Browser task and page state are required.' }, 400)
   if ((state.text ?? '').trim().length < 40) {
     return privateJson(c, { error: 'page_empty', message: 'This page has no readable text yet.' }, 422)
   }
   try {
-    return privateJson(c, await answerPage(c.env, task, state))
+    return privateJson(c, await answerPage(c.env, task, state, deep))
   } catch (error) {
     return errorResponse(c, error)
   }

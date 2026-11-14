@@ -2028,8 +2028,8 @@ export function Browser() {
                   if ((clicked.snapshot.text ?? '').trim().length >= 160) {
                     const second = await api<{ answer?: string }>('/browser/answer', {
                       method: 'POST',
-                      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]),
-                      json: { task: siteSearch.followUp, snapshot: clicked.snapshot },
+                      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(deep ? 50_000 : 8_000)]),
+                      json: { task: siteSearch.followUp, snapshot: clicked.snapshot, ...(deep ? { deep: true } : {}) },
                     })
                     const secondAnswer = usablePageAnswer(second.answer || '')
                     if (secondAnswer) {
@@ -3137,8 +3137,8 @@ export function Browser() {
           try {
             const result = await api<{ answer?: string }>('/browser/answer', {
               method: 'POST',
-              signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]),
-              json: { task: planningTask, snapshot: next.snapshot },
+              signal: AbortSignal.any([controller.signal, AbortSignal.timeout(deep ? 50_000 : 8_000)]),
+              json: { task: planningTask, snapshot: next.snapshot, ...(deep ? { deep: true } : {}) },
             })
             const answer = usablePageAnswer(result.answer || '')
             if (answer) {
