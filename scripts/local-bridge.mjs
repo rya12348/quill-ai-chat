@@ -41,9 +41,9 @@ const APP_ORIGINS = new Set(
     'https://site-d487210d16384bf6a8003bd3c398cc14.freebuff.page',
     // Free tunnel origins for this dev session. Exact origins only: a wildcard
     // would let any page on a tunnel provider control the local browser.
-    'https://12adeaa82da432.app.lhr.life',
-    'https://292808d21ca47fb6-73-159-248-190.serveousercontent.com',
-    'https://ndoedi-ip-73-159-248-190.tunnelmole.net',
+    'https://671a2877109835.app.lhr.life',
+    'https://e628a74aaf5bc55c-73-159-248-190.serveousercontent.com',
+    'https://s6lpo3-ip-73-159-248-190.tunnelmole.net',
     'http://127.0.0.1:5180',
     'http://localhost:5180',
     process.env.INK_APP_ORIGIN,
@@ -236,6 +236,11 @@ wss.on('connection', async (app, request) => {
     maxPayload: 8 * 1024 * 1024,
   })
   let currentTargetId = target.id
+  // Keep the tab that started the session available when a popup or a
+  // target=_blank tab closes. Previously the bridge closed that socket when it
+  // followed the popup, and closing the popup then killed the whole session.
+  let fallbackChrome = null
+  let fallbackTargetId = null
   let switchingTarget = false
   const queued = []
   chrome.on('open', () => {
@@ -292,16 +297,18 @@ wss.on('connection', async (app, request) => {
         maxPayload: 8 * 1024 * 1024,
       })
       replacement.on('open', () => {
-        const previous = chrome
+        // Hold on to the tab we came from instead of closing it. A popup is
+        // temporary; the course or document tab is where the task continues.
+        if (fallbackChrome && fallbackChrome !== chrome) fallbackChrome.close()
+        fallbackChrome = chrome
+        fallbackTargetId = currentTargetId
         chrome = replacement
         currentTargetId = next.id
-        pinnedTargetId = next.id
         console.log('[ink] following new page target', next.id)
         while (queued.length) replacement.send(queued.shift())
         if (app.readyState === WebSocket.OPEN) {
           app.send(JSON.stringify({ type: 'bridge-ready', target: { id: next.id, url: next.url, title: next.title } }))
         }
-        previous.close()
         // Allow the next opener; the guard only protects the close event from
         // the socket we just replaced.
         setTimeout(() => { switchingTarget = false }, 800)
@@ -311,6 +318,21 @@ wss.on('connection', async (app, request) => {
       })
       replacement.on('close', (code) => {
         console.warn('[ink] followed target closed:', code)
+        // The popup closed. Go back to the page that opened it instead of
+        // ending the session; the task is still there.
+        if (fallbackChrome && fallbackChrome.readyState === WebSocket.OPEN && fallbackTargetId) {
+          const previous = fallbackChrome
+          chrome = previous
+          currentTargetId = fallbackTargetId
+          pinnedTargetId = fallbackTargetId
+          fallbackChrome = null
+          fallbackTargetId = null
+          console.log('[ink] popup closed; returning to main target', currentTargetId)
+          if (app.readyState === WebSocket.OPEN) {
+            app.send(JSON.stringify({ type: 'bridge-ready', target: { id: currentTargetId } }))
+          }
+          return
+        }
         if (app.readyState === WebSocket.OPEN) app.close(1012, 'Chrome target closed')
       })
       replacement.on('error', (error) => console.warn('[ink] followed target error:', error.message))

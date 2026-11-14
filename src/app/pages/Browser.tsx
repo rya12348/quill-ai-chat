@@ -1287,6 +1287,22 @@ export function Browser() {
     const blockedActions = new Set<string>()
     let blockedRepeats = 0
     let emptyPlans = 0
+    // Blocked actions belong to the page they failed on. After a navigation, or
+    // after a popup closes and the target returns to the main tab, those ids
+    // are stale. Keeping them made the agent refuse to click a button it had
+    // never actually tried on this page, then give up.
+    let blockedPageKey = ''
+    const syncPageBlocks = (state: BrowserViewState) => {
+      const key = `${state.url}|${state.title}`
+      if (blockedPageKey && blockedPageKey !== key) {
+        blockedActions.clear()
+        stalledActions.clear()
+        failedActions.clear()
+        blockedRepeats = 0
+        emptyPlans = 0
+      }
+      blockedPageKey = key
+    }
     // A quick sheet fill can be followed by one chart-planning pass. Keep the
     // task here so the destination opener does not send us back to A1.
     let sheetChartTask: string | null = null
@@ -2933,6 +2949,7 @@ export function Browser() {
       let current = recent ?? (await api<BrowserViewState>('/browser/state', { method: 'POST', signal: controller.signal }))
       setView(current)
       setAddress(current.url)
+      syncPageBlocks(current)
       setPhase(recent ? 'Using the current page…' : 'Page loaded.')
       for (let step = 0; step < MAX_STEPS; step += 1) {
         if (controller.signal.aborted) break
@@ -3141,6 +3158,7 @@ export function Browser() {
             current = refreshed
             setView(refreshed)
             setAddress(refreshed.url)
+            syncPageBlocks(refreshed)
             setScreenNonce((value) => value + 1)
           } catch (refreshCause) {
             if (controller.signal.aborted) throw refreshCause
@@ -3162,6 +3180,7 @@ export function Browser() {
         current = next
         setView(next)
         setAddress(next.url)
+        syncPageBlocks(next)
         // A click can open a new tab or replace the document. Reconnect the
         // interactive viewer when the URL changes so it never keeps showing
         // the page the agent just left.
