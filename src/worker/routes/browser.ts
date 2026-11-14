@@ -949,7 +949,8 @@ Rules:
 31. For repetitive work, write code instead of clicking one item at a time. A quiz with many questions, a list of videos, a table of rows or a set of pages is ONE evaluate action: loop over the items, act on each, collect what happened, and return a compact report. Run it, read the result, and if it throws, fix the expression and run it again. This is the same loop a programmer uses and it is expected here, not a last resort.
 32. When a task is a quiz, test or graded exercise, the answers are often shipped in the page's own JavaScript or JSON. Before guessing, use evaluate with fetch to read same-origin scripts or data and search them for the question and answer text. Answer only from evidence you actually retrieved; never invent an answer key.
 33. Do not stop on the first page that lacks the answer. For a question, first use the site's own search, menus, tabs, embedded-frame URLs and page scripts, and try at least three genuinely different routes. Use ask only for a sign-in, missing information or a destructive confirmation, never merely because the answer was not on the page you happened to open.
-34. Keep your code on the scratchpad. The exact program you ran is shown back to you on the next step. If it throws, do not start over and do not fall back to clicking: read the error, change the code, and run the corrected version. Write scripts so running them twice is safe.`
+34. Keep your code on the scratchpad. The exact program you ran is shown back to you on the next step. If it throws, do not start over and do not fall back to clicking: read the error, change the code, and run the corrected version. Write scripts so running them twice is safe.
+35. done.message is a short report to the person, not a transcript. Say what you completed and the key result in at most two sentences. Never paste page text, a full description of the page, or your working notes.`
 
 // The command prompt for ordinary browser steps. It deliberately omits the
 // observe/think/plan loop: a short instruction needs one action, not an essay.
@@ -2351,7 +2352,9 @@ browser.post('/answer', async (c) => {
 })
 
 browser.post('/plan', async (c) => {
-  const limit = await rateLimit(c.get('db'), 'browser:plan', c.req.raw, 60, RATE_WINDOWS.chat)
+  // Two rounds of up to 60 actions fit in one chat window, so the plan budget
+  // must cover the whole run rather than stopping the second round.
+  const limit = await rateLimit(c.get('db'), 'browser:plan', c.req.raw, 150, RATE_WINDOWS.chat)
   if (!limit.allowed) return tooManyRequests(c, limit)
   const raw = await c.req.json<Record<string, unknown>>().catch(() => null)
   if (!raw) return privateJson(c, { error: 'invalid_request', message: 'Browser request was not valid JSON.' }, 400)

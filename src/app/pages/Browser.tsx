@@ -85,6 +85,11 @@ type BrowserSheetResponse = { state: BrowserViewState; rows: number; columns: nu
 // anchored unrelated tasks (Classroom, docs, ordinary sites) to a spreadsheet.
 const DEFAULT_URL = 'https://www.google.com/'
 const MAX_STEPS = 60
+// A long course or a many-page form can need more than one round. The plan,
+// notes and scratchpad carry over, so the second round continues the task
+// instead of restarting it.
+const MAX_ROUNDS = 2
+const MAX_ACTIONS = MAX_STEPS * MAX_ROUNDS
 // There is deliberately no overall task clock: a slow page or a multi-field
 // form must not be cut off just because a fixed wall-clock budget expired.
 // Each planner call still has a transport backstop, and the Worker switches
@@ -105,6 +110,15 @@ function saveBrowserMemory(memory: { task: string; plan: string[]; notes: string
   } catch {
     // Storage can be full or disabled; memory is an optimization, not a need.
   }
+}
+/** A completion message is a report, not a page dump. The planner sometimes
+ * pastes the whole snapshot into done; keep the first few sentences. */
+function cleanDoneMessage(message: string): string {
+  const text = message.trim()
+  if (text.length <= 600) return text
+  const sentences = text.match(/[^.!?]+[.!?]+/g)?.slice(0, 3).join(' ').trim() ?? ''
+  const short = sentences.length >= 80 ? sentences : text.slice(0, 500).trim()
+  return short.endsWith('.') ? short : `${short}…`
 }
 function loadBrowserMemory(): { task: string; plan: string[]; notes: string[]; script: string } | null {
   try {
@@ -1287,6 +1301,7 @@ export function Browser() {
     const blockedActions = new Set<string>()
     let blockedRepeats = 0
     let emptyPlans = 0
+    let clarifyAsks = 0
     // Blocked actions belong to the page they failed on. After a navigation, or
     // after a popup closes and the target returns to the main tab, those ids
     // are stale. Keeping them made the agent refuse to click a button it had
@@ -2951,9 +2966,16 @@ export function Browser() {
       setAddress(current.url)
       syncPageBlocks(current)
       setPhase(recent ? 'Using the current page…' : 'Page loaded.')
-      for (let step = 0; step < MAX_STEPS; step += 1) {
+      for (let step = 0; step < MAX_ACTIONS; step += 1) {
         if (controller.signal.aborted) break
-        setStepNumber(step + 1)
+        const roundStep = step % MAX_STEPS
+        if (roundStep === 0 && step > 0) {
+          append({
+            role: 'stet',
+            text: `Continuing with another ${MAX_STEPS} actions. My plan, notes and scratchpad carry over, so this is the same task, not a restart.`,
+          })
+        }
+        setStepNumber(roundStep + 1)
         setPhase('Choosing the next step…')
         const blockedPage = /\b(?:rate[\s-]*limit|too many requests|captcha|verify you are human|access denied|403 forbidden|429|not able to serve|requests? this quickly|unusual traffic|slow down)\b/i.test(current.snapshot.text)
         if (blockedPage && !agentNotes.some((note) => note.startsWith('This page is showing'))) {
@@ -2966,7 +2988,7 @@ export function Browser() {
         const planStartedAt = Date.now()
         const planPayload = {
           task: planningTask,
-          step,
+          step: roundStep,
           maxSteps: MAX_STEPS,
           url: current.url,
           title: current.title,
@@ -3055,15 +3077,44 @@ export function Browser() {
           append({ role: 'stet', text: planned.say || label, ...planMeta })
         }
         if (planned.action.type === 'ask') {
-          append({ role: 'stet', text: planned.action.message, ...planMeta })
-          setAnswer(planned.action.message)
+          const question = planned.action.message.trim()
+          // A confused "could you restate that?" is not a blocker. The page,
+          // the plan and the session are still here, so keep working instead
+          // of handing the task back to the person. Genuine asks (sign-in,
+          // payment, missing facts) still stop.
+          const confused =
+            /\b(?:restate|repeat|not sure|unclear|clarify|could you (?:tell|say|repeat)|what (?:should|do) (?:i|you)|which step|need (?:more|the) (?:information|context)|lost|give up)\b/i.test(
+              question,
+            )
+          clarifyAsks += 1
+          if (confused && clarifyAsks <= 2 && session) {
+            append({
+              role: 'stet',
+              text: 'I lost the thread for a moment. Re-reading the page and continuing instead of stopping.',
+              thoughts: [
+                `The planner asked: “${question}”`,
+                'That is a request for help, not a real blocker. The page and the task are still here, so I will choose a different route.',
+              ],
+            })
+            append({ role: 'action', text: 'Recovered from a clarification request', detail: question })
+            agentNotes = [
+              ...agentNotes,
+              `The planner got stuck and asked “${question.slice(0, 200)}”. Do not ask again: re-read the page and continue with a different route.`,
+            ].slice(-8)
+            agentMemory.current.notes = agentNotes
+            saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
+            continue
+          }
+          append({ role: 'stet', text: question, ...planMeta })
+          setAnswer(question)
           reachedEnd = true
           setPhase('')
           break
         }
         if (planned.action.type === 'done') {
-          append({ role: 'stet', text: planned.action.message, ...planMeta })
-          setAnswer(planned.action.message)
+          const report = cleanDoneMessage(planned.action.message)
+          append({ role: 'stet', text: report, ...planMeta })
+          setAnswer(report)
           clearAgentMemory()
           reachedEnd = true
           setPhase('')
@@ -3193,7 +3244,7 @@ export function Browser() {
         const detail = stateDetail(next)
         const resultDetail = next.observation ? `${detail} — ${next.observation}` : detail
         history.push({ action: label, result: resultDetail })
-        append({ role: 'action', text: label, detail: `Step ${step + 1} · thought ${formatDuration(planMs)} · acted ${formatDuration(actMs)} · ${resultDetail}` })
+        append({ role: 'action', text: label, detail: `Step ${roundStep + 1} · thought ${formatDuration(planMs)} · acted ${formatDuration(actMs)} · ${resultDetail}` })
         // “Open this and tell me its title” is already complete when the click
         // lands. The snapshot title is the answer; do not send another planner
         // request just to read it back.
@@ -3294,7 +3345,7 @@ export function Browser() {
       if (!reachedEnd && !controller.signal.aborted) {
         append({
           role: 'stet',
-          text: `I used all ${MAX_STEPS} actions and the task is not finished. The page, my plan and the scratchpad are saved — press Run and I will continue from here.`,
+          text: `I used all ${MAX_ACTIONS} actions and the task is not finished. The page, my plan and the scratchpad are saved — press Run and I will continue from here.`,
         })
       }
     } catch (cause) {
@@ -3820,7 +3871,7 @@ export function Browser() {
                   Run
                 </button>
               )}
-              <span className="text-[11.5px] text-faint">{MAX_STEPS} actions max</span>
+              <span className="text-[11.5px] text-faint">{MAX_ACTIONS} actions max</span>
             </div>
             {error && session ? <p role="alert" className="mt-2 text-[11.5px] leading-relaxed text-danger">{error}</p> : null}
             {busy ? (
