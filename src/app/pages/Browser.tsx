@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Code2, ExternalLink, Globe2, Loader2, Monitor, Play, Plus, RefreshCw, Search, Square, Timer, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Brain, Code2, ExternalLink, Globe2, Loader2, Monitor, Play, Plus, RefreshCw, Search, Square, Timer, X } from 'lucide-react'
 import { startTransition, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
@@ -382,6 +382,9 @@ export function Browser() {
   const address = typeof addressValue === 'string' ? addressValue : ''
   const setAddress = (value: string | undefined | null) => setAddressValue(typeof value === 'string' ? value : '')
   const [task, setTask] = useState('')
+  // Deep is a deliberate quality-over-speed switch: one strong free reasoner
+  // and a long budget, instead of the quickest small planner on every step.
+  const [deep, setDeep] = useState(true)
   const [view, setView] = useState<BrowserViewState | null>(null)
   const [log, setLog] = useState<LogEntry[]>([])
   const [busy, setBusy] = useState(false)
@@ -2861,7 +2864,7 @@ export function Browser() {
     const planWithRetry = (payload: Record<string, unknown>, signal: AbortSignal): Promise<BrowserActResponse> =>
       api<BrowserActResponse>('/browser/plan', {
         method: 'POST',
-        signal: AbortSignal.any([signal, AbortSignal.timeout(PLAN_TIMEOUT_MS)]),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(deep ? 125_000 : PLAN_TIMEOUT_MS)]),
         json: payload,
       })
 
@@ -2903,6 +2906,7 @@ export function Browser() {
           ...(agentNotes.length ? { notes: agentNotes.slice(-8) } : {}),
           ...(blockedActions.size ? { blocked: [...blockedActions].slice(-8) } : {}),
           ...(blockedActions.size ? { recovering: true } : {}),
+          ...(deep ? { deep: true } : {}),
           history: history.slice(-10),
         }
         let planned: BrowserActResponse | null = null
@@ -3724,6 +3728,21 @@ export function Browser() {
                   Run
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => setDeep((value) => !value)}
+                aria-pressed={deep}
+                title="Use the strongest free reasoning model and a longer budget. Slower per step, better on long or multi-step tasks."
+                className={cx(
+                  'inline-flex h-9 items-center gap-1.5 rounded-tile border px-2.5 text-[12px] font-medium transition-colors',
+                  deep
+                    ? 'border-accent/40 bg-accent/10 text-accent'
+                    : 'border-line bg-surface text-muted hover:bg-surface-2 hover:text-fg',
+                )}
+              >
+                <Brain className="size-3.5" />
+                Deep
+              </button>
               <span className="text-[11.5px] text-faint">{MAX_STEPS} actions max</span>
             </div>
             {error && session ? <p role="alert" className="mt-2 text-[11.5px] leading-relaxed text-danger">{error}</p> : null}

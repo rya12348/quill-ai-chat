@@ -27,6 +27,10 @@ const MAX_TEXT = 8_000
 // A compact step tolerates 12 seconds of silence, a complex form 15, and a
 // long document 20; the first token is what matters, not the total duration.
 const BROWSER_PLAN_MAX_MS = 48_000
+// Deep mode gives one strong reasoning model enough time to finish a plan. The
+// regular budget aborts that model mid-thought, which is why hard tasks were
+// always decided by the quickest small lane instead of the best one.
+const BROWSER_PLAN_DEEP_MAX_MS = 112_000
 // The recovery pass after a missed window keeps the same lanes and a real
 // budget. It used to get only eight seconds and skip fallbacks, which turned
 // one slow first attempt into an immediate second failure.
@@ -840,6 +844,24 @@ function browserLaneScore(lane: PublicLane, preferredModel?: string): number {
   return score
 }
 
+/** Deep mode ranks by capability instead of latency: the opposite trade from
+ * the interactive pool. Big free reasoners are preferred even though they take
+ * 20–40 seconds to plan. */
+function browserDeepScore(lane: PublicLane): number {
+  const id = lane.model.toLowerCase()
+  let score = laneStrength(lane.model, lane.url)
+  if (/nemotron-3-ultra|550b/.test(id)) score += 100
+  else if (/step-5/.test(id)) score += 90
+  else if (/deepseek-v4\.1|deepseek-v4-pro/.test(id)) score += 80
+  else if (/nemotron-3\.5-super/.test(id)) score += 72
+  else if (/qwen3\.8-max|kimi-k3/.test(id)) score += 64
+  else if (/gemini-3\.[68]-flash|gemini-3-pro/.test(id)) score += 56
+  else if (/nemotron-3-120b/.test(id)) score += 40
+  else if (/qwen3\.8-27b|minimax-m3\.1/.test(id)) score += 24
+  if (/nano|9b|20b|lightning|mini|gemma|llama|oss-20b|north|flint|liquid|dots/.test(id)) score -= 30
+  return score
+}
+
 const SYSTEM = `You are Ink Browser, a computer-use agent controlling one real browser for the person using Ink.
 
 You are not a fixed script. You can read pages, inspect the DOM, run JavaScript, click, type, navigate, open embedded frames and change your approach based on what actually happens. Work like a careful engineer: observe, form a hypothesis, take the smallest reliable action, verify the result and adapt.
@@ -959,6 +981,8 @@ async function plan(input: {
   notes?: string[]
   blocked?: string[]
   recovering?: boolean
+  /** Spend a strong reasoning model and a long budget on a hard task. */
+  deep?: boolean
   /** Use one small, short planning pass for a timeout retry. */
   fast?: boolean
   /** Optional public-lane model override; used by the chat's model picker. */
@@ -1000,9 +1024,14 @@ async function plan(input: {
   // pretending there are no lanes at all. Active, fast lanes still sort first,
   // and allowCooling below lets a browser step recover immediately rather than
   // sitting out a provider's two-minute cooldown.
+  const deep = input.deep === true
   const ranked = candidateLanes(lanes).sort((a, b) => {
     const active = Number(laneIsCooling(a)) - Number(laneIsCooling(b))
     if (active) return active
+    // Deep mode is the opposite trade: one strong reasoner instead of the
+    // quickest small model. Latency is not a tiebreak when correctness is the
+    // point of the run.
+    if (deep) return browserDeepScore(b) - browserDeepScore(a)
     const tier = browserLaneTier(a, preferredModel) - browserLaneTier(b, preferredModel)
     if (tier) return tier
     return browserLaneScore(b, preferredModel) - laneSpeedPenalty(b) - (browserLaneScore(a, preferredModel) - laneSpeedPenalty(a))
@@ -1029,7 +1058,7 @@ async function plan(input: {
   // Never make a click wait on a 550B thinker. The fast pool is the whole
   // planner for normal steps; slower lanes are only reached if every fast lane
   // actually fails, and even then they get a short deadline.
-  const fast = ranked.filter((lane) => browserLaneTier(lane, preferredModel) <= 2)
+  const fast = deep ? ranked : ranked.filter((lane) => browserLaneTier(lane, preferredModel) <= 2)
   const pool = fast.length ? fast : ranked
   // A simple click does not need the same heavyweight thinker as a multi-step
   // task.
@@ -1037,6 +1066,7 @@ async function plan(input: {
   // action-oriented tasks, including “click X, then tell me Y”; only writing,
   // forms and irreversible/account work need the full reasoning schema.
   const actionFast =
+    !deep &&
     !longForm &&
     !input.recovering &&
     !input.inspect &&
@@ -1073,8 +1103,9 @@ async function plan(input: {
         (recentLaneLatency.get(laneCacheKey(a)) ?? Infinity) -
         (recentLaneLatency.get(laneCacheKey(b)) ?? Infinity),
     )
-  const fastestSmart =
-    pinned ??
+  const fastestSmart = deep
+    ? pool[0]
+    : pinned ??
     measured[0] ??
     pool.find((lane) => /qwen3\.8-27b/i.test(lane.model)) ??
     pool.find((lane) => /minimax-m3\.1-flash/i.test(lane.model)) ??
@@ -1087,20 +1118,24 @@ async function plan(input: {
   // before trying another made an arbitrary instruction inherit that lane's
   // 12-second silence. The first valid intent wins; the remaining fast lanes
   // are still available as failovers.
-  const candidates = fastestSmart
-    ? [
-        fastestSmart,
-        ...pool
-          .filter((lane) => lane !== fastestSmart)
-          .slice(0, 2),
-      ]
-    : []
+  const candidates = deep
+    ? pool.slice(0, 1)
+    : fastestSmart
+      ? [
+          fastestSmart,
+          ...pool
+            .filter((lane) => lane !== fastestSmart)
+            .slice(0, 2),
+        ]
+      : []
   // A bunch of genuinely different fast lanes. Sable is deliberately absent;
   // it is tried only after every one of these has failed.
   const candidateKeys = new Set(candidates.map(laneCacheKey))
   const remaining = ranked.filter((lane) => !candidateKeys.has(laneCacheKey(lane)))
-  const fallbacks = remaining.filter((lane) => browserLaneTier(lane, preferredModel) <= 2).slice(0, 4)
-  const planTokens = longForm ? 1_600 : informational ? 900 : 700
+  const fallbacks = deep
+    ? remaining.slice(0, 2)
+    : remaining.filter((lane) => browserLaneTier(lane, preferredModel) <= 2).slice(0, 4)
+  const planTokens = deep ? 1_800 : longForm ? 1_600 : informational ? 900 : 700
   // Output tokens dominate latency. A normal browser step only needs a short
   // sentence and one action; the long reasoning schema is for hard steps.
   // The retry still needs enough room for a complete JSON action. A 160-token
@@ -1121,12 +1156,12 @@ async function plan(input: {
   // producing tokens can take as long as its total timeout; one that has gone
   // quiet for this long is genuinely stuck. The old 6/12-second windows cut
   // off Qwen while it was still reasoning before its first token.
-  const idleMs = fastRetry ? 5_000 : compactStep ? 5_000 : longForm ? 22_000 : complex ? 20_000 : 15_000
+  const idleMs = deep ? 30_000 : fastRetry ? 5_000 : compactStep ? 5_000 : longForm ? 22_000 : complex ? 20_000 : 15_000
   // Honor the step's real budget. The old hard 8-second cap aborted healthy
   // models on multi-step and long-form tasks, then spent another cycle racing
   // fallbacks; raising the cap only affects those genuinely complex steps.
-  const timeoutMs = fastRetry ? 8_000 : compactStep ? 7_000 : longForm ? 45_000 : complex ? 30_000 : 24_000
-  const planDeadlineMs = fastRetry ? 10_000 : compactStep ? 9_000 : longForm ? 52_000 : complex ? 48_000 : 38_000
+  const timeoutMs = deep ? 90_000 : fastRetry ? 8_000 : compactStep ? 7_000 : longForm ? 45_000 : complex ? 30_000 : 24_000
+  const planDeadlineMs = deep ? 108_000 : fastRetry ? 10_000 : compactStep ? 9_000 : longForm ? 52_000 : complex ? 48_000 : 38_000
   if (!candidates.length) {
     throw new AiError('browser_unavailable', 'No free browser-capable model is configured right now.', 503)
   }
@@ -1241,7 +1276,11 @@ async function plan(input: {
   const messages: ChatMessage[] = [
     {
       role: 'system',
-      content: compactStep ? COMPACT_SYSTEM : SYSTEM,
+      content: compactStep
+        ? COMPACT_SYSTEM
+        : deep
+          ? `${SYSTEM}\n\nDEEP TASK MODE: This run is allowed to think before acting. Write a short ordered plan first and keep it current across steps. Prefer one evaluate script that performs a whole repetitive job over a long series of clicks. Verify the result on the page before finishing; never mark work done from a plan alone.`
+          : SYSTEM,
     },
     {
       role: 'user',
@@ -2313,6 +2352,7 @@ browser.post('/plan', async (c) => {
   const blocked = stringList(raw.blocked, 8, 500)
   const recovering = raw.recovering === true
   const fast = raw.fast === true
+  const deep = raw.deep === true
   const assistantModel = text(raw.assistantModel, 120)
   const history = Array.isArray(raw.history)
     ? raw.history
@@ -2342,7 +2382,7 @@ browser.post('/plan', async (c) => {
   let planTimer: ReturnType<typeof setTimeout> | undefined
   try {
     const planAbort = new AbortController()
-    const planBudget = fast ? BROWSER_PLAN_FAST_MAX_MS : BROWSER_PLAN_MAX_MS
+    const planBudget = fast ? BROWSER_PLAN_FAST_MAX_MS : deep ? BROWSER_PLAN_DEEP_MAX_MS : BROWSER_PLAN_MAX_MS
     const planDeadline = new Promise<never>((_, reject) => {
       planTimer = setTimeout(() => {
         planAbort.abort()
@@ -2369,6 +2409,7 @@ browser.post('/plan', async (c) => {
       ...(blocked.length ? { blocked } : {}),
       ...(recovering ? { recovering } : {}),
       ...(fast ? { fast: true } : {}),
+      ...(deep ? { deep: true } : {}),
       ...(assistantModel ? { assistantModel } : {}),
       history,
       signal: AbortSignal.any([c.req.raw.signal, planAbort.signal]),
