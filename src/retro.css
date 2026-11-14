@@ -1,0 +1,156 @@
+/*
+ * The retro host is a separate design language, not a tint.
+ * It stays in the same application so every route, dialog and tool inherits it.
+ */
+html.retro {
+  --font-sans: 'Courier New', Courier, ui-monospace, monospace;
+  --font-display: 'Newsreader Variable', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+
+  --color-bg: #f0e0bd;
+  --color-surface: #f8ecd1;
+  --color-surface-2: #e5cda0;
+  --color-raised: #d9ba83;
+  --color-line: #c9aa72;
+  --color-line-strong: #2a2118;
+  --color-fg: #1d1812;
+  --color-muted: #4b3e2d;
+  --color-faint: #675740;
+  --color-accent: #a03c0f;
+  --color-accent-strong: #7f2f08;
+  --color-accent-soft: #f2c7a6;
+  --color-success: #17603a;
+  --color-success-soft: #d8e8cd;
+  --color-warning: #7b4d06;
+  --color-warning-soft: #f7dfac;
+  --color-danger: #9c2d1d;
+  --color-danger-soft: #f5d4c8;
+
+  --radius-control: 0px;
+  --radius-card: 0px;
+  --radius-dialog: 0px;
+  --radius-tile: 0px;
+  --radius-bubble: 0px;
+
+  --shadow-card: 3px 3px 0 var(--color-fg);
+  --shadow-pop: 5px 5px 0 var(--color-fg);
+  --shadow-dialog: 8px 8px 0 var(--color-fg);
+  --shadow-composer: 5px 5px 0 var(--color-fg);
+
+  color-scheme: light;
+  background: var(--color-bg);
+}
+
+html.retro body {
+  background-color: var(--color-bg);
+  background-image: radial-gradient(circle at center, rgb(29 24 18 / 0.12) 0.6px, transparent 0.7px);
+  background-size: 6px 6px;
+  letter-spacing: 0;
+}
+
+/* Every rounded control becomes a square. That is the fastest way to make the
+   whole product feel like one system instead of a skin over the old one. */
+html.retro [class*='rounded-'] {
+  border-radius: 0 !important;
+}
+
+html.retro .retro-hide {
+  display: none !important;
+}
+
+.retro-art {
+  display: none;
+}
+
+html.retro .retro-art {
+  display: block;
+}
+
+html.retro .theme-art {
+  filter: drop-shadow(3px 3px 0 rgb(29 24 18 / 0.14));
+}
+
+html.retro .theme-art img {
+  image-rendering: pixelated;
+}
+
+/* Hard-edged type and printed-poster labels. */
+html.retro h1 {
+  text-transform: uppercase;
+  letter-spacing: -0.045em;
+}
+
+html.retro::selection {
+  background: var(--color-warning-soft);
+  color: var(--color-fg);
+}
+
+html.retro :focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Cards and panels are cut paper with a physical offset, not floating glass. */
+html.retro [class*='rounded-card'],
+html.retro [class*='rounded-dialog'] {
+  border: 2px solid var(--color-line-strong) !important;
+  box-shadow: 3px 3px 0 var(--color-line-strong) !important;
+}
+
+html.retro [class*='rounded-bubble'] {
+  border: 2px solid var(--color-line-strong);
+  box-shadow: 2px 2px 0 var(--color-line-strong);
+}
+
+html.retro [class*='shadow-composer'] {
+  border-width: 2px;
+  border-style: solid;
+}
+
+html.retro aside {
+  border-right-color: var(--color-line-strong);
+  border-right-width: 2px;
+}
+
+/* Solid actions get a border and an offset. Ghost actions keep their air. */
+html.retro button[class~='bg-accent'],
+html.retro a[class~='bg-accent'] {
+  border: 2px solid var(--color-fg);
+  box-shadow: 3px 3px 0 var(--color-fg);
+  transition-property: transform, box-shadow, background-color, opacity;
+  transition-duration: 120ms;
+}
+
+html.retro button[class~='bg-accent']:hover:not(:disabled),
+html.retro a[class~='bg-accent']:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--color-fg);
+}
+
+html.retro button[class~='bg-accent']:active:not(:disabled),
+html.retro a[class~='bg-accent']:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--color-fg);
+}
+
+html.retro input:not([type='range']):not([type='checkbox']):not([type='radio']):not([type='file']),
+html.retro select,
+html.retro textarea[class*='border'] {
+  border-width: 2px;
+  border-style: solid;
+  border-color: var(--color-line-strong);
+  border-radius: 0 !important;
+  background-color: var(--color-surface) !important;
+  box-shadow: inset 2px 2px 0 rgb(29 24 18 / 0.06);
+}
+
+html.retro input:focus,
+html.retro select:focus,
+html.retro textarea:focus {
+  border-color: var(--color-accent) !important;
+}
+
+html.retro input::placeholder,
+html.retro textarea::placeholder {
+  opacity: 1;
+  color: var(--color-faint);
+}
