@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 
 import { DAILY_MESSAGE_LIMIT } from '../../shared/config'
-import { cleanPageAnswer, directBrowserTask, directFormFill, isSpreadsheetDataTask, PAGE_ANSWER_UNAVAILABLE } from '../../shared/browser'
+import { cleanPageAnswer, directBrowserTask, directFormFill, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE } from '../../shared/browser'
 import type { BrowserAction, BrowserActResponse, BrowserElement, BrowserInspectResult, BrowserSnapshot } from '../../shared/types'
 import { AiError, aiConfigured, completeText, isModelId, type ChatMessage } from '../ai'
 import { MODELS, type ModelId } from '../../shared/config'
@@ -950,7 +950,8 @@ Rules:
 32. When a task is a quiz, test or graded exercise, the answers are often shipped in the page's own JavaScript or JSON. Before guessing, use evaluate with fetch to read same-origin scripts or data and search them for the question and answer text. Answer only from evidence you actually retrieved; never invent an answer key.
 33. Do not stop on the first page that lacks the answer. For a question, first use the site's own search, menus, tabs, embedded-frame URLs and page scripts, and try at least three genuinely different routes. Use ask only for a sign-in, missing information or a destructive confirmation, never merely because the answer was not on the page you happened to open.
 34. Keep your code on the scratchpad. The exact program you ran is shown back to you on the next step. If it throws, do not start over and do not fall back to clicking: read the error, change the code, and run the corrected version. Write scripts so running them twice is safe.
-35. done.message is a short report to the person, not a transcript. Say what you completed and the key result in at most two sentences. Never paste page text, a full description of the page, or your working notes.`
+35. done.message is a short report to the person, not a transcript. Say what you completed and the key result in at most two sentences. Never paste page text, a full description of the page, or your working notes.
+36. Never refuse, lecture, or announce a limitation. The person asked you to use their browser, so ordinary browsing work is yours to do. If a site truly blocks progress (sign-in, payment, CAPTCHA, a missing permission), name that exact blocker, keep the page open and try another route. Never say you cannot do the task and never finish with a refusal. Confirm before genuinely destructive actions; do not refuse ordinary ones.`
 
 // The command prompt for ordinary browser steps. It deliberately omits the
 // observe/think/plan loop: a short instruction needs one action, not an essay.
@@ -1526,8 +1527,9 @@ async function answerPage(env: Env, task: string, state: BrowserSnapshot): Promi
     const cleaned = cleanPageAnswer(answer)
     // A lane that could not find the answer is a failed attempt, not a valid
     // result. Treating the sentinel as success let the first fast lane win the
-    // Promise.any race and hide a correct answer from another lane.
-    if (!cleaned || cleaned === PAGE_ANSWER_UNAVAILABLE) {
+    // Promise.any race and hide a correct answer from another lane. A refusal
+    // is a failed attempt too: another lane may simply do the job.
+    if (!cleaned || cleaned === PAGE_ANSWER_UNAVAILABLE || looksLikeRefusal(cleaned)) {
       throw new AiError('browser_answer', `${lane.label} did not find the answer on the page.`, 502)
     }
     recentLaneLatency.set(laneCacheKey(lane), Date.now() - startedAt)

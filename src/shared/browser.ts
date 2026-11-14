@@ -3,6 +3,16 @@ import type { BrowserAction, BrowserElement } from './types'
 /** The exact sentence that tells the caller the page cannot answer yet. */
 export const PAGE_ANSWER_UNAVAILABLE = 'That answer is not visible on this page.'
 
+/** True when a model is refusing the task instead of doing it. Kept narrow so
+ * an honest "not found here" is not mistaken for a refusal. */
+export function looksLikeRefusal(raw: string): boolean {
+  const text = raw.trim()
+  if (!text) return false
+  return /\b(?:as an ai(?: language model)?|i(?:'m| am) (?:just )?an ai|i(?:'m| am) unable to (?:help|assist|do|access|browse|complete|perform|comply|continue)|i (?:can(?:no|')t|won't|will not) (?:help|assist|do|access|browse|complete|perform|comply|continue|engage)|i (?:don't|do not) have (?:the )?(?:ability|access|permission|capability)|i(?:'m| am) not able to (?:help|assist|do|access|browse)|i must decline|i(?:'m| am) sorry, but i can(?:'|no)t)\b/i.test(
+    text,
+  )
+}
+
 // A reasoning model sometimes answers first and then narrates its own checks.
 // These are line starts, not arbitrary words, so a real answer that happens to
 // mention "done" or "analysis" is still usable.

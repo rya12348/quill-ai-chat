@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directPageSearch, directSearchAnswer, directSiteSearch, isDocumentWritingTask, isSameBrowserSite, isSpreadsheetChartTask, isSpreadsheetDataTask, PAGE_ANSWER_UNAVAILABLE } from '../src/shared/browser'
+import { answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directPageSearch, directSearchAnswer, directSiteSearch, isDocumentWritingTask, isSameBrowserSite, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE } from '../src/shared/browser'
 import type { BrowserElement } from '../src/shared/types'
 
 test('a page answer never exposes a model reasoning trace', () => {
@@ -404,4 +404,13 @@ test('site search and page search resolve to native typing', () => {
     text: 'cats',
     submit: true,
   })
+})
+
+test('a refusal is detected but an honest gap is not', () => {
+  assert.equal(looksLikeRefusal("I'm sorry, but I can't help with that."), true)
+  assert.equal(looksLikeRefusal('As an AI, I cannot browse this site.'), true)
+  assert.equal(looksLikeRefusal("I don't have permission to access that."), true)
+  assert.equal(looksLikeRefusal("I can't find that on this page."), false)
+  assert.equal(looksLikeRefusal('The page needs a sign-in before the quiz opens.'), false)
+  assert.equal(looksLikeRefusal(''), false)
 })
