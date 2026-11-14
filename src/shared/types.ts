@@ -362,6 +362,8 @@ export interface BrowserActResponse {
   plan?: string[]
   /** A durable working note the agent wants to carry into later steps. */
   note?: string
+  /** The last script the agent wrote and ran, kept on its scratchpad. */
+  script?: string
   /** True when the planner believes this action completes the task. */
   complete?: boolean
   action: BrowserAction

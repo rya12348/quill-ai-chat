@@ -90,6 +90,37 @@ const MAX_STEPS = 60
 // Each planner call still has a transport backstop, and the Worker switches
 // lanes long before this; ordinary commands stay on the direct path.
 const PLAN_TIMEOUT_MS = 50_000
+// The browser keeps its plan, notes and scratchpad on the device so closing a
+// popup or reloading the page does not erase what the agent already learned.
+const BROWSER_MEMORY_KEY = 'ink.browser.memory.v1'
+function saveBrowserMemory(memory: { task: string; plan: string[]; notes: string[]; script: string }) {
+  try {
+    if (!memory.task.trim()) return
+    localStorage.setItem(
+      BROWSER_MEMORY_KEY,
+      JSON.stringify({ ...memory, script: memory.script.slice(0, 12_000), at: Date.now() }),
+    )
+  } catch {
+    // Storage can be full or disabled; memory is an optimization, not a need.
+  }
+}
+function loadBrowserMemory(): { task: string; plan: string[]; notes: string[]; script: string } | null {
+  try {
+    const raw = localStorage.getItem(BROWSER_MEMORY_KEY)
+    if (!raw) return null
+    const value = JSON.parse(raw) as Record<string, unknown>
+    if (typeof value.task !== 'string' || !value.task.trim()) return null
+    if (Date.now() - Number(value.at ?? 0) > 24 * 60 * 60 * 1_000) return null
+    return {
+      task: value.task,
+      plan: Array.isArray(value.plan) ? value.plan.filter((item): item is string => typeof item === 'string').slice(0, 8) : [],
+      notes: Array.isArray(value.notes) ? value.notes.filter((item): item is string => typeof item === 'string').slice(-8) : [],
+      script: typeof value.script === 'string' ? value.script : '',
+    }
+  } catch {
+    return null
+  }
+}
 const SESSION_CHECK_MS = 60_000
 const SESSION_ENDED = 'This browser session ended. Start a new one; your Google sign-in is saved.'
 
@@ -385,6 +416,7 @@ export function Browser() {
   // Deep is a deliberate quality-over-speed switch: one strong free reasoner
   // and a long budget, instead of the quickest small planner on every step.
   const [deep, setDeep] = useState(true)
+  const [script, setScript] = useState('')
   const [view, setView] = useState<BrowserViewState | null>(null)
   const [log, setLog] = useState<LogEntry[]>([])
   const [busy, setBusy] = useState(false)
@@ -425,6 +457,25 @@ export function Browser() {
     plan: [],
     notes: [],
   })
+  const clearAgentMemory = () => {
+    agentMemory.current = { task: '', plan: [] as string[], notes: [] as string[] }
+    setScript('')
+    try {
+      localStorage.removeItem(BROWSER_MEMORY_KEY)
+    } catch {
+      // Nothing to clear.
+    }
+  }
+  // Restore the last unfinished task after a reload or a closed popup. The
+  // saved record is removed as soon as a run finishes, so this only brings
+  // back work that was interrupted.
+  useEffect(() => {
+    const saved = loadBrowserMemory()
+    if (!saved) return
+    agentMemory.current = { task: saved.task, plan: saved.plan, notes: saved.notes }
+    setTask(saved.task)
+    setScript(saved.script)
+  }, [])
   const markerTimer = useRef<number | null>(null)
   const browserSectionRef = useRef<HTMLElement | null>(null)
   const liveStageRef = useRef<HTMLDivElement | null>(null)
@@ -1226,9 +1277,14 @@ export function Browser() {
     // The agent keeps its own plan and working notes between steps. These are
     // not scripted task rules; they are the model's durable context so it can
     // change course without forgetting what it already learned.
-    if (agentMemory.current.task !== instruction) agentMemory.current = { task: instruction, plan: [], notes: [] }
+    // Only carry the scratchpad forward for the same task. A new instruction
+    // starts with a clean program instead of running old code by accident.
+    const resumingTask = agentMemory.current.task === instruction
+    if (!resumingTask) agentMemory.current = { task: instruction, plan: [], notes: [] }
     let agentPlan: string[] = [...agentMemory.current.plan]
     let agentNotes: string[] = [...agentMemory.current.notes]
+    let agentScript = resumingTask ? script : ''
+    saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
     const blockedActions = new Set<string>()
     let blockedRepeats = 0
     let emptyPlans = 0
@@ -1269,7 +1325,7 @@ export function Browser() {
           if (answer) {
             append({ role: 'stet', text: answer })
             setAnswer(answer)
-            agentMemory.current = { task: '', plan: [], notes: [] }
+            clearAgentMemory()
             abort.current = null
             setBusy(false)
             setPhase('')
@@ -1662,7 +1718,7 @@ export function Browser() {
             const answer = `The first result is: ${displayTitle}`
             append({ role: 'stet', text: answer })
             setAnswer(answer)
-            agentMemory.current = { task: '', plan: [], notes: [] }
+            clearAgentMemory()
             abort.current = null
             setBusy(false)
             setPhase('')
@@ -1713,7 +1769,7 @@ export function Browser() {
                 append({ role: 'action', text: `Opened ${(titleLabel || link.label).slice(0, 80)}`, detail: `First result · ${formatDuration(Date.now() - before)} · ${link.href || resultsState.url}` })
                 append({ role: 'stet', text: answer })
                 setAnswer(answer)
-                agentMemory.current = { task: '', plan: [], notes: [] }
+                clearAgentMemory()
                 abort.current = null
                 setBusy(false)
                 setPhase('')
@@ -1745,7 +1801,7 @@ export function Browser() {
           if (answer) {
             append({ role: 'stet', text: answer })
             setAnswer(answer)
-            agentMemory.current = { task: '', plan: [], notes: [] }
+            clearAgentMemory()
             abort.current = null
             setBusy(false)
             setPhase('')
@@ -1797,7 +1853,7 @@ export function Browser() {
             append({ role: 'stet', text: visibleFact })
             setAnswer(visibleFact)
             setLastAction(`Found ${visibleFact}`)
-            agentMemory.current = { task: '', plan: [], notes: [] }
+            clearAgentMemory()
             abort.current = null
             setBusy(false)
             setPhase('')
@@ -1820,7 +1876,7 @@ export function Browser() {
           if (answer) {
             append({ role: 'stet', text: answer })
             setAnswer(answer)
-            agentMemory.current = { task: '', plan: [], notes: [] }
+            clearAgentMemory()
             abort.current = null
             setBusy(false)
             setPhase('')
@@ -1957,7 +2013,7 @@ export function Browser() {
                     const answer = `The page title is: ${(opened.title || '').trim()}`
                     append({ role: 'stet', text: answer })
                     setAnswer(answer)
-                    agentMemory.current = { task: '', plan: [], notes: [] }
+                    clearAgentMemory()
                     abort.current = null
                     setBusy(false)
                     setPhase('')
@@ -1969,7 +2025,7 @@ export function Browser() {
                     const answer = `Opened the first result: ${(resultLink.label || opened.title || opened.url).trim()}`
                     append({ role: 'stet', text: answer })
                     setAnswer(answer)
-                    agentMemory.current = { task: '', plan: [], notes: [] }
+                    clearAgentMemory()
                     abort.current = null
                     setBusy(false)
                     setPhase('')
@@ -1996,7 +2052,7 @@ export function Browser() {
                 if (answer) {
                   append({ role: 'stet', text: answer })
                   setAnswer(answer)
-                  agentMemory.current = { task: '', plan: [], notes: [] }
+                  clearAgentMemory()
                   abort.current = null
                   setBusy(false)
                   setPhase('')
@@ -2035,7 +2091,7 @@ export function Browser() {
                     if (secondAnswer) {
                       append({ role: 'stet', text: secondAnswer })
                       setAnswer(secondAnswer)
-                      agentMemory.current = { task: '', plan: [], notes: [] }
+                      clearAgentMemory()
                       abort.current = null
                       setBusy(false)
                       setPhase('')
@@ -2107,7 +2163,7 @@ export function Browser() {
             if (answer) {
               append({ role: 'stet', text: answer })
               setAnswer(answer)
-              agentMemory.current = { task: '', plan: [], notes: [] }
+              clearAgentMemory()
               abort.current = null
               setBusy(false)
               setPhase('')
@@ -2183,7 +2239,7 @@ export function Browser() {
                 append({ role: 'stet', text: visibleFact })
                 setAnswer(visibleFact)
                 setLastAction(`Found ${visibleFact}`)
-                agentMemory.current = { task: '', plan: [], notes: [] }
+                clearAgentMemory()
                 abort.current = null
                 setBusy(false)
                 setPhase('')
@@ -2201,7 +2257,7 @@ export function Browser() {
               if (answer) {
                 append({ role: 'stet', text: answer })
                 setAnswer(answer)
-                agentMemory.current = { task: '', plan: [], notes: [] }
+                clearAgentMemory()
                 abort.current = null
                 setBusy(false)
                 setPhase('')
@@ -2301,7 +2357,7 @@ export function Browser() {
         append({ role: 'action', text: label, detail: `Direct link scan · ${formatDuration(Date.now() - startedAt)} · ${stateDetail(next)}` })
         const answer = `Opened “${siteLookup.query}” in ${siteLookup.site}.`
         setAnswer(answer)
-        agentMemory.current = { task: '', plan: [], notes: [] }
+        clearAgentMemory()
         abort.current = null
         setBusy(false)
         setPhase('')
@@ -2446,7 +2502,7 @@ export function Browser() {
           const answer = completionMessage(instruction)
           append({ role: 'stet', text: answer })
           setAnswer(answer)
-          agentMemory.current = { task: '', plan: [], notes: [] }
+          clearAgentMemory()
           abort.current = null
           setBusy(false)
           setPhase('')
@@ -2478,7 +2534,7 @@ export function Browser() {
           const answer = `${next.title || 'The page'} — ${next.url}`
           append({ role: 'stet', text: `The click opened ${answer}.` })
           setAnswer(answer)
-          agentMemory.current = { task: '', plan: [], notes: [] }
+          clearAgentMemory()
           abort.current = null
           setBusy(false)
           setPhase('')
@@ -2522,7 +2578,7 @@ export function Browser() {
         const answer = `The page title is: ${pageTitle}`
         append({ role: 'stet', text: answer })
         setAnswer(answer)
-        agentMemory.current = { task: '', plan: [], notes: [] }
+        clearAgentMemory()
         abort.current = null
         setBusy(false)
         setPhase('')
@@ -2535,7 +2591,7 @@ export function Browser() {
       const answer = completionMessage(instruction)
       append({ role: 'stet', text: answer })
       setAnswer(answer)
-      agentMemory.current = { task: '', plan: [], notes: [] }
+      clearAgentMemory()
       abort.current = null
       setBusy(false)
       setPhase('')
@@ -2692,7 +2748,7 @@ export function Browser() {
           const answer = next ? `${next.title || 'The page'} — ${next.url}` : `${view?.title || 'The page'} — ${view?.url || ''}`
           append({ role: 'stet', text: `The click opened ${answer}.` })
           setAnswer(answer)
-          agentMemory.current = { task: '', plan: [], notes: [] }
+          clearAgentMemory()
           abort.current = null
           setBusy(false)
           setPhase('')
@@ -2704,7 +2760,7 @@ export function Browser() {
           const answer = completionMessage(instruction)
           append({ role: 'stet', text: answer })
           setAnswer(answer)
-          agentMemory.current = { task: '', plan: [], notes: [] }
+          clearAgentMemory()
           abort.current = null
           setBusy(false)
           setPhase('')
@@ -2802,7 +2858,7 @@ export function Browser() {
         if (scheduled) {
           append({ role: 'stet', text: scheduled })
           setAnswer(scheduled)
-          agentMemory.current = { task: '', plan: [], notes: [] }
+          clearAgentMemory()
           abort.current = null
           setBusy(false)
           setPhase('')
@@ -2848,7 +2904,7 @@ export function Browser() {
         if (answer) {
           append({ role: 'stet', text: answer })
           setAnswer(answer)
-          agentMemory.current = { task: '', plan: [], notes: [] }
+          clearAgentMemory()
           abort.current = null
           setBusy(false)
           setPhase('')
@@ -2907,6 +2963,7 @@ export function Browser() {
           ...(blockedActions.size ? { blocked: [...blockedActions].slice(-8) } : {}),
           ...(blockedActions.size ? { recovering: true } : {}),
           ...(deep ? { deep: true } : {}),
+          ...(agentScript ? { script: agentScript } : {}),
           history: history.slice(-10),
         }
         let planned: BrowserActResponse | null = null
@@ -2965,6 +3022,13 @@ export function Browser() {
           agentMemory.current.notes = agentNotes
         }
         const label = actionLabel(planned.action, current.snapshot.elements)
+        // The scratchpad is whatever page code the agent last wrote, captured
+        // before it runs so a thrown error can be repaired next step.
+        if (planned.action.type === 'evaluate') {
+          agentScript = planned.action.expression
+          setScript(agentScript)
+          saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
+        }
         const planMeta = {
           ...(planned.thinking ? { thinking: planned.thinking } : {}),
           ...(planned.thoughts?.length ? { thoughts: planned.thoughts } : {}),
@@ -2985,7 +3049,7 @@ export function Browser() {
         if (planned.action.type === 'done') {
           append({ role: 'stet', text: planned.action.message, ...planMeta })
           setAnswer(planned.action.message)
-          agentMemory.current = { task: '', plan: [], notes: [] }
+          clearAgentMemory()
           reachedEnd = true
           setPhase('')
           break
@@ -3038,6 +3102,14 @@ export function Browser() {
             `${label} failed: ${failure}. Try a different target or tool; do not repeat it.`,
           ].slice(-8)
           agentMemory.current.notes = agentNotes
+          if (planned.action.type === 'evaluate') {
+            agentNotes = [
+              ...agentNotes,
+              `The last script threw: ${failure.slice(0, 400)}. Fix that code and run the corrected version; do not fall back to clicking.`,
+            ].slice(-8)
+            agentMemory.current.notes = agentNotes
+            saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
+          }
           flashMarker(null)
           setLastAction(`${label} didn't work`)
           if (failures >= 4) {
@@ -3119,7 +3191,7 @@ export function Browser() {
           const answer = `The page title is: ${(next.title || '').trim()}`
           append({ role: 'stet', text: answer })
           setAnswer(answer)
-          agentMemory.current = { task: '', plan: [], notes: [] }
+          clearAgentMemory()
           reachedEnd = true
           setPhase('')
           break
@@ -3144,7 +3216,7 @@ export function Browser() {
             if (answer) {
               append({ role: 'stet', text: answer })
               setAnswer(answer)
-              agentMemory.current = { task: '', plan: [], notes: [] }
+              clearAgentMemory()
               reachedEnd = true
               setPhase('')
               break
@@ -3190,7 +3262,7 @@ export function Browser() {
             thoughts: ['The requested click changed the page.', 'The new title and URL are the answer to “what page opens”, so there is nothing left to explore.'],
           })
           setAnswer(answer)
-          agentMemory.current = { task: '', plan: [], notes: [] }
+          clearAgentMemory()
           reachedEnd = true
           setPhase('')
           break
@@ -3203,7 +3275,10 @@ export function Browser() {
         }
       }
       if (!reachedEnd && !controller.signal.aborted) {
-        append({ role: 'stet', text: `I reached the ${MAX_STEPS}-step limit before finishing. Run it again or give me a narrower task.` })
+        append({
+          role: 'stet',
+          text: `I used all ${MAX_STEPS} actions and the task is not finished. The page, my plan and the scratchpad are saved — press Run and I will continue from here.`,
+        })
       }
     } catch (cause) {
       if (controller.signal.aborted) {
@@ -3771,6 +3846,25 @@ export function Browser() {
                 </button>
               </div>
               <p className="mt-1.5 max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-fg">{answer}</p>
+            </div>
+          ) : null}
+
+          {script ? (
+            <div className="border-b border-line px-4 py-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent">Scratchpad</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScript('')
+                    saveBrowserMemory({ task, plan: agentMemory.current.plan, notes: agentMemory.current.notes, script: '' })
+                  }}
+                  className="text-[11px] text-faint transition-colors hover:text-fg"
+                >
+                  Clear
+                </button>
+              </div>
+              <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-[8px] bg-surface-2 p-2 font-mono text-[11px] leading-relaxed text-muted">{script}</pre>
             </div>
           ) : null}
 

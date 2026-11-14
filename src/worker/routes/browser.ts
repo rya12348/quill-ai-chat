@@ -935,7 +935,8 @@ Rules:
 30. Before done, check the task's conditions against the current page: the right site or tab, the requested filter/selection, and any requested count, date or detail. Use done only when the result is visible and every condition is satisfied. If the page does not prove it, keep working or explain what is missing.
 31. For repetitive work, write code instead of clicking one item at a time. A quiz with many questions, a list of videos, a table of rows or a set of pages is ONE evaluate action: loop over the items, act on each, collect what happened, and return a compact report. Run it, read the result, and if it throws, fix the expression and run it again. This is the same loop a programmer uses and it is expected here, not a last resort.
 32. When a task is a quiz, test or graded exercise, the answers are often shipped in the page's own JavaScript or JSON. Before guessing, use evaluate with fetch to read same-origin scripts or data and search them for the question and answer text. Answer only from evidence you actually retrieved; never invent an answer key.
-33. Do not stop on the first page that lacks the answer. For a question, first use the site's own search, menus, tabs, embedded-frame URLs and page scripts, and try at least three genuinely different routes. Use ask only for a sign-in, missing information or a destructive confirmation, never merely because the answer was not on the page you happened to open.`
+33. Do not stop on the first page that lacks the answer. For a question, first use the site's own search, menus, tabs, embedded-frame URLs and page scripts, and try at least three genuinely different routes. Use ask only for a sign-in, missing information or a destructive confirmation, never merely because the answer was not on the page you happened to open.
+34. Keep your code on the scratchpad. The exact program you ran is shown back to you on the next step. If it throws, do not start over and do not fall back to clicking: read the error, change the code, and run the corrected version. Write scripts so running them twice is safe.`
 
 // The command prompt for ordinary browser steps. It deliberately omits the
 // observe/think/plan loop: a short instruction needs one action, not an essay.
@@ -979,6 +980,8 @@ async function plan(input: {
   observation?: string
   plan?: string[]
   notes?: string[]
+  /** The last program the agent wrote; shown back so it can repair it. */
+  script?: string
   blocked?: string[]
   recovering?: boolean
   /** Spend a strong reasoning model and a long budget on a hard task. */
@@ -1212,6 +1215,9 @@ async function plan(input: {
           'WORKING NOTES:',
           input.notes?.length ? input.notes.map((item) => `- ${item}`).join('\n') : '(none yet)',
         ]),
+    '',
+    'SCRATCHPAD (your last page program, kept from the previous step):',
+    input.script?.trim() ? input.script.slice(0, 8_000) : '(empty)',
     '',
     'BLOCKED ACTIONS (do not repeat these):',
     input.blocked?.length ? input.blocked.map((item) => `- ${item}`).join('\n') : '(none)',
@@ -2352,6 +2358,7 @@ browser.post('/plan', async (c) => {
 
   const inspect = inspection(raw.inspect)
   const observation = text(raw.observation, 2_000)
+  const script = text(raw.script, 8_000)
   const priorPlan = stringList(raw.plan, 8, 180)
   const notes = stringList(raw.notes, 8, 400)
   const blocked = stringList(raw.blocked, 8, 500)
@@ -2410,6 +2417,7 @@ browser.post('/plan', async (c) => {
       ...(inspect ? { inspect } : {}),
       ...(observation ? { observation } : {}),
       ...(priorPlan.length ? { plan: priorPlan } : {}),
+      ...(script ? { script } : {}),
       ...(notes.length ? { notes } : {}),
       ...(blocked.length ? { blocked } : {}),
       ...(recovering ? { recovering } : {}),
