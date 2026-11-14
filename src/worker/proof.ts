@@ -8,6 +8,7 @@
 // are date-checked, and format is counted. Subjective writing gets an explicit
 // "unverified", never a confidence score.
 
+import { isUsableAgentAnswer } from '../shared/agent'
 import { MAX_OUTPUT_TOKENS } from '../shared/config'
 import type { ChatMessage, StreamPiece } from './ai'
 import { activeLanes, laneKey, laneStrength, laneText, type LaneResult, type PublicLane } from './public-ai'
@@ -74,6 +75,10 @@ export function kindFor(question: string): ProofKind {
   // Only an explicit source or recency cue makes this research. A price in a
   // discount calculation is arithmetic, not a pricing lookup.
   if (/\b(cite|sources?|studies|study|latest|newest|current(?:ly)?|news|who won|as of|hands-on review|recent (?:human )?studies)\b/.test(text)) return 'research'
+  // A stated equation is arithmetic even when the request only says "verify".
+  // Without this, the Proof tool had no check to run for a simple calculation.
+  if (/\d[\d,]*(?:\.\d+)?\s*[+\-*/x×÷]\s*\$?\d[\d,]*(?:\.\d+)?\s*=\s*\$?-?\d/i.test(question)) return 'math'
+  if (/\d+(?:\.\d+)?\s*%\s*of\s+\$?\d/i.test(question)) return 'math'
   if (/\b(price|cost|pay|total|average|speed|percent|discount|recipe|calculate|how much|how many)\b/.test(text) && /\d/.test(text)) return 'math'
   if (/\b(exactly|steps?|list|plan|budget|schedule|words?)\b/.test(text) && /\d/.test(text)) return 'structured'
   return 'general'
@@ -199,6 +204,20 @@ function formatChecks(contract: Contract, text: string): ProofCheck[] {
     ]
     const missing = required.filter(([, pattern]) => !pattern.test(text)).map(([name]) => name)
     checks.push(check('sql', 'Query shape', missing.length ? 'fail' : 'pass', true, missing.length ? `Missing: ${missing.join(', ')}` : 'All required clauses are present.'))
+  }
+  // A general or lightly constrained request still gets an explicit check, so
+  // "0/0 checks passed" cannot be presented as a completed proof.
+  if (!checks.length) {
+    const present = text.trim().length > 0
+    checks.push(
+      check(
+        'format',
+        'The requested response is present',
+        present ? 'pass' : 'unknown',
+        false,
+        present ? 'A response was returned; its content was not independently verified.' : 'No response was returned.',
+      ),
+    )
   }
   return checks
 }
@@ -567,7 +586,7 @@ export async function proofComplete(input: ProofInput): Promise<ProofOutcome> {
     : input.messages
 
   if (contract.kind === 'code') {
-    await input.onStatus?.('Two free models are writing independent programs…')
+    await input.onStatus?.('Two models are writing independent programs…')
     const candidates = await solveCode(input.lanes, { ...input, messages }, 2)
     const runnable = candidates.filter((candidate) => candidate.code)
     if (!runnable.length) {
@@ -652,24 +671,45 @@ export async function proofComplete(input: ProofInput): Promise<ProofOutcome> {
     return { text: runnable[0]!.text, proof, job, models }
   }
 
-  await input.onStatus?.('A free model is writing the answer…')
-  const lane = pickLanes(input.lanes, 1)[0]
-  if (!lane) {
-    const proof = baseInfo(contract.kind, [check('answer', 'A free model answered', 'unknown', true)], [], 0, 1, null)
+  await input.onStatus?.('A model is writing the answer…')
+  const lanes = pickLanes(input.lanes, 3)
+  const first = lanes[0]
+  if (!first) {
+    const proof = baseInfo(contract.kind, [check('answer', 'A model answered', 'unknown', true)], [], 0, 1, null)
     return { text: '', proof, models: [] }
   }
   let text = ''
-  try {
-    text = await laneText(lane, {
-      messages,
-      signal: input.signal,
-      temperature: 0.3,
-      maxTokens: MAX_OUTPUT_TOKENS,
-      onLaneResult: input.onLaneResult,
-    })
-  } catch {
-    const proof = baseInfo(contract.kind, [check('answer', 'A free model answered', 'unknown', true)], [lane.label], 0, 1, null)
-    return { text: '', proof, models: [lane.label] }
+  let lane = first
+  for (const candidate of lanes) {
+    try {
+      const candidateText = await laneText(candidate, {
+        messages,
+        signal: input.signal,
+        temperature: 0.3,
+        maxTokens: MAX_OUTPUT_TOKENS,
+        onLaneResult: input.onLaneResult,
+      })
+      // A provider can return HTTP 200 with a quota notice instead of an answer.
+      // Move to another host rather than using that notice as the proof.
+      if (!isUsableAgentAnswer(candidateText, false)) continue
+      text = candidateText
+      lane = candidate
+      break
+    } catch (error) {
+      if (input.signal?.aborted) throw error
+    }
+  }
+  if (!text.trim()) {
+    const models = [...new Set(lanes.map((candidate) => candidate.label))]
+    const proof = baseInfo(
+      contract.kind,
+      [check('answer', 'A model answered', 'unknown', true, 'No usable model answer was returned.')],
+      models,
+      0,
+      1,
+      null,
+    )
+    return { text: '', proof, models }
   }
 
   const checks: ProofCheck[] =

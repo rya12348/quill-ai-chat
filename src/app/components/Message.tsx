@@ -4,14 +4,19 @@ import { createPortal } from 'react-dom'
 import { motion, useReducedMotion } from 'motion/react'
 import { useNavigate } from 'react-router'
 
+import { STOPPED_REPLY } from '../../shared/config'
 import { repairDocument } from '../../shared/html'
+import { modelDisplayList } from '../../shared/model-display'
 import { elapsedLabel } from '../../shared/receipt'
 import { splitThinking } from '../../shared/thinking'
 import type { AgentInfo, AnalysisInfo, BuildInfo, CanvasInfo, FeedbackRating, MessageAttachment, ProofInfo, ResearchInfo, Source, TeamInfo } from '../../shared/types'
 import { cx } from '../lib/cx'
+import { externalHttpUrl } from '../lib/external-url'
 import { useEnrollReviewDeck } from '../lib/api'
+import { isIsolatedLiveUrl, isolatedLiveUrl } from '../lib/live-preview'
 import { AgentNote } from './AgentNote'
 import { Markdown } from './Markdown'
+import { InkThinking } from './InkThinking'
 import { Mark } from './Shell'
 import { useToast } from './ui'
 
@@ -20,8 +25,18 @@ const fileSize = (bytes: number) => (bytes < 1_000 ? `${bytes} B` : bytes < 1_00
 export function UserMessage({ content, attachments }: { content: string; attachments?: MessageAttachment[] }) {
   const images = (attachments ?? []).filter((attachment) => attachment.kind === 'image' && attachment.url)
   const files = (attachments ?? []).filter((attachment) => attachment.kind === 'text')
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
   return (
-    <div className="flex justify-end">
+    <div className="group flex justify-end">
       <div className="flex min-w-0 max-w-[78%] flex-col items-end gap-2">
         {images.length > 0 && (
           <div className="flex flex-wrap justify-end gap-1.5">
@@ -49,7 +64,17 @@ export function UserMessage({ content, attachments }: { content: string; attachm
           </div>
         )}
         {content.trim() && (
-          <div className="whitespace-pre-wrap break-words rounded-bubble rounded-br-[8px] bg-surface-2 px-4 py-2.5 text-[15px] leading-[1.55]">{content}</div>
+          <div className="flex items-end gap-1.5">
+            <button
+              type="button"
+              onClick={copy}
+              aria-label={copied ? 'Copied' : 'Copy message'}
+              className="mb-0.5 grid size-7 shrink-0 place-items-center rounded-[8px] text-faint opacity-0 transition-colors hover:bg-surface-2 hover:text-fg focus-visible:opacity-100 group-hover:opacity-100 max-md:opacity-100 [&_svg]:size-3.5"
+            >
+              {copied ? <Check /> : <Copy />}
+            </button>
+            <div className="whitespace-pre-wrap break-words rounded-bubble rounded-br-[8px] bg-surface-2 px-4 py-2.5 text-[15px] leading-[1.55]">{content}</div>
+          </div>
         )}
       </div>
     </div>
@@ -76,13 +101,7 @@ function Thoughts({ text, ms, live }: { text: string; ms?: number; live: boolean
       >
         <Brain className="size-3.5 shrink-0" />
         <span>{label}</span>
-        {live && (
-          <span className="thinking inline-flex items-center gap-0.5" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
-        )}
+        {live && <InkThinking />}
         <ChevronDown className={cx('ml-auto size-3.5 shrink-0 transition-transform', open && 'rotate-180')} />
       </button>
       {open && (
@@ -99,11 +118,7 @@ function Progress({ statusLog, statusText }: { statusLog?: string[]; statusText?
   if (!steps.length) {
     return (
       <div className="flex min-h-[24px] items-center gap-2.5">
-        <span className="thinking inline-flex h-[24px] items-center gap-1" aria-label="Thinking">
-          <span />
-          <span />
-          <span />
-        </span>
+        <InkThinking label="Thinking" />
       </div>
     )
   }
@@ -114,11 +129,7 @@ function Progress({ statusLog, statusText }: { statusLog?: string[]; statusText?
         return (
           <div key={`${index}-${step}`} className="flex items-center gap-2 text-[12.5px]">
             {active ? (
-              <span className="thinking inline-flex items-center gap-0.5" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
+              <InkThinking />
             ) : (
               <Check className="size-3.5 shrink-0 text-accent" />
             )}
@@ -178,7 +189,7 @@ function Sources({ sources, unverified }: { sources?: Source[]; unverified?: num
             }
             return (
               <li key={source.url} className="border-b border-line last:border-0">
-                <a href={source.url} target="_blank" rel="noreferrer" className="group/source block px-3 py-2.5 transition-colors hover:bg-surface-2/60">
+                <a href={externalHttpUrl(source.url)} target="_blank" rel="noreferrer" className="group/source block px-3 py-2.5 transition-colors hover:bg-surface-2/60">
                   <span className="flex items-start gap-2 text-[12.5px] font-medium leading-snug text-fg">
                     <span className="min-w-0 flex-1">{source.title}</span>
                     <ExternalLink className="mt-0.5 size-3 shrink-0 text-faint transition-colors group-hover/source:text-fg" />
@@ -198,9 +209,10 @@ function Sources({ sources, unverified }: { sources?: Source[]; unverified?: num
 function TeamNote({ team }: { team: TeamInfo }) {
   const confidence = team.confidence === 'high' ? 'High confidence' : team.confidence === 'medium' ? 'Medium confidence' : 'Low confidence'
   const label = team.verified ? `Team verified · ${confidence}` : team.reviewed ? `Team checked · ${confidence}` : team.drafts > 1 ? 'Team merged · review unavailable' : 'Team fallback · one draft'
-  const count = `${team.models.length} ${team.models.length === 1 ? 'model' : 'models'}`
+  const modelNames = modelDisplayList(team.models)
+  const count = `${modelNames.length} ${modelNames.length === 1 ? 'model' : 'models'}`
   return (
-    <p className="mt-2 inline-flex max-w-full items-center gap-1.5 text-[11.5px] leading-none text-faint" title={`Team: ${team.models.join(' · ')}`}>
+    <p className="mt-2 inline-flex max-w-full items-center gap-1.5 text-[11.5px] leading-none text-faint" title={`Team: ${modelNames.join(' · ')}`}>
       <Users className="size-3.5 shrink-0" />
       <span className="truncate">{label}</span>
       <span aria-hidden>·</span>
@@ -211,20 +223,20 @@ function TeamNote({ team }: { team: TeamInfo }) {
 
 function ResearchNote({ research, sources, content }: { research: ResearchInfo; sources?: Source[]; content: string }) {
   const [open, setOpen] = useState(false)
+  const modelNames = modelDisplayList(research.models)
   const sourceByUrl = new Map((sources ?? []).map((source) => [source.url, source]))
   const ordered = research.sourceOrder
     .map((url) => sourceByUrl.get(url))
     .filter((source): source is Source => Boolean(source))
   const shown = ordered.length ? ordered : (sources ?? [])
-  const supported = research.claims.filter((claim) => claim.status === 'supported').length
   const label =
     research.status === 'verified'
-      ? `Research · ${supported}/${research.claims.length} claims supported`
+      ? 'Research verified'
       : research.status === 'warning'
         ? `Research · checked with warnings${research.reason ? ` · ${research.reason}` : ''}`
         : research.status === 'failed'
           ? `Research · failed${research.reason ? ` · ${research.reason}` : ''}`
-          : `Research · unverified${research.reason ? ` · ${research.reason}` : ''}`
+          : 'Research'
   const Icon = research.status === 'verified' ? ShieldCheck : research.status === 'failed' ? ShieldX : research.status === 'warning' ? ShieldAlert : Shield
   const tone =
     research.status === 'verified'
@@ -255,7 +267,7 @@ function ResearchNote({ research, sources, content }: { research: ResearchInfo; 
       '',
       `Status: ${research.status}${research.reason ? ` (${research.reason})` : ''}`,
       `Checked: ${new Date(research.asOf).toLocaleDateString()}`,
-      `Models: ${research.models.join(', ') || 'not recorded'}`,
+      `Models: ${modelNames.join(', ') || 'not recorded'}`,
     ]
     const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -295,11 +307,11 @@ function ResearchNote({ research, sources, content }: { research: ResearchInfo; 
                   <p className="text-muted">{claim.text}</p>
                   <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1">
                     {claim.sourceUrls.map((url) => (
-                      <a key={url} href={url} target="_blank" rel="noreferrer" className="text-[10.5px] text-faint underline underline-offset-2 hover:text-fg">
+                      <a key={url} href={externalHttpUrl(url)} target="_blank" rel="noreferrer" className="text-[11.5px] text-faint underline underline-offset-2 hover:text-fg">
                         {sourceLabel(url)}
                       </a>
                     ))}
-                    <span className="text-[10px] uppercase tracking-wide text-faint">
+                    <span className="text-[11.5px] uppercase tracking-wide text-faint">
                       {claim.status === 'single-source' ? 'single source' : claim.status}
                     </span>
                   </div>
@@ -310,12 +322,12 @@ function ResearchNote({ research, sources, content }: { research: ResearchInfo; 
             )}
           </div>
           <div className="mt-3 border-t border-line pt-2">
-            <p className="text-[10px] uppercase tracking-wide text-faint">Sources opened</p>
+            <p className="text-[11.5px] uppercase tracking-wide text-faint">Sources opened</p>
             <ol className="mt-1 space-y-1">
               {shown.map((source, index) => (
                 <li key={`${source.url}-${index}`} className="flex items-start gap-1.5 text-[11px] leading-relaxed">
                   <span className="shrink-0 text-faint">{index + 1}.</span>
-                  <a href={source.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-muted underline underline-offset-2 hover:text-fg">
+                  <a href={externalHttpUrl(source.url)} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-muted underline underline-offset-2 hover:text-fg">
                     {source.title}
                   </a>
                   {source.publishedAt ? <span className="shrink-0 text-faint">{new Date(source.publishedAt).toLocaleDateString()}</span> : null}
@@ -323,8 +335,8 @@ function ResearchNote({ research, sources, content }: { research: ResearchInfo; 
               ))}
             </ol>
           </div>
-          <p className="mt-2 text-[10.5px] leading-relaxed text-faint">
-            {research.models.length ? `${research.models.join(' · ')} · ` : ''}
+          <p className="mt-2 text-[11.5px] leading-relaxed text-faint">
+            {modelNames.length ? `${modelNames.join(' · ')} · ` : ''}
             checked {new Date(research.asOf).toLocaleDateString()}
             {research.queries.length ? ` · ${research.queries.length} searches` : ''}
           </p>
@@ -342,40 +354,8 @@ function ResearchNote({ research, sources, content }: { research: ResearchInfo; 
   )
 }
 
-/**
- * On loopback the dev server also answers on a second `.localhost` hostname.
- * Point the live preview there so a site that needs a real origin for its own
- * about:blank frames still cannot touch Quill's origin or its session. Deployed
- * origins keep the opaque sandbox because they have no second hostname.
- */
-const LIVE_PREVIEW_HOST = 'quill-preview.localhost'
-
-function isolatedLiveUrl(url: string): string {
-  if (typeof window === 'undefined') return url
-  const host = window.location.hostname
-  if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') return url
-  try {
-    const next = new URL(url, window.location.origin)
-    if (next.protocol !== 'http:' && next.protocol !== 'https:') return url
-    next.protocol = window.location.protocol
-    next.hostname = LIVE_PREVIEW_HOST
-    next.port = window.location.port
-    return next.href
-  } catch {
-    return url
-  }
-}
-
-function isIsolatedLiveUrl(url: string): boolean {
-  if (typeof window === 'undefined') return false
-  try {
-    return new URL(url, window.location.origin).hostname === LIVE_PREVIEW_HOST
-  } catch {
-    return false
-  }
-}
-
 function BuildNote({ build }: { build: BuildInfo }) {
+  const modelNames = modelDisplayList(build.models)
   const [open, setOpen] = useState(true)
   const [expanded, setExpanded] = useState(false)
   // Games and tools are dead without their scripts. Other pages still start
@@ -394,6 +374,9 @@ function BuildNote({ build }: { build: BuildInfo }) {
   const currentPage = pages ? pages[Math.min(pageIndex, pages.length - 1)] ?? pages[0] : undefined
   const documentHtml = currentPage?.html ?? build.html
   const live = build.kind === 'embed' && Boolean(build.proxyUrl)
+  const verification = build.verification
+  const checked = verification?.checks.length ?? 0
+  const failedChecks = verification?.checks.filter((check) => check.status === 'fail').length ?? 0
   const liveFrame = useRef<HTMLIFrameElement>(null)
   const [liveUrl, setLiveUrl] = useState(() => isolatedLiveUrl(build.proxyUrl ?? ''))
   const sourceHost = (() => {
@@ -411,19 +394,26 @@ function BuildNote({ build }: { build: BuildInfo }) {
   // stays isolated and without access to this origin.
   useEffect(() => {
     if (!live) return
+    const previewOrigin = (() => {
+      try {
+        return new URL(isolatedLiveUrl(window.location.origin)).origin
+      } catch {
+        return ''
+      }
+    })()
     const onMessage = (event: MessageEvent) => {
       if (event.source !== liveFrame.current?.contentWindow) return
       const data: unknown = event.data
       if (!data || typeof data !== 'object') return
       const message = data as { type?: unknown; url?: unknown }
-      if (message.type !== 'quill:preview-navigate' || typeof message.url !== 'string') return
+      if (message.type !== 'stet:preview-navigate' || typeof message.url !== 'string') return
       let next: URL
       try {
         next = new URL(message.url, window.location.origin)
       } catch {
         return
       }
-      if (next.origin !== window.location.origin) return
+      if (next.origin !== window.location.origin && next.origin !== previewOrigin) return
       if (!next.pathname.startsWith('/api/web-proxy/') && !next.pathname.startsWith('/api/poki-game/')) return
       setLiveUrl(isolatedLiveUrl(next.href))
     }
@@ -507,7 +497,7 @@ function BuildNote({ build }: { build: BuildInfo }) {
         ref={liveFrame}
         src={liveUrl}
         sandbox={liveSandbox}
-        allow={live ? 'fullscreen' : undefined}
+        allow={live ? 'fullscreen; pointer-lock' : undefined}
         allowFullScreen={live}
         title={`Live preview of ${sourceHost}`}
         className={className}
@@ -533,7 +523,7 @@ function BuildNote({ build }: { build: BuildInfo }) {
         >
           {live ? <Globe2 className="size-3.5 shrink-0 text-accent" /> : <Hammer className="size-3.5 shrink-0 text-accent" />}
           <span className="min-w-0 flex-1 truncate">{live ? `Live site · ${sourceHost}` : `Build · ${build.title}`}</span>
-          <span className="hidden shrink-0 text-[11px] text-faint sm:inline">{live ? 'live proxy' : 'sandboxed preview'}</span>
+          <span className="hidden shrink-0 text-[11px] text-faint sm:inline">{live ? 'live page' : 'sandboxed preview'}</span>
           <ChevronDown className={cx('size-3.5 shrink-0 transition-transform', open && 'rotate-180')} />
         </button>
         {open && (
@@ -595,15 +585,27 @@ function BuildNote({ build }: { build: BuildInfo }) {
                 <Maximize2 className="size-3" />
                 Expand
               </button>
-              <span className="text-[10.5px] text-faint">
-                {live ? 'live page · ' : build.models.length ? `${build.models.join(' · ')} · ` : ''}
+              <span className="text-[11.5px] text-faint">
+                {verification ? (
+                  <span
+                    title={verification.checks.map((check) => `${check.label}: ${check.status}`).join('\n')}
+                    className={cx(
+                      'mr-1 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium',
+                      verification.status === 'verified' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning',
+                    )}
+                  >
+                    {verification.status === 'verified' ? <ShieldCheck className="size-3" /> : <ShieldAlert className="size-3" />}
+                    {verification.status === 'verified' ? `${checked} checks` : 'needs review'}
+                  </span>
+                ) : null}
+                {live ? 'live page · ' : modelNames.length ? `${modelNames.join(' · ')} · ` : ''}
                 {new Date(build.asOf).toLocaleString()}
               </span>
             </div>
-            <p className="mt-2 text-[10.5px] leading-relaxed text-faint">
+            <p className="mt-2 text-[11.5px] leading-relaxed text-faint">
               {live
-                ? "This is a live page fetched through Quill's proxy, not a screenshot. Sign-in, payments and some cross-origin features may not work."
-                : `${pages ? `This build has ${pages.length} pages — switch with the tabs above the frame. ` : ''}${interactive ? 'This interactive build starts with scripts on inside the sandbox. Pause or restart it with the controls above.' : 'The preview starts with scripts off so a slow page cannot freeze the chat. Turn scripts on for interactive pages.'} Ask for a change in the composer to edit this build. Images load from the web.`}
+                ? "This is a live page loaded in Ink, not a screenshot. Sign-in, payments and some cross-origin features may not work. If this pane is blank or shows Securly's block page, the filter blocked the page before Ink could see the request; when Ink sees a block, the frame reports the HTTP status and reason."
+                : `${pages ? `This build has ${pages.length} pages — switch with the tabs above the frame. ` : ''}${interactive ? 'This interactive build starts with scripts on inside the sandbox. Pause or restart it with the controls above.' : 'The preview starts with scripts off so a slow page cannot freeze the chat. Turn scripts on for interactive pages.'}${verification ? ` ${verification.status === 'verified' ? `Automated page checks passed${verification.repaired ? ' after a repair' : ''}.` : `${failedChecks || checked} page check${failedChecks === 1 ? '' : 's'} still need attention.`}` : ''} Ask for a change in the composer to edit this build. Images load from the web.`}
             </p>
           </div>
         )}
@@ -682,6 +684,7 @@ function BuildNote({ build }: { build: BuildInfo }) {
 
 function AnalysisNote({ analysis, content, onRerun }: { analysis: AnalysisInfo; content: string; onRerun?: () => void }) {
   const [open, setOpen] = useState(false)
+  const modelNames = modelDisplayList(analysis.models)
   const label =
     analysis.status === 'checking'
       ? 'Analyze · running Python…'
@@ -711,7 +714,7 @@ function AnalysisNote({ analysis, content, onRerun }: { analysis: AnalysisInfo; 
       '',
       `Status: ${analysis.status}${analysis.reason ? ` (${analysis.reason})` : ''}`,
       `Rows: ${analysis.rows} · Columns: ${analysis.columns.length}`,
-      `Models: ${analysis.models.join(', ') || 'not recorded'}`,
+      `Models: ${modelNames.join(', ') || 'not recorded'}`,
     ]
     const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -762,9 +765,9 @@ function AnalysisNote({ analysis, content, onRerun }: { analysis: AnalysisInfo; 
             <summary className="cursor-pointer text-[11px] font-medium text-faint hover:text-fg">Python used</summary>
             <pre className="scrollbar-thin mt-2 max-h-72 overflow-auto whitespace-pre rounded-[8px] border border-line bg-surface px-2.5 py-2 font-mono text-[11px] leading-relaxed text-muted">{analysis.code}</pre>
           </details>
-          <p className="mt-2 text-[10.5px] leading-relaxed text-faint">
+          <p className="mt-2 text-[11.5px] leading-relaxed text-faint">
             {analysis.fileName} · {analysis.rows.toLocaleString()} rows · {analysis.columns.length} columns
-            {analysis.models.length ? ` · ${analysis.models.join(' · ')}` : ''}
+            {modelNames.length ? ` · ${modelNames.join(' · ')}` : ''}
             {' · '}run {new Date(analysis.asOf).toLocaleString()}
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -802,6 +805,7 @@ function CanvasNote({ canvas, messageId }: { canvas: CanvasInfo; messageId?: str
   const enroll = useEnrollReviewDeck()
   const cards = canvas.cards ?? []
   const questions = canvas.questions ?? []
+  const modelNames = modelDisplayList(canvas.models)
   const isQuiz = canvas.kind === 'quiz'
   const flippedCount = cards.filter((_, index) => flipped[index]).length
   const answered = Object.keys(picked).length
@@ -816,7 +820,7 @@ function CanvasNote({ canvas, messageId }: { canvas: CanvasInfo; messageId?: str
       lines.push(`${index + 1}. ${question.question}`, `   - Answer: ${question.choices[question.answer]}`)
       if (question.explanation) lines.push(`   - ${question.explanation}`)
     })
-    lines.push('', `Made by Quill Canvas${canvas.models.length ? ` · ${canvas.models.join(' · ')}` : ''}`)
+    lines.push('', `Made by Ink Canvas${modelNames.length ? ` · ${modelNames.join(' · ')}` : ''}`)
     const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -836,7 +840,7 @@ function CanvasNote({ canvas, messageId }: { canvas: CanvasInfo; messageId?: str
     <div className="mt-2 overflow-hidden rounded-[16px] border border-line bg-surface shadow-[0_18px_44px_-34px_rgb(27_26_23/0.55)]">
       <div
         className="relative overflow-hidden border-b border-line px-4 pb-3 pt-3.5"
-        style={{ background: 'radial-gradient(circle at top left, rgb(194 87 27 / 0.11), transparent 58%)' }}
+        style={{ background: 'radial-gradient(circle at top left, rgb(168 73 20 / 0.11), transparent 58%)' }}
       >
         <div className="relative flex items-center gap-3">
           <span className="grid size-9 shrink-0 place-items-center rounded-[11px] bg-accent-soft text-accent shadow-[inset_0_1px_0_rgb(255_255_255/0.7)]">
@@ -844,16 +848,16 @@ function CanvasNote({ canvas, messageId }: { canvas: CanvasInfo; messageId?: str
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-accent">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">
                 {isQuiz ? 'Canvas quiz' : 'Canvas deck'}
               </span>
-              <span className="text-[10px] text-faint">
+              <span className="text-[11.5px] text-faint">
                 {total} {isQuiz ? 'questions' : 'cards'}
               </span>
             </div>
             <h3 className="truncate text-[13.5px] font-semibold tracking-[-0.01em] text-fg">{canvas.title}</h3>
           </div>
-          <span className="shrink-0 rounded-full border border-line bg-surface/80 px-2 py-1 text-[10px] font-medium tabular-nums text-muted">
+          <span className="shrink-0 rounded-full border border-line bg-surface/80 px-2 py-1 text-[11.5px] font-medium tabular-nums text-muted">
             {completed}/{total}
           </span>
         </div>
@@ -902,18 +906,18 @@ function CanvasNote({ canvas, messageId }: { canvas: CanvasInfo; messageId?: str
                       className="relative col-start-1 row-start-1 flex min-h-[144px] flex-col overflow-hidden rounded-[14px] border border-line bg-surface p-3.5 shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-colors group-hover:border-line-strong"
                     >
                       <span className="relative flex items-center justify-between gap-2">
-                        <span className="flex items-center gap-1.5 text-[9.5px] font-semibold uppercase tracking-[0.12em] text-faint">
-                          <span className="grid size-5 place-items-center rounded-full bg-surface-2 text-[9px] font-semibold tabular-nums text-muted">
+                        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">
+                          <span className="grid size-5 place-items-center rounded-full bg-surface-2 text-[11px] font-semibold tabular-nums text-muted">
                             {String(index + 1).padStart(2, '0')}
                           </span>
                           Question
                         </span>
-                        <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-accent">
+                        <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent">
                           Card
                         </span>
                       </span>
                       <span className="relative mt-4 flex-1 break-words text-[13px] font-medium leading-snug text-fg">{card.front}</span>
-                      <span className="relative mt-3 flex items-center justify-between border-t border-line/70 pt-2 text-[9.5px] font-medium uppercase tracking-[0.1em] text-faint">
+                      <span className="relative mt-3 flex items-center justify-between border-t border-line/70 pt-2 text-[11px] font-medium uppercase tracking-[0.1em] text-faint">
                         Tap to reveal
                         <span className="grid size-6 place-items-center rounded-full bg-surface-2 text-muted transition-colors group-hover:bg-accent-soft group-hover:text-accent">
                           <RefreshCw className="size-3" />
@@ -926,20 +930,20 @@ function CanvasNote({ canvas, messageId }: { canvas: CanvasInfo; messageId?: str
                       className="relative col-start-1 row-start-1 flex min-h-[144px] flex-col overflow-hidden rounded-[14px] border border-fg/80 bg-fg p-3.5 text-bg shadow-[0_12px_28px_-18px_rgb(27_26_23/0.8)]"
                     >
                       <span className="relative flex items-center justify-between gap-2">
-                        <span className="flex items-center gap-1.5 text-[9.5px] font-semibold uppercase tracking-[0.12em] text-bg/50">
-                          <span className="grid size-5 place-items-center rounded-full bg-bg/10 text-[9px] font-semibold tabular-nums text-bg/70">
+                        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-bg/80">
+                          <span className="grid size-5 place-items-center rounded-full bg-bg/10 text-[11px] font-semibold tabular-nums text-bg/85">
                             {String(index + 1).padStart(2, '0')}
                           </span>
                           Answer
                         </span>
-                        <span className="rounded-full bg-accent px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-bg">
+                        <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-bg">
                           Back
                         </span>
                       </span>
                       <span className="relative mt-4 flex-1 break-words text-[13px] font-medium leading-relaxed text-bg">{card.back}</span>
-                      <span className="relative mt-3 flex items-center justify-between border-t border-bg/10 pt-2 text-[9.5px] font-medium uppercase tracking-[0.1em] text-bg/45">
+                      <span className="relative mt-3 flex items-center justify-between border-t border-bg/10 pt-2 text-[11px] font-medium uppercase tracking-[0.1em] text-bg/70">
                         Tap to hide
-                        <span className="grid size-6 place-items-center rounded-full bg-bg/10 text-bg/70">
+                        <span className="grid size-6 place-items-center rounded-full bg-bg/10 text-bg/80">
                           <RefreshCw className="size-3" />
                         </span>
                       </span>
@@ -995,7 +999,7 @@ function CanvasNote({ canvas, messageId }: { canvas: CanvasInfo; messageId?: str
           </ol>
         )}
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
-          <span className="text-[10.5px] text-faint" aria-live="polite">
+          <span className="text-[11.5px] text-faint" aria-live="polite">
             {isQuiz
               ? `${correct}/${questions.length} correct${answered < questions.length ? ` · ${questions.length - answered} to go` : ''}`
               : `${flippedCount}/${cards.length} flipped${cards.length > 0 && flippedCount === cards.length ? ' · deck complete' : ''}`}
@@ -1026,15 +1030,15 @@ function CanvasNote({ canvas, messageId }: { canvas: CanvasInfo; messageId?: str
               disabled={enroll.isPending}
               onClick={startReview}
               title="Rate these cards and see them again when they are due"
-              className="inline-flex items-center gap-1.5 rounded-[8px] bg-fg px-2.5 py-1.5 text-[11px] font-medium text-bg transition-colors hover:bg-fg/90 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-bg transition-colors hover:bg-accent-strong disabled:opacity-50"
             >
               <Brain className="size-3" />
               {enroll.isPending ? 'Starting…' : 'Review'}
             </button>
           )}
         </div>
-        <p className="mt-2 text-[10.5px] leading-relaxed text-faint">
-          {canvas.models.length ? `${canvas.models.join(' · ')} · ` : ''}
+        <p className="mt-2 text-[11.5px] leading-relaxed text-faint">
+          {modelNames.length ? `${modelNames.join(' · ')} · ` : ''}
           made {new Date(canvas.asOf).toLocaleString()}
         </p>
       </div>
@@ -1046,6 +1050,7 @@ function ProofNote({ proof }: { proof: ProofInfo }) {
   const [open, setOpen] = useState(false)
   const critical = proof.checks.filter((item) => item.critical)
   const relevant = critical.length ? critical : proof.checks
+  const modelNames = modelDisplayList(proof.models)
   const passed = relevant.filter((item) => item.status === 'pass').length
   const label =
     proof.status === 'checking'
@@ -1097,14 +1102,14 @@ function ProofNote({ proof }: { proof: ProofInfo }) {
                 />
                 <span className="min-w-0 flex-1">
                   <span className={item.status === 'pass' ? 'text-muted' : item.status === 'fail' ? 'text-danger' : 'text-faint'}>{item.label}</span>
-                  {item.critical ? <span className="ml-1.5 text-[10px] uppercase tracking-wide text-faint">critical</span> : null}
+                  {item.critical ? <span className="ml-1.5 text-[11.5px] uppercase tracking-wide text-faint">critical</span> : null}
                   {item.detail ? <span className="mt-0.5 block text-[11px] leading-relaxed text-faint">{item.detail}</span> : null}
                 </span>
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-[10.5px] leading-relaxed text-faint">
-            {proof.models.length ? `Models: ${proof.models.join(' · ')}` : 'No model recorded.'}
+          <p className="mt-2 text-[11.5px] leading-relaxed text-faint">
+            {modelNames.length ? `Models: ${modelNames.join(' · ')}` : 'No model recorded.'}
             {proof.attempts > 1 ? ` · ${proof.attempts} attempts` : ''}
           </p>
         </div>
@@ -1158,10 +1163,12 @@ function Receipt({
   }
   if (research) {
     const { supported, unsupported } = research.counts
-    parts.push({
-      label: `${supported}/${research.claims.length} claims supported`,
-      tone: unsupported ? 'text-warning' : 'text-accent',
-    })
+    if (research.claims.length) {
+      parts.push({
+        label: `${supported}/${research.claims.length} claims supported`,
+        tone: unsupported ? 'text-warning' : 'text-accent',
+      })
+    }
   }
   if (analysis) {
     parts.push({
@@ -1279,6 +1286,9 @@ export function AssistantMessage({
   const [copied, setCopied] = useState(false)
   const sourceKeys = new Set((sources ?? []).map((source) => normalizeUrl(source.url)))
   const unverified = sources?.length ? citedUrls(visibleContent).filter((url) => !sourceKeys.has(normalizeUrl(url))).length : 0
+  // A document was written from general knowledge; it has no research receipts.
+  // Unverified reports also get no verification bar, only their sources.
+  const researchNote = research && !research.document && research.status !== 'unverified' ? research : undefined
   const [rating, setRating] = useState<FeedbackRating | undefined>(feedback)
   useEffect(() => setRating(feedback), [feedback])
   const rate = (next: FeedbackRating) => {
@@ -1295,23 +1305,29 @@ export function AssistantMessage({
     }
   }
   const waiting = streaming && !visibleContent
+  const stoppedPlaceholder = visibleContent.trim() === STOPPED_REPLY
   return (
     <div id={messageId ? `message-${messageId}` : undefined} className="group flex scroll-mt-4 gap-3.5">
       <Mark size={26} className="mt-0.5 rounded-[8px]" />
       <div className="min-w-0 flex-1 pt-0.5">
         {thoughts && <Thoughts text={thoughts} ms={reasoningMs} live={Boolean(waiting)} />}
         {!waiting && (
-          <Receipt model={model} elapsedMs={elapsedMs} sources={sources} team={team} proof={proof} research={research} analysis={analysis} />
+          <Receipt model={model} elapsedMs={elapsedMs} sources={sources} team={team} proof={proof} research={researchNote} analysis={analysis} />
         )}
         {agent && <AgentNote agent={agent} live={Boolean(streaming)} />}
         {waiting ? thoughts ? null : <Progress statusLog={statusLog} statusText={statusText} /> : <Markdown className={cx('prose-chat', streaming && 'streaming')}>{visibleContent}</Markdown>}
-        {!research && <Sources sources={sources} unverified={unverified} />}
+        {interrupted && !stoppedPlaceholder && (
+          <p role="status" className="mt-2 text-[12px] leading-relaxed text-faint">
+            {visibleContent ? 'Reply stopped before it finished.' : STOPPED_REPLY}
+          </p>
+        )}
+        {!researchNote && <Sources sources={sources} unverified={unverified} />}
         {!streaming && !error && (
           <>
             {build ? <BuildNote build={build} /> : null}
             {canvas ? <CanvasNote canvas={canvas} messageId={messageId} /> : null}
             {analysis ? <AnalysisNote analysis={analysis} content={visibleContent} onRerun={onRerun} /> : null}
-            {research ? <ResearchNote research={research} sources={sources} content={visibleContent} /> : null}
+            {researchNote ? <ResearchNote research={researchNote} sources={sources} content={visibleContent} /> : null}
             {proof ? <ProofNote proof={proof} /> : null}
             {team ? <TeamNote team={team} /> : null}
           </>
@@ -1327,8 +1343,7 @@ export function AssistantMessage({
           </div>
         )}
         {!streaming && !error && (
-          <div className="mt-1 flex h-7 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-            {interrupted && <span className="mr-2 text-[12px] text-faint">Stopped</span>}
+          <div className="mt-1 flex h-7 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 max-md:opacity-100">
             {messageId && onFeedback && (
               <>
                 <button

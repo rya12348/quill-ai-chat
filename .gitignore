@@ -10,3 +10,4 @@ dist
 .dev.vars.*
 .DS_Store
 *.log
+.ink-chrome-profile

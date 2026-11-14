@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ink — product demo</title>
+<style>
+  @font-face { font-family: 'Inter'; src: url('./assets/fonts/inter.woff2') format('woff2'); font-weight: 100 900; font-display: block; }
+  @font-face { font-family: 'Newsreader'; src: url('./assets/fonts/newsreader.woff2') format('woff2'); font-weight: 200 800; font-display: block; }
+  :root { --paper: #f4efe4; --ink: #211d18; --muted: #6b6155; --faint: #8d7c67; --accent: #a84914; }
+  * { box-sizing: border-box; }
+  html, body { position: fixed; inset: 0; width: 1920px; height: 1080px; margin: 0; overflow: hidden; background: var(--paper); color: var(--ink); font-family: 'Inter', sans-serif; }
+  body { -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; }
+  .stage { position: fixed; inset: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--paper); }
+  .stage:before {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(ellipse 900px 600px at 100% 0%, rgba(168,73,20,.09), transparent 65%),
+      radial-gradient(ellipse 720px 520px at 0% 100%, rgba(113,72,39,.08), transparent 70%);
+  }
+  .stage:after {
+    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .03; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .ring { position: absolute; border: 1px solid rgba(168,73,20,.12); border-radius: 50%; }
+  .ring.r1 { width: 760px; height: 760px; right: -300px; top: -410px; }
+  .ring.r2 { width: 360px; height: 360px; left: -190px; bottom: -220px; }
+
+  .demo-bar {
+    position: fixed; z-index: 30; top: 0; left: 0; right: 0; height: 64px; display: flex; align-items: center; gap: 28px;
+    padding: 0 42px; border-bottom: 1px solid rgba(115,96,72,.16);
+  }
+  .brand { display: flex; align-items: center; gap: 11px; width: 210px; flex: none; }
+  .brand .mark { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--ink); color: var(--paper); }
+  .brand .mark svg { width: 20px; height: 20px; }
+  .brand .word { font-family: 'Newsreader', serif; font-size: 29px; font-weight: 600; letter-spacing: -.045em; line-height: 1; }
+  .caption { min-width: 0; flex: 1; display: flex; align-items: center; gap: 13px; opacity: 1; }
+  .caption .no { color: var(--accent); font-size: 10px; font-weight: 750; letter-spacing: .18em; }
+  .caption .label { font-family: 'Newsreader', serif; font-size: 21px; font-weight: 450; letter-spacing: -.018em; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-meta { flex: none; display: flex; align-items: center; gap: 9px; color: var(--faint); font-size: 9px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; }
+  .bar-meta i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: .8; }
+  .device {
+    position: fixed; z-index: 2; top: 72px; left: 50%; transform: translateX(-50%);
+    width: calc(1440px * 1.095); height: calc(900px * 1.095); border-radius: 15px; overflow: hidden;
+    background: #fdfaf3; border: 1px solid rgba(70,55,39,.2);
+    box-shadow: 0 34px 70px -32px rgba(51,34,19,.45), 0 10px 24px -18px rgba(51,34,19,.2);
+  }
+  .device iframe { display: block; width: 1440px; height: 900px; border: 0; transform: scale(1.095); transform-origin: top left; background: #f4efe4; }
+  .chapter-line { position: fixed; z-index: 30; left: 42px; right: 42px; bottom: 9px; height: 2px; background: rgba(94,73,52,.12); }
+  .chapter-line i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .8s cubic-bezier(.22,1,.36,1); }
+
+  .veil {
+    position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: var(--paper);
+    transition: opacity .7s ease, visibility .7s; opacity: 1; visibility: visible;
+  }
+  .veil.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+  .intro-inner, .outro-inner { text-align: center; transform: translateY(4px); }
+  .intro-mark, .outro-mark { width: 92px; height: 92px; border-radius: 24px; background: var(--ink); color: var(--paper); display: grid; place-items: center; margin: 0 auto; box-shadow: 0 25px 50px -30px rgba(50,33,17,.5); }
+  .intro-mark svg, .outro-mark svg { width: 53px; height: 53px; }
+  .outro-mark { width: 62px; height: 62px; border-radius: 16px; }
+  .outro-mark svg { width: 36px; height: 36px; }
+  .intro-word { margin: 22px 0 0; font-family: 'Newsreader', serif; font-size: 132px; line-height: .78; font-weight: 500; letter-spacing: -.075em; }
+  .intro-tag { margin: 34px 0 0; font-family: 'Newsreader', serif; font-size: 33px; font-weight: 430; letter-spacing: -.02em; color: #332c24; }
+  .intro-tag em { color: var(--accent); font-style: italic; }
+  .intro-kicker { margin: 21px 0 0; color: #8c7b65; font-size: 10px; font-weight: 700; letter-spacing: .22em; text-transform: uppercase; }
+  .outro-word { margin: 18px 0 0; font-family: 'Newsreader', serif; font-size: 52px; line-height: 1; font-weight: 600; letter-spacing: -.05em; }
+  .outro-inner h2 { margin: 24px 0 0; font-family: 'Newsreader', serif; font-size: 82px; line-height: .95; font-weight: 500; letter-spacing: -.055em; }
+  .outro-inner h2 em { color: var(--accent); font-style: italic; font-weight: 430; }
+  .outro-sub { margin: 23px 0 0; color: #7c6e5b; font-size: 11px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; }
+  #outro { opacity: 0; visibility: hidden; }
+  #outro.show { opacity: 1; visibility: visible; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="ring r1"></div><div class="ring r2"></div>
+  <header class="demo-bar">
+    <div class="brand">
+      <span class="mark"><svg viewBox="0 0 64 64" fill="currentColor"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></span>
+      <span class="word">Ink</span>
+    </div>
+    <div class="caption" id="caption"><span class="no" id="capNo">01</span><span class="label" id="capLabel">One place for the whole task.</span></div>
+    <div class="bar-meta"><i></i> Product demo</div>
+  </header>
+
+  <div class="device"><iframe id="app" src="http://127.0.0.1:5180/" title="Ink app"></iframe></div>
+  <div class="chapter-line"><i id="chapterLine"></i></div>
+
+  <div class="veil" id="intro">
+    <div class="intro-inner">
+      <div class="intro-mark"><svg viewBox="0 0 64 64" fill="currentColor"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></div>
+      <div class="intro-word">Ink</div>
+      <div class="intro-tag">Think it through. <em>Then ship it.</em></div>
+      <div class="intro-kicker">A quick product demo</div>
+    </div>
+  </div>
+
+  <div class="veil" id="outro">
+    <div class="outro-inner">
+      <div class="outro-mark"><svg viewBox="0 0 64 64" fill="currentColor"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></div>
+      <div class="outro-word">Ink</div>
+      <h2>Ask once. <em>Finish it here.</em></h2>
+      <div class="outro-sub">Research · Build · Analyze · Study</div>
+    </div>
+  </div>
+</div>
+<script>
+  const captions = {
+    1: 'One place for the whole task.',
+    2: 'Saved work, ready to reuse.',
+    3: 'Open a build. Use it right here.',
+    4: 'Answers keep their receipts.',
+  }
+  // Playwright can scroll the outer page while focusing controls inside the
+  // app frame. The stage is a fixed 1080p canvas, so keep it pinned at 0,0.
+  const lockStage = () => {
+    if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0)
+    if (document.documentElement.scrollLeft !== 0) document.documentElement.scrollLeft = 0
+    if (document.body.scrollLeft !== 0) document.body.scrollLeft = 0
+  }
+  window.addEventListener('scroll', lockStage, { passive: true })
+  setInterval(lockStage, 120)
+
+  window.hideIntro = () => document.getElementById('intro').classList.add('hidden')
+  window.showOutro = () => document.getElementById('outro').classList.add('show')
+  window.setStep = (step) => {
+    const caption = document.getElementById('caption')
+    document.getElementById('capNo').textContent = String(step).padStart(2, '0')
+    document.getElementById('capLabel').textContent = captions[step] || ''
+    document.getElementById('chapterLine').style.width = `${(step / 4) * 100}%`
+    caption.style.opacity = '1'
+    caption.animate([{ transform: 'translateY(4px)' }, { transform: 'translateY(0)' }], {
+      duration: 280,
+      easing: 'cubic-bezier(.22,1,.36,1)',
+    })
+  }
+</script>
+</body>
+</html>

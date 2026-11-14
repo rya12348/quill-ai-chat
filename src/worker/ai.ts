@@ -111,41 +111,54 @@ async function failure(response: Response): Promise<AiError> {
 
 /**
  * One reply, as text pieces. Streams token by token when the model supports
- * streaming, otherwise yields the whole reply once. `signal` aborts the
- * upstream request; the API's own deadline is 270 seconds.
+ * streaming, otherwise yields the whole reply once. A total deadline is only
+ * a backstop; an actively producing answer is allowed to finish.
  */
 export async function* complete(env: Env, input: { model: ModelId; messages: ChatMessage[]; signal?: AbortSignal }): AsyncGenerator<StreamPiece> {
   const capabilities = await availableModels(env)
   const stream = capabilities?.get(input.model)?.streaming ?? false
-  const timeout = AbortSignal.timeout(240_000)
-  const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout
+  const timeout = AbortSignal.timeout(600_000)
+  let lastPieceAt = Date.now()
+  const idle = new AbortController()
+  const idleTimer = setInterval(() => {
+    if (Date.now() - lastPieceAt > 120_000) idle.abort()
+  }, 500)
+  const deadline = AbortSignal.any([timeout, idle.signal])
+  const signal = input.signal ? AbortSignal.any([input.signal, deadline]) : deadline
 
-  let response: Response
   try {
-    response = await fetch(`${apiBase(env)}/chat/completions`, {
-      method: 'POST',
-      headers: headers(env),
-      body: JSON.stringify({ model: input.model, messages: input.messages, max_tokens: MAX_OUTPUT_TOKENS, stream }),
-      signal,
-    })
-  } catch (error) {
-    if (input.signal?.aborted) return
-    if (timeout.aborted) throw new AiError('timeout', 'The model took too long to answer.', 504)
-    throw new AiError('network', 'Could not reach the Freebuff API.', 503)
-  }
-  if (!response.ok) throw await failure(response)
+    let response: Response
+    try {
+      response = await fetch(`${apiBase(env)}/chat/completions`, {
+        method: 'POST',
+        headers: headers(env),
+        body: JSON.stringify({ model: input.model, messages: input.messages, max_tokens: MAX_OUTPUT_TOKENS, stream }),
+        signal,
+      })
+    } catch (error) {
+      if (input.signal?.aborted) return
+      if (deadline.aborted) throw new AiError('timeout', 'The model took too long to answer.', 504)
+      throw new AiError('network', 'Could not reach the Freebuff API.', 503)
+    }
+    if (!response.ok) throw await failure(response)
 
-  if (!stream) {
-    const body = (await response.json()) as { choices?: { message?: { content?: unknown } }[] }
-    const split = splitThinking(textFromContent(body.choices?.[0]?.message?.content))
-    if (split.reasoning) yield { type: 'reasoning', text: split.reasoning }
-    const text = split.text || split.reasoning
-    if (!text) throw new AiError('malformed', 'The model returned an empty reply.', 502)
-    yield { type: 'text', text }
-    return
-  }
+    if (!stream) {
+      const body = (await response.json()) as { choices?: { message?: { content?: unknown } }[] }
+      const split = splitThinking(textFromContent(body.choices?.[0]?.message?.content))
+      if (split.reasoning) yield { type: 'reasoning', text: split.reasoning }
+      const text = split.text || split.reasoning
+      if (!text) throw new AiError('malformed', 'The model returned an empty reply.', 502)
+      yield { type: 'text', text }
+      return
+    }
 
-  yield* readSse(response, { client: input.signal, timeout })
+    for await (const piece of readSse(response, { client: input.signal, timeout: deadline })) {
+      lastPieceAt = Date.now()
+      yield piece
+    }
+  } finally {
+    clearInterval(idleTimer)
+  }
 }
 
 /**
@@ -222,7 +235,10 @@ export async function* readSse(response: Response, signals: { client?: AbortSign
         try {
           chunk = JSON.parse(data)
         } catch {
-          throw new AiError('malformed', 'The reply was interrupted.', 502)
+          // One malformed chunk from a gateway must not discard an otherwise
+          // healthy stream. Keep reading; a truly empty answer is caught by the
+          // caller's blank-reply fallback.
+          continue
         }
         if (chunk.error) throw new AiError('unavailable', 'The model stopped unexpectedly.', 502)
         const delta = chunk.choices?.[0]?.delta

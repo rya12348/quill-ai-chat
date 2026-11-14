@@ -101,19 +101,18 @@ export function Review() {
   return (
     <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[760px] px-4 pb-16 pt-8 md:px-6 md:pt-10">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">Smart Review</p>
         <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-[28px] font-semibold tracking-[-0.02em]">
+            <h1 className="font-display text-[38px] font-medium leading-tight tracking-[-0.03em]">
               {deck ? data?.deckTitle ?? 'Deck review' : 'Review what’s due'}
             </h1>
-            <p className="mt-1 max-w-[500px] text-[13px] leading-relaxed text-muted">
-              A little every day beats cramming. Reveal each card, then tell Quill how it felt.
+            <p className="mt-1.5 max-w-[540px] text-[14.5px] leading-relaxed text-muted">
+              Reveal each card, then rate it Again, Hard, Good or Easy. The next date is scheduled for you.
             </p>
           </div>
-          <span className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[11.5px] font-medium text-muted">
+          <span className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 text-[12.5px] font-medium text-muted">
             <Brain className="size-3.5 text-accent" />
-            {due} due today
+            {deck ? `${total} in this deck` : `${due} due today`}
           </span>
         </div>
 
@@ -135,21 +134,21 @@ export function Review() {
               <Brain className="size-5" />
             </span>
             <h2 className="mt-3 text-[16px] font-semibold">{noSchedule ? 'Start with a flashcard deck' : 'All caught up'}</h2>
-            <p className="mx-auto mt-1 max-w-[380px] text-[12.5px] leading-relaxed text-muted">
+            <p className="mx-auto mt-1.5 max-w-[400px] text-[13.5px] leading-relaxed text-muted">
               {noSchedule
-                ? 'Open a study deck and choose Review once. Quill will schedule its cards for you.'
+                ? 'Open a study deck and choose Review once. Ink will schedule its cards for you.'
                 : hasOtherDue
                   ? 'This deck is caught up, but other decks have cards due today.'
                   : 'Nothing is due right now. Your cards will come back when they are ready for another pass.'}
             </p>
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
               {hasOtherDue && (
-                <Link to="/review" className="inline-flex h-9 items-center gap-1.5 rounded-control bg-fg px-3.5 text-[12.5px] font-medium text-bg transition-colors hover:bg-fg/90">
+                <Link to="/review" className="inline-flex h-10 items-center gap-1.5 rounded-control bg-accent px-4 text-[13.5px] font-medium text-bg shadow-[0_4px_14px_-6px_rgb(168_73_20/0.55)] transition-colors hover:bg-accent-strong">
                   Review all due
                   <ArrowUpRight className="size-3.5" />
                 </Link>
               )}
-              <Link to="/library" className="inline-flex h-9 items-center gap-1.5 rounded-control border border-line bg-surface px-3.5 text-[12.5px] font-medium text-muted transition-colors hover:text-fg">
+              <Link to="/library" className="inline-flex h-10 items-center gap-1.5 rounded-control border border-line bg-surface px-4 text-[13.5px] font-medium text-muted transition-colors hover:text-fg">
                 <ArrowLeft className="size-3.5" />
                 Back to Library
               </Link>
@@ -162,14 +161,14 @@ export function Review() {
             </span>
             <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">Session complete</p>
             <h2 className="mt-1 text-[24px] font-semibold tracking-[-0.02em]">Those cards are filed away.</h2>
-            <p className="mx-auto mt-2 max-w-[430px] text-[13px] leading-relaxed text-muted">
-              You reviewed {reviewed} card{reviewed === 1 ? '' : 's'}. Quill will bring each one back on its own schedule.
+            <p className="mx-auto mt-2 max-w-[450px] text-[14px] leading-relaxed text-muted">
+              You reviewed {reviewed} card{reviewed === 1 ? '' : 's'}. Ink will bring each one back on its own schedule.
             </p>
             <div className="mx-auto mt-6 grid max-w-[480px] grid-cols-2 gap-2 sm:grid-cols-4">
               {RATINGS.map((rating) => (
                 <div key={rating.id} className="rounded-tile border border-line bg-surface-2/50 px-3 py-3">
                   <p className={cx('text-[17px] font-semibold tabular-nums', rating.tone)}>{tally[rating.id]}</p>
-                  <p className="mt-0.5 text-[10.5px] font-medium text-faint">{rating.label}</p>
+                  <p className="mt-0.5 text-[12px] font-medium text-faint">{rating.label}</p>
                 </div>
               ))}
             </div>
@@ -182,12 +181,12 @@ export function Review() {
             </div>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
               {hasOtherDue && (
-                <Link to="/review" className="inline-flex h-9 items-center gap-1.5 rounded-control bg-fg px-3.5 text-[12.5px] font-medium text-bg transition-colors hover:bg-fg/90">
+                <Link to="/review" className="inline-flex h-10 items-center gap-1.5 rounded-control bg-accent px-4 text-[13.5px] font-medium text-bg shadow-[0_4px_14px_-6px_rgb(168_73_20/0.55)] transition-colors hover:bg-accent-strong">
                   Review more
                   <ArrowUpRight className="size-3.5" />
                 </Link>
               )}
-              <Link to="/library" className="inline-flex h-9 items-center gap-1.5 rounded-control border border-line bg-surface px-3.5 text-[12.5px] font-medium text-muted transition-colors hover:text-fg">
+              <Link to="/library" className="inline-flex h-10 items-center gap-1.5 rounded-control border border-line bg-surface px-4 text-[13.5px] font-medium text-muted transition-colors hover:text-fg">
                 <ArrowLeft className="size-3.5" />
                 Back to Library
               </Link>
@@ -221,16 +220,16 @@ export function Review() {
                 >
                   <div
                     className="relative mt-5 overflow-hidden rounded-[24px] border border-line bg-surface p-5 shadow-[0_24px_60px_-50px_rgb(27_26_23/0.5)] md:p-8"
-                    style={{ backgroundImage: 'radial-gradient(circle at top right, rgb(194 87 27 / 0.08), transparent 42%)' }}
+                    style={{ backgroundImage: 'radial-gradient(circle at top right, rgb(168 73 20 / 0.08), transparent 42%)' }}
                   >
                     <div className="relative flex flex-wrap items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-2 text-[9.5px] font-semibold uppercase tracking-[0.13em] text-faint">
-                        <span className="grid size-5 place-items-center rounded-full bg-surface-2 text-[9px] tabular-nums text-muted">
+                      <span className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-faint">
+                        <span className="grid size-5 place-items-center rounded-full bg-surface-2 text-[11.5px] tabular-nums text-muted">
                           {String(index + 1).padStart(2, '0')}
                         </span>
                         Question
                       </span>
-                      <span className="truncate text-[10.5px] text-faint">{card.conversationTitle}</span>
+                      <span className="truncate text-[12px] text-faint">{card.conversationTitle}</span>
                     </div>
                     <p className="relative mt-7 text-[21px] font-medium leading-snug tracking-[-0.01em] text-fg md:text-[25px]">{card.front}</p>
 
@@ -242,7 +241,7 @@ export function Review() {
                           transition={{ duration: reduceMotion ? 0 : 0.25, ease: [0.22, 1, 0.36, 1] }}
                           className="relative mt-7 rounded-[14px] border border-accent/20 bg-accent-soft/55 px-4 py-4"
                         >
-                          <p className="text-[9.5px] font-semibold uppercase tracking-[0.13em] text-accent">Answer</p>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-accent">Answer</p>
                           <p className="mt-2 break-words text-[14px] leading-relaxed text-fg">{card.back}</p>
                         </motion.div>
                       )}
@@ -252,11 +251,11 @@ export function Review() {
                       <button
                         type="button"
                         onClick={() => setRevealed(true)}
-                        className="relative mt-8 inline-flex h-10 items-center gap-2 rounded-control bg-fg px-4 text-[12.5px] font-medium text-bg transition-colors hover:bg-fg/90"
+                        className="relative mt-8 inline-flex h-11 items-center gap-2 rounded-control bg-accent px-4 text-[13.5px] font-medium text-bg shadow-[0_4px_14px_-6px_rgb(168_73_20/0.55)] transition-colors hover:bg-accent-strong"
                       >
                         <Eye className="size-4" />
                         Show answer
-                        <kbd className="ml-1 rounded-[5px] border border-bg/20 px-1.5 py-0.5 text-[9.5px] font-normal text-bg/55">Space</kbd>
+                        <kbd className="ml-1 rounded-[5px] border border-bg/20 px-1.5 py-0.5 text-[11.5px] font-normal text-bg">Space</kbd>
                       </button>
                     ) : null}
                   </div>
@@ -266,7 +265,7 @@ export function Review() {
 
             {revealed ? (
               <div className="mt-4">
-                <div className="flex items-center justify-between gap-3 text-[10.5px] uppercase tracking-[0.1em] text-faint">
+                <div className="flex items-center justify-between gap-3 text-[11.5px] uppercase tracking-[0.1em] text-faint">
                   <span>How well did you know it?</span>
                   <span>1–4</span>
                 </div>
@@ -284,10 +283,10 @@ export function Review() {
                     >
                       <span className="flex w-full items-center justify-between gap-2">
                         <span className="text-[12.5px] font-semibold text-fg">{rating.label}</span>
-                        <kbd className="rounded-[5px] border border-line px-1 text-[9.5px] font-normal text-faint">{ratingIndex + 1}</kbd>
+                        <kbd className="rounded-[5px] border border-line px-1 text-[11px] font-normal text-faint">{ratingIndex + 1}</kbd>
                       </span>
-                      <span className="mt-1 text-[10.5px] text-muted">{rating.hint}</span>
-                      <span className={cx('mt-auto pt-2 text-[10.5px] font-medium', rating.tone)}>
+                      <span className="mt-1 text-[11.5px] text-muted">{rating.hint}</span>
+                      <span className={cx('mt-auto pt-2 text-[11.5px] font-medium', rating.tone)}>
                         {previews ? intervalLabel(previews[rating.id]) : '—'}
                       </span>
                     </button>
@@ -295,13 +294,13 @@ export function Review() {
                 </div>
               </div>
             ) : (
-              <p className="mt-3 text-center text-[10.5px] text-faint">Tip: press Space to reveal, then 1–4 to rate.</p>
+              <p className="mt-3 text-center text-[11.5px] text-faint">Tip: press Space to reveal, then 1–4 to rate.</p>
             )}
           </div>
         )}
 
         {finished && (
-          <p className="mt-4 text-center text-[10.5px] text-faint">
+          <p className="mt-4 text-center text-[11.5px] text-faint">
             <Check className="mr-1 inline size-3 text-success" />
             Progress saves as you go.
           </p>

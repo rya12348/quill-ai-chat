@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live benchmark for Quill's free Team mode.
+// Live benchmark for Stet's free Team mode.
 //
 // It talks to the running app's real /api/chat SSE endpoint, records the
 // conversation id from the start event, deletes that conversation immediately,
@@ -21,7 +21,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const BASE = (process.env.QUILL_BASE_URL || 'http://127.0.0.1:5180').replace(/\/$/, '')
+const BASE = (process.env.STET_BASE_URL || 'http://127.0.0.1:5180').replace(/\/$/, '')
 const ORIGIN = new URL(BASE).origin
 const BENCH_DIR = path.join(ROOT, 'bench')
 const STATE_PATH = path.join(BENCH_DIR, 'inflight.json')
@@ -329,7 +329,7 @@ function extractPython(answer, functionName) {
 }
 
 function runPython(code, tests) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'quill-bench-'))
+  const dir = mkdtempSync(path.join(tmpdir(), 'stet-bench-'))
   const file = path.join(dir, 'solution.py')
   try {
     writeFileSync(file, `${code}\n\n${tests}\n`)
@@ -355,7 +355,7 @@ function runPython(code, tests) {
 }
 
 const C1_TESTS = `
-def _quill_case(values, expected):
+def _stet_case(values, expected):
     original = list(values)
     got = two_largest(list(values))
     if expected is None:
@@ -365,24 +365,24 @@ def _quill_case(values, expected):
         assert list(got) == expected, f"expected {expected!r} for {values!r}, got {got!r}"
     assert values == original, f"mutated input for {values!r}"
 
-_quill_case([], None)
-_quill_case([42], None)
-_quill_case([5, 5, 1], [5, 5])
-_quill_case([7, 7, 3], [7, 7])
-_quill_case([3, 1, 2], [3, 2])
-_quill_case([-1, -5, -3], [-1, -3])
-_quill_case([10, 10, 9, 9], [10, 10])
+_stet_case([], None)
+_stet_case([42], None)
+_stet_case([5, 5, 1], [5, 5])
+_stet_case([7, 7, 3], [7, 7])
+_stet_case([3, 1, 2], [3, 2])
+_stet_case([-1, -5, -3], [-1, -3])
+_stet_case([10, 10, 9, 9], [10, 10])
 print("HIDDEN_OK")
 `
 
 const C2_TESTS = `
-def _quill_close(a, b):
+def _stet_close(a, b):
     assert abs(a - b) < 1e-9, f"expected {b}, got {a}"
 
 assert average([]) is None, "empty list must return None"
-_quill_close(average([2, 4, 6]), 4)
-_quill_close(average([-1, 1]), 0)
-_quill_close(average([5]), 5)
+_stet_close(average([2, 4, 6]), 4)
+_stet_close(average([-1, 1]), 0)
+_stet_close(average([5]), 5)
 print("HIDDEN_OK")
 `
 

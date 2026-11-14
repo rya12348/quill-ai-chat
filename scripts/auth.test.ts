@@ -3,10 +3,23 @@ import test from 'node:test'
 
 import { isSameOriginRequest } from '@freebuff/auth'
 
-import { allowsMutation, analyzeEnabledFor, appOrigin, authMode, buildEnabledFor, currentUser, isCodespacesRequest, researchEnabledFor } from '../src/worker/auth'
+import { allowsMutation, analyzeEnabledFor, appOrigin, authMode, buildEnabledFor, currentUser, guestUser, isCodespacesRequest, isGuestId, isGuestUser, researchEnabledFor } from '../src/worker/auth'
 import type { Env } from '../src/worker/env'
 
 const development = {} as Env
+
+test('guest sessions get an opaque browser-scoped owner id', () => {
+  const id = '2f1c3d5b-9e4a-4b7c-8d1e-6a2b3c4d5e6f'
+  assert.equal(isGuestId(id), true)
+  assert.equal(isGuestId(`guest:${id}`), false)
+  assert.equal(isGuestId(undefined), false)
+
+  const user = guestUser(id)
+  assert.equal(user.sub, `guest:${id}`)
+  assert.equal(user.name, 'Guest')
+  assert.equal(isGuestUser(user), true)
+  assert.equal(isGuestUser({ sub: 'freebuff-user', name: 'Real', email_verified: true }), false)
+})
 
 const codespacesRequest = () =>
   new Request('http://127.0.0.1:5180/api/chat', {
@@ -24,7 +37,7 @@ test('auth mode accepts a Codespaces public host', () => {
 })
 
 test('auth mode accepts a forwarded Codespaces host', () => {
-  const request = new Request('http://quill.internal:5180/api/me', {
+  const request = new Request('http://stet.internal:5180/api/me', {
     headers: {
       'x-forwarded-host': 'bright-otter-5180.app.github.dev',
       'x-forwarded-proto': 'https',
@@ -34,13 +47,13 @@ test('auth mode accepts a forwarded Codespaces host', () => {
 })
 
 test('auth mode stays off on an ordinary public host', () => {
-  assert.equal(authMode(development, new Request('https://quill.example/api/me')), 'off')
+  assert.equal(authMode(development, new Request('https://stet.example/api/me')), 'off')
 })
 
 test('auth mode still requires sign in when Freebuff auth is configured', () => {
   const request = new Request('https://bright-otter-5180.app.github.dev/api/me')
   assert.equal(
-    authMode({ FREEBUFF_CLIENT_ID: 'client-id', APP_ORIGIN: 'https://quill.example' } as Env, request),
+    authMode({ FREEBUFF_CLIENT_ID: 'client-id', APP_ORIGIN: 'https://stet.example' } as Env, request),
     'freebuff',
   )
 })
@@ -60,7 +73,7 @@ test('all free-only modes default on for a Codespaces development origin', () =>
   assert.equal(analyzeEnabledFor(development, codespaces), true)
   assert.equal(buildEnabledFor(development, codespaces), true)
 
-  const ordinary = new Request('https://quill.example/api/me')
+  const ordinary = new Request('https://stet.example/api/me')
   assert.equal(researchEnabledFor(development, ordinary), false)
   assert.equal(analyzeEnabledFor(development, ordinary), false)
   assert.equal(buildEnabledFor(development, ordinary), false)
@@ -104,7 +117,7 @@ test('keeps a configured public APP_ORIGIN authoritative', () => {
       'x-forwarded-proto': 'https',
     },
   })
-  assert.equal(appOrigin({ APP_ORIGIN: 'https://quill.example' } as Env, request), 'https://quill.example')
+  assert.equal(appOrigin({ APP_ORIGIN: 'https://stet.example' } as Env, request), 'https://stet.example')
 })
 
 test('replaces a loopback APP_ORIGIN with the Codespaces origin', () => {
@@ -125,8 +138,8 @@ test('does not use forwarding when Sign in with Freebuff is configured', () => {
     },
   })
   assert.equal(
-    appOrigin({ FREEBUFF_CLIENT_ID: 'client-id', APP_ORIGIN: 'https://quill.example' } as Env, request),
-    'https://quill.example',
+    appOrigin({ FREEBUFF_CLIENT_ID: 'client-id', APP_ORIGIN: 'https://stet.example' } as Env, request),
+    'https://stet.example',
   )
 })
 
@@ -134,12 +147,12 @@ test('enables Build automatically on a Codespaces development origin', () => {
   const request = new Request('https://bright-otter-5180.app.github.dev/api/me')
   assert.equal(isCodespacesRequest(development, request), true)
   assert.equal(buildEnabledFor(development, request), true)
-  assert.equal(buildEnabledFor({ BUILD_ENABLED: '1' } as Env, new Request('https://quill.example/api/me')), true)
+  assert.equal(buildEnabledFor({ BUILD_ENABLED: '1' } as Env, new Request('https://stet.example/api/me')), true)
   assert.equal(buildEnabledFor({ BUILD_ENABLED: '0' } as Env, request), false)
 })
 
 test('does not enable Build automatically on an ordinary origin', () => {
-  assert.equal(buildEnabledFor(development, new Request('https://quill.example/api/me')), false)
+  assert.equal(buildEnabledFor(development, new Request('https://stet.example/api/me')), false)
 })
 
 test('accepts a proxied development mutation marked same-origin by the browser', () => {

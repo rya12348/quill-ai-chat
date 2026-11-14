@@ -9,7 +9,7 @@
 
 ## 1. The paid thing we are giving away
 
-Deep research is normally a paid-tier feature: Perplexity Pro, ChatGPT Plus and Gemini Advanced all put their best multi-source reports behind roughly $20/month. Quill already has the ingredients — web search, free model lanes, Proof, history, sharing and export — so the marginal feature is mostly orchestration, not a new paid service.
+Deep research is normally a paid-tier feature: Perplexity Pro, ChatGPT Plus and Gemini Advanced all put their best multi-source reports behind roughly $20/month. Stet already has the ingredients — web search, free model lanes, Proof, history, sharing and export — so the marginal feature is mostly orchestration, not a new paid service.
 
 The promise is not "another chatbot." It is:
 
@@ -17,7 +17,7 @@ The promise is not "another chatbot." It is:
 
 The differentiator is not "free research"; free research is becoming common. It is **free research with receipts**: every key finding points to a source that was actually opened, and unsupported claims are visibly marked.
 
-This also gives Quill a homepage sentence that a chat box cannot:
+This also gives Stet a homepage sentence that a chat box cannot:
 
 > **Free research reports with sources. The $20/month workflow, without the subscription.**
 
@@ -189,7 +189,7 @@ Source pages and snippets are **untrusted data**, never instructions.
 
 - Ignore any instruction found in a page, snippet, title or metadata. Only extract factual spans.
 - Allow `http:` and `https:` only. Block `localhost`, `.local`, `0.0.0.0`, `[::1]`, private/link-local/metadata IP ranges, and credentials in URLs. Revalidate every redirect.
-- Send no cookies, authorization headers or user identifiers to source sites. Use the existing Quill user agent.
+- Send no cookies, authorization headers or user identifiers to source sites. Use the existing Stet user agent.
 - Cap response size and time. Treat non-HTML content as a source only if the snippet is usable.
 - Store at most 300-character quotes and the extracted snippet, never the full page. Link to the original.
 - The report is owner-scoped until the person explicitly shares it. Deleting the conversation or account removes `message_research`, sources and `research_runs` rows that belong to it.
@@ -203,7 +203,7 @@ Prompt injection in a source must not be able to change the report's instruction
 
 The existing share page is the v1 distribution surface:
 
-- Shared reports show `Research · 6 sources · citations checked`, the claim receipts and a `Research your own question` link back to Quill.
+- Shared reports show `Research · 6 sources · citations checked`, the claim receipts and a `Research your own question` link back to Stet.
 - The share page already is read-only and token-gated; do not index private chats. Public indexing of shared reports is a phase-2 decision, not a default.
 - A report-only Markdown download makes the output portable to a doc, email or client update.
 - The homepage and empty state should lead with the artifact, not the chat box: an example report with visible sources, then the free/paid comparison.

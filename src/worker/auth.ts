@@ -1,5 +1,6 @@
 import { createFreebuffAuth, isSameOriginRequest } from '@freebuff/auth'
 import type { FreebuffAuth, FreebuffUser } from '@freebuff/auth'
+import { getCookie } from 'hono/cookie'
 import type { Context, MiddlewareHandler } from 'hono'
 
 import type { AppContext, Env } from './env'
@@ -64,14 +65,150 @@ function codespacesDevelopment(env: Env, request: Request): boolean {
 
 // One development identity, honoured only on loopback or a GitHub Codespaces
 // preview origin. That includes a Codespace carrying the local loopback auth
-// example, but never a normal deployed origin or a public APP_ORIGIN. This
-// matters here: every message spends the owner's API credits, so a deployed
-// app without Sign in with Freebuff answers nobody.
+// example, but never a normal deployed origin or a public APP_ORIGIN.
 export const DEV_USER: FreebuffUser = {
   sub: 'dev-user',
   name: 'Alex Morgan',
   email: 'alex@example.com',
   email_verified: true,
+}
+
+/** Cookie that scopes a signed-out visitor to one anonymous browser session. */
+export const GUEST_COOKIE = 'stet_guest'
+
+/** First-party email/password session cookie. */
+export const ACCOUNT_COOKIE = 'stet_account'
+const ACCOUNT_SESSION_TTL = 60 * 60 * 24 * 30
+// workerd caps PBKDF2 at 100,000 iterations, so use the strongest supported count.
+const PBKDF2_ITERATIONS = 100_000
+
+const GUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+export function isGuestId(value: string | undefined): value is string {
+  return Boolean(value && GUEST_ID.test(value))
+}
+
+export function guestUser(id: string): FreebuffUser {
+  return { sub: `guest:${id}`, name: 'Guest', email_verified: false }
+}
+
+export function isGuestUser(user: FreebuffUser): boolean {
+  return user.sub.startsWith('guest:') && isGuestId(user.sub.slice('guest:'.length))
+}
+
+export function isAccountUser(user: FreebuffUser): boolean {
+  return user.sub.startsWith('account:')
+}
+
+function cookieValue(header: string | undefined, name: string): string | undefined {
+  for (const part of (header ?? '').split(';')) {
+    const separator = part.indexOf('=')
+    if (separator < 0) continue
+    if (part.slice(0, separator).trim() === name) return part.slice(separator + 1).trim()
+  }
+  return undefined
+}
+
+function toBase64Url(bytes: Uint8Array): string {
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function fromBase64Url(value: string): Uint8Array {
+  const binary = atob(value.replace(/-/g, '+').replace(/_/g, '/'))
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0))
+}
+
+async function tokenHash(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+  return toBase64Url(new Uint8Array(digest))
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.length !== right.length) return false
+  let difference = 0
+  for (let index = 0; index < left.length; index += 1) difference |= left[index] ^ right[index]
+  return difference === 0
+}
+
+/** PBKDF2 password hash; the plaintext password is never stored or logged. */
+export async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16))
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits'])
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    key,
+    256,
+  )
+  return `pbkdf2$${PBKDF2_ITERATIONS}$${toBase64Url(salt)}$${toBase64Url(new Uint8Array(bits))}`
+}
+
+export async function verifyPassword(password: string, encoded: string): Promise<boolean> {
+  const [scheme, iterationsRaw, saltRaw, hashRaw] = encoded.split('$')
+  if (scheme !== 'pbkdf2' || !iterationsRaw || !saltRaw || !hashRaw) return false
+  const iterations = Number(iterationsRaw)
+  if (!Number.isInteger(iterations) || iterations < 10_000 || iterations > 500_000) return false
+  try {
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits'])
+    const decodedSalt = fromBase64Url(saltRaw)
+    const salt = new Uint8Array(decodedSalt.length)
+    salt.set(decodedSalt)
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+      key,
+      256,
+    )
+    return sameBytes(new Uint8Array(bits), fromBase64Url(hashRaw))
+  } catch {
+    return false
+  }
+}
+
+/** Create a random session and return the token that goes in the browser cookie. */
+export async function createAccountSession(db: D1Database, userId: string): Promise<string> {
+  const token = toBase64Url(crypto.getRandomValues(new Uint8Array(32)))
+  const createdAt = Date.now()
+  await db
+    .prepare(`INSERT INTO auth_sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`)
+    .bind(await tokenHash(token), userId, createdAt, createdAt + ACCOUNT_SESSION_TTL * 1_000)
+    .run()
+  // Keep the session table from growing forever. This is housekeeping; a
+  // failed cleanup must never turn a successful sign-in into an error.
+  if (Math.random() < 0.02) {
+    await db
+      .prepare('DELETE FROM auth_sessions WHERE expires_at < ?')
+      .bind(createdAt)
+      .run()
+      .catch(() => undefined)
+  }
+  return token
+}
+
+export async function deleteAccountSession(db: D1Database, token: string): Promise<void> {
+  await db.prepare(`DELETE FROM auth_sessions WHERE token_hash = ?`).bind(await tokenHash(token)).run()
+}
+
+/** Resolve an email/password session cookie to the same user shape as the app. */
+export async function accountUser(db: D1Database, request: Request): Promise<FreebuffUser | null> {
+  const token = cookieValue(request.headers.get('cookie') ?? undefined, ACCOUNT_COOKIE)
+  if (!token) return null
+  const row = await db
+    .prepare(
+      `SELECT u.id, u.email, u.name
+         FROM auth_sessions s
+         JOIN auth_users u ON u.id = s.user_id
+        WHERE s.token_hash = ? AND s.expires_at > ?`,
+    )
+    .bind(await tokenHash(token), Date.now())
+    .first<{ id: string; email: string; name: string }>()
+  if (!row) return null
+  return {
+    sub: `account:${row.id}`,
+    name: row.name || row.email.split('@')[0] || row.email,
+    email: row.email,
+    email_verified: true,
+  }
 }
 
 export function isLoopback(request: Request): boolean {
@@ -181,10 +318,28 @@ export const requireUser: MiddlewareHandler<AppContext> = async (c, next) => {
   if (request.method !== 'GET' && request.method !== 'HEAD' && !allowsMutation(c.env, request)) {
     return c.json({ error: 'Cross-origin request refused.' }, 403)
   }
+  // A first-party email/password session takes precedence over the hosted
+  // identity and over an anonymous guest cookie. requireDb runs first, so the
+  // auth tables are already created here.
+  const account = await accountUser(c.get('db'), request)
+  if (account) {
+    c.set('user', account)
+    await next()
+    return
+  }
   const user = await currentUser(c.env, request)
-  if (!user) return c.json({ error: 'Sign in required.' }, 401)
-  c.set('user', user)
-  await next()
+  if (user) {
+    c.set('user', user)
+    await next()
+    return
+  }
+  const guestId = getCookie(c, GUEST_COOKIE)
+  if (isGuestId(guestId)) {
+    c.set('user', guestUser(guestId))
+    await next()
+    return
+  }
+  return c.json({ error: 'Sign in required.' }, 401)
 }
 
 export function privateJson<T>(c: Context<AppContext>, body: T, status = 200) {

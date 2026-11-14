@@ -4,29 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#f7f6f2" />
-    <script>
-      (() => {
-        try {
-          const saved = localStorage.getItem('theme')
-          const dark = saved === 'dark' || (saved !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-          document.documentElement.classList.toggle('dark', dark)
-          document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
-          document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#141310' : '#f7f6f2')
-        } catch {
-          /* keep the light default when storage is unavailable */
-        }
-      })()
-    </script>
-    <title>Quill</title>
-    <meta name="description" content="A thoughtful assistant for everyday questions." />
+    <meta name="theme-color" content="#f4efe4" />
+    <script src="/theme-init.js"></script>
+    <title>Ink</title>
+    <meta name="description" content="A practical workspace for writing, research and building pages." />
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="Quill" />
+    <meta name="apple-mobile-web-app-title" content="Ink" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   </head>
   <body>

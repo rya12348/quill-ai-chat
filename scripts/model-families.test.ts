@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import type { Env } from '../src/worker/env'
+import { PICKER_MODEL_DESCRIPTIONS, PICKER_MODEL_NAMES } from '../src/shared/config'
 import { familyForLane, laneKey, laneStrength, laneSupportsVision, pickModelFamilies, pickPickerFamilies, publicLanes } from '../src/worker/public-ai'
 
 const lane = (model: string, label: string, url = 'https://free.example/v1/chat/completions') => ({
@@ -56,10 +57,37 @@ test('one row per family, represented by its strongest lane', () => {
   assert.equal(picks[1]?.lane.model, 'deepseek-ai/deepseek-v4.1-flash')
 })
 
+test('the picker uses the five short model names in order', () => {
+  assert.deepEqual([...PICKER_MODEL_NAMES], ['Sable', 'Quill', 'Stride', 'Ink', 'Prism'])
+  assert.equal(new Set(PICKER_MODEL_DESCRIPTIONS).size, PICKER_MODEL_NAMES.length)
+  assert.ok(PICKER_MODEL_DESCRIPTIONS.every((description) => description.endsWith('.')))
+})
+
 test('the model picker exposes five families at most', () => {
   const picks = pickPickerFamilies(publicLanes({} as unknown as Env))
   assert.equal(picks.length, 5)
   assert.equal(new Set(picks.map((pick) => pick.family)).size, picks.length)
+})
+
+test('DeepSeek 4.1 is pinned into the shortlist when its lane is configured', () => {
+  const env = { DEEPSEEK_API_KEY: 'deepseek-key' } as unknown as Env
+  const lanes = publicLanes(env)
+  const deepseek = lanes.find((lane) => lane.model === 'deepseek-flash')
+  assert.ok(deepseek)
+  assert.equal(deepseek.label, 'DeepSeek V4.1 Flash')
+  assert.equal(deepseek.key, 'deepseek-key')
+
+  const crowded = [
+    lane('stepfun-ai/step-5-preview', 'Step 5 Preview (NVIDIA)'),
+    lane('claude-sonnet-5', 'Claude Sonnet 5'),
+    lane('gemini-4', 'Gemini 4'),
+    lane('qwen3.8-max', 'Qwen 3.8 Max'),
+    lane('kimi-k3', 'Kimi K3'),
+    lane('deepseek-flash', 'DeepSeek V4.1 Flash', 'https://api.deepseek.com/chat/completions'),
+  ]
+  const picks = pickPickerFamilies(crowded)
+  assert.equal(picks.length, 5)
+  assert.ok(picks.some((pick) => pick.lane.model === 'deepseek-flash'))
 })
 
 test('the added keyless lanes are wired into the free chain', () => {

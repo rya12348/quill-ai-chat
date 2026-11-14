@@ -1,27 +1,29 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { Menu as MenuIcon, FileText, Library as LibraryIcon, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, X } from 'lucide-react'
+import { Menu as MenuIcon, Bot, Eye, FileText, Globe2, Library as LibraryIcon, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PenLine, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, Users, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 
 import { BRAND } from '../../shared/config'
 import type { Conversation } from '../../shared/types'
+import { isLocalTunnelHost } from '../../shared/traffic'
 import { useConversations, useDeleteConversation, useMe, useRenameConversation } from '../lib/api'
 import { ProjectNav } from './ProjectNav'
 import { cx } from '../lib/cx'
 import { DAY_GROUPS, dayGroup } from '../lib/format'
 import { useTurn } from '../lib/turn'
+import { InkThinking } from './InkThinking'
 import { Avatar, Button, ConfirmDialog, Dialog, Input, Menu, useToast } from './ui'
 
 export function Logo({ className, size = 28 }: { className?: string; size?: number }) {
   return (
-    <Link to="/" className={cx('inline-flex items-center gap-2.5 text-[15px] font-semibold tracking-tight', className)}>
+    <Link to="/" className={cx('font-display inline-flex items-center gap-2.5 text-[20px] font-semibold tracking-[-0.02em]', className)}>
       <Mark size={size} />
       {BRAND}
     </Link>
   )
 }
 
-/** The brand mark: a quill nib. */
+/** The brand mark: an ink nib. */
 export function Mark({ size = 28, className }: { size?: number; className?: string }) {
   return (
     <span className={cx('grid shrink-0 place-items-center rounded-[9px] bg-fg text-bg', className)} style={{ width: size, height: size }} aria-hidden>
@@ -41,7 +43,7 @@ export function Shell() {
   // Remembered between visits; the drawer is separate and always starts closed.
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar') === 'closed')
   const location = useLocation()
-  const isChatSurface = location.pathname === '/' || location.pathname.startsWith('/c/')
+  const isChatSurface = location.pathname === '/' || location.pathname === '/room' || location.pathname.startsWith('/c/')
   useEffect(() => setDrawer(false), [location.pathname, location.search])
   useEffect(() => {
     localStorage.setItem('sidebar', collapsed ? 'closed' : 'open')
@@ -53,9 +55,29 @@ export function Shell() {
           <Button variant="ghost" size="icon" aria-label="Show sidebar" title="Show sidebar" onClick={() => setCollapsed(false)}>
             <PanelLeftOpen />
           </Button>
+          <NavLink
+            to="/buffy"
+            aria-label="Buffy"
+            title="Buffy"
+            className={({ isActive }) =>
+              cx('mt-2 grid size-9 place-items-center rounded-tile transition-colors', isActive ? 'bg-surface text-fg shadow-card' : 'text-muted hover:bg-surface hover:text-fg')
+            }
+          >
+            <Bot className="size-4" />
+          </NavLink>
+          <NavLink
+            to="/browser"
+            aria-label="Browser"
+            title="Browser"
+            className={({ isActive }) =>
+              cx('mt-2 grid size-9 place-items-center rounded-tile transition-colors', isActive ? 'bg-surface text-fg shadow-card' : 'text-muted hover:bg-surface hover:text-fg')
+            }
+          >
+            <Monitor className="size-4" />
+          </NavLink>
         </aside>
       ) : (
-        <aside className="hidden w-[264px] shrink-0 flex-col border-r border-line bg-bg md:flex">
+        <aside className="hidden w-[276px] shrink-0 flex-col border-r border-line bg-bg md:flex">
           <Sidebar onCollapse={() => setCollapsed(true)} />
         </aside>
       )}
@@ -63,7 +85,7 @@ export function Shell() {
         {drawer && (
           <motion.div key="drawer" className="fixed inset-0 z-40 bg-black/40 md:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }} onMouseDown={() => setDrawer(false)}>
             <motion.aside
-              className="absolute inset-y-0 left-0 flex w-[284px] flex-col bg-bg shadow-dialog"
+              className="absolute inset-y-0 left-0 flex w-[292px] flex-col bg-bg shadow-dialog"
               initial={{ x: -40, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: -40, opacity: 0 }}
@@ -83,6 +105,11 @@ export function Shell() {
                 <MenuIcon />
               </Button>
               <Logo size={24} />
+              <div className="ml-auto flex items-center gap-1">
+                <Link to="/browser" aria-label="Open browser" title="Browser" className="grid size-9 place-items-center rounded-tile text-muted transition-colors hover:bg-surface-2 hover:text-fg">
+                  <Monitor className="size-5" />
+                </Link>
+              </div>
             </header>
           )}
           <Outlet />
@@ -98,6 +125,7 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
   const turn = useTurn()
   const [query, setQuery] = useState('')
   const [params] = useSearchParams()
+  const showTraffic = Boolean(me && (me.capabilities.auth !== 'guest' || isLocalTunnelHost(window.location.hostname)))
   const selectedProject = params.get('project')
   const allItems = data?.items ?? []
   const needle = query.trim().toLowerCase()
@@ -128,46 +156,110 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
           to={selectedProject ? `/?project=${encodeURIComponent(selectedProject)}` : '/'}
           end
           className={({ isActive }) =>
-            cx('flex h-9 items-center gap-2 rounded-control px-3 text-[13.5px] font-medium transition-colors', isActive && !turn ? 'bg-surface text-fg shadow-card' : 'text-muted hover:bg-surface hover:text-fg')
+            cx('relative flex h-10 items-center gap-2.5 rounded-control px-3 text-[15px] font-medium transition-colors', isActive && !turn ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2.5 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
           }
         >
-          <Plus className="size-4" />
+          <Plus className="size-[17px]" />
           New chat
         </NavLink>
         <NavLink
           to="/library"
           className={({ isActive }) =>
-            cx('mt-1 flex h-9 items-center gap-2 rounded-control px-3 text-[13.5px] font-medium transition-colors', isActive ? 'bg-surface text-fg shadow-card' : 'text-muted hover:bg-surface hover:text-fg')
+            cx('relative mt-0.5 flex h-10 items-center gap-2.5 rounded-control px-3 text-[15px] font-medium transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2.5 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
           }
         >
-          <LibraryIcon className="size-4" />
+          <LibraryIcon className="size-[17px]" />
           Library
+        </NavLink>
+
+        <div className="mt-5 flex items-center gap-2 px-3 pb-1.5">
+          <span className="text-[12px] font-semibold uppercase tracking-[0.14em] text-faint">Tools</span>
+          <span className="h-px flex-1 bg-line" />
+        </div>
+
+        <NavLink
+          to="/buffy"
+          className={({ isActive }) =>
+            cx('relative flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
+          }
+        >
+          <Bot className="size-4" />
+          Buffy
+        </NavLink>
+        <NavLink
+          to="/humanizer"
+          className={({ isActive }) =>
+            cx('relative flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
+          }
+        >
+          <PenLine className="size-4" />
+          Humanizer
+        </NavLink>
+        <NavLink
+          to="/browser"
+          className={({ isActive }) =>
+            cx('relative mt-0.5 flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
+          }
+        >
+          <Monitor className="size-4" />
+          Browser
+        </NavLink>
+        {showTraffic && (
+          <NavLink
+            to="/analytics"
+            className={({ isActive }) =>
+              cx('relative mt-0.5 flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
+            }
+          >
+            <Eye className="size-4" />
+            Traffic
+          </NavLink>
+        )}
+        <NavLink
+          to="/room"
+          className={({ isActive }) =>
+            cx('relative mt-0.5 flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
+          }
+        >
+          <Users className="size-4" />
+          Chat
+        </NavLink>
+        <NavLink
+          to="/proxy"
+          className={({ isActive }) =>
+            cx('relative mt-0.5 flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
+          }
+        >
+          <Globe2 className="size-4" />
+          Google
         </NavLink>
         <NavLink
           to="/tools/pdf"
           className={({ isActive }) =>
-            cx('mt-1 flex h-9 items-center gap-2 rounded-control px-3 text-[13.5px] font-medium transition-colors', isActive ? 'bg-surface text-fg shadow-card' : 'text-muted hover:bg-surface hover:text-fg')
+            cx('relative mt-0.5 flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
           }
         >
           <FileText className="size-4" />
           PDF Studio
         </NavLink>
-        <label className="relative mt-2 block">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-faint" />
+      </div>
+      <ProjectNav selectedId={selectedProject} totalChats={allItems.length} />
+      <div className="px-3 pb-2 pt-1">
+        <label className="relative block">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search chats"
             aria-label="Search chats"
-            className="h-8 w-full rounded-control border border-line bg-surface pl-8 pr-2 text-[13px] text-fg placeholder:text-faint focus:border-line-strong focus:outline-none"
+            className="h-9 w-full rounded-control border border-line bg-surface pl-9 pr-3 text-[14px] text-fg placeholder:text-faint transition-[border-color,box-shadow] focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/15"
           />
         </label>
       </div>
-      <ProjectNav selectedId={selectedProject} totalChats={allItems.length} />
-      <nav className="scrollbar-thin mt-1 flex-1 overflow-y-auto px-3 pb-3" aria-label="Chats">
+      <nav className="scrollbar-thin flex-1 overflow-y-auto px-3 pb-3" aria-label="Chats">
         {groups.map(({ group, items }) => (
           <section key={group} className="mb-4">
-            <h2 className="px-3 pb-1.5 pt-1 text-[11.5px] font-medium text-faint">{group}</h2>
+            <h2 className="px-3 pb-1.5 pt-1 text-[12.5px] font-medium text-faint">{group}</h2>
             <ul className="space-y-0.5">
               {items.map((conversation) => (
                 <ConversationRow key={conversation.id} conversation={conversation} streaming={turn?.conversationId === conversation.id} />
@@ -182,15 +274,15 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
         )}
       </nav>
       <div className="border-t border-line p-3">
-        <NavLink to="/settings" className={({ isActive }) => cx('flex h-11 items-center gap-3 rounded-control px-2 transition-colors', isActive ? 'bg-surface shadow-card' : 'hover:bg-surface')}>
-          {me && <Avatar name={me.user.name ?? me.user.email ?? 'You'} src={me.user.picture} size={28} />}
+        <NavLink to="/settings" className={({ isActive }) => cx('flex h-12 items-center gap-3 rounded-control px-2 transition-colors', isActive ? 'bg-surface shadow-card' : 'hover:bg-surface')}>
+          {me && <Avatar name={me.user.name ?? me.user.email ?? 'You'} src={me.user.picture} size={30} />}
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13.5px] font-medium">{me?.user.name ?? 'Account'}</span>
-            <span className="block truncate text-[12px] text-faint">
+            <span className="block truncate text-[14.5px] font-medium">{me?.user.name ?? 'Account'}</span>
+            <span className="block truncate text-[13px] text-faint">
               {me ? `${me.usage.used} of ${me.usage.limit} replies today` : ''}
             </span>
           </span>
-          <SettingsIcon className="size-4 text-faint" />
+          <SettingsIcon className="size-[16px] text-faint" />
         </NavLink>
       </div>
     </>
@@ -214,10 +306,10 @@ function ConversationRow({ conversation, streaming }: { conversation: Conversati
     <li className="group relative">
       <NavLink
         to={href}
-        className={cx('flex h-9 items-center gap-2 rounded-control pl-3 pr-9 text-[13.5px] transition-colors', active ? 'bg-surface text-fg shadow-card' : 'text-muted hover:bg-surface hover:text-fg')}
+        className={cx('relative flex h-9 items-center gap-2 rounded-control pl-3 pr-9 text-[14px] transition-colors', active ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')}
       >
         <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
-        {streaming && <span className="round size-1.5 shrink-0 animate-pulse rounded-full bg-accent" />}
+        {streaming && <InkThinking compact />}
       </NavLink>
       <span className={cx('absolute right-1 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100', active && 'opacity-100')}>
         <Menu

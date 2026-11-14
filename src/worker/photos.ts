@@ -27,7 +27,7 @@ export type CommonsPage = { title?: string; imageinfo?: CommonsInfo[] }
 type CommonsResponse = { query?: { pages?: CommonsPage[] } }
 
 // Wikimedia asks API clients to identify themselves; a browser UA is refused.
-const USER_AGENT = 'QuillBuild/1.0 (generated-page image search; https://freebuff.com)'
+const USER_AGENT = 'InkBuild/1.0 (generated-page image search; https://freebuff.com)'
 const COMMONS_API = 'https://commons.wikimedia.org/w/api.php'
 
 const strip = (value?: string) =>
@@ -105,19 +105,49 @@ const NOISE = new Set([
 ])
 
 /**
- * The subject of the request, not its web-page words: "a neighborhood bakery
- * called Crumb & Co" searches for "neighborhood bakery".
+ * Real chains whose shopfronts Commons returns for generic coffee searches.
+ * A page for a fictional roaster must not use another company's storefront as
+ * its own, even when the file name mentions coffee.
+ */
+const COMMERCIAL_CHAIN =
+  /\b(?:peet'?s|starbucks|dunkin|tim hortons|costa coffee|caribou coffee|blue bottle|lavazza|illy|nespresso|folgers|maxwell house)\b/i
+
+/**
+ * The subject of the request, not its web-page words: "a landing page for
+ * Ember & Oak, a small specialty coffee roaster in Portland" searches for
+ * "specialty coffee roaster", not the trailing "roast menu".
  */
 export function photoQuery(question: string): string {
-  const words = question
+  const clean = question
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
-  const keep = (word: string) => !NOISE.has(word) && !/^\d/.test(word)
-  const namedAt = words.findIndex((word) => word === 'called' || word === 'named')
-  const subject = (namedAt > 0 ? words.slice(0, namedAt) : words).filter(keep)
-  return subject.slice(-2).join(' ')
+    .replace(/[^a-z0-9\s&,'-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!clean) return ''
+  const keep = (word: string) => !NOISE.has(word) && !/^\d/.test(word) && word.length > 1
+  const stop = /\s+(?:with|including|include|featuring|that|which|called|named|in|at|on|for)\b/i
+
+  // "for [a] coffee shop with …" and "for [a] bakery called …".
+  const forPhrase = /\b(?:for|about|of)\s+(?!a\b|an\b|the\b)([^,.;]+)/i.exec(clean)?.[1]
+  const descriptive = /\b(?:for|about|of)\s+(?:a|an|the)\s+([^,.;]+)/i.exec(clean)?.[1]
+  // "for Ember & Oak, a small specialty coffee roaster in Portland": the
+  // appositive is the useful subject; the brand name alone is not.
+  const appositive = /\b(?:for|about|of)\s+[^,.;]+,\s+(?:a|an)\s+([^,.;]+)/i.exec(clean)?.[1]
+
+  const phrase = (appositive ?? descriptive ?? forPhrase ?? clean)
+    .split(stop)[0]
+    .replace(/\s+/g, ' ')
+    .trim()
+  const subject = phrase.split(' ').filter(keep)
+  // Keep the head of the phrase. The old last-two-words rule turned a request
+  // for a coffee roaster into a search for its roast menu.
+  const words = subject.slice(0, 4).join(' ')
+  // Commons has no useful generic "coffee roaster" photography: the results are
+  // storefronts of Peet's and other real chains. Ingredients are a more honest,
+  // reusable hero for a fictional roaster or café, and avoid implying that a
+  // photographed shop belongs to the brand being built.
+  if (/\bcoffee\b/i.test(words) && /\b(?:roaster|roastery|shop|cafe|espresso)\b/i.test(words)) return 'coffee beans'
+  return words
 }
 
 /**
@@ -127,6 +157,10 @@ export function photoQuery(question: string): string {
 export function pickPhotos(pages: CommonsPage[], limit = 4, subject = ''): BuildPhoto[] {
   const photos: BuildPhoto[] = []
   const seen = new Set<string>()
+  const subjectWords = subject
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word.length > 3 && !NOISE.has(word))
   for (const page of pages) {
     const info = page.imageinfo?.[0]
     if (!info) continue
@@ -140,9 +174,15 @@ export function pickPhotos(pages: CommonsPage[], limit = 4, subject = ''): Build
     if (width < height * 1.15) continue
     const title = strip(page.title).replace(/^File:\s*/i, '')
     if (/map|logo|diagram|chart|icon|flag|coat of arms|seal of|screenshot/i.test(title)) continue
+    // Titles are the only reliable signal Commons gives us. A gallery interior
+    // matching a generic word such as "roast" must not become a coffee hero.
+    if (subjectWords.length && !subjectWords.some((word) => title.toLowerCase().includes(word))) continue
     // A photo of an unrelated business (or worse) must not reach a page just
     // because its file name matched the search words.
     if (/erotic|adult|nude|naked|brothel|lingerie|sex shop|strip club/i.test(title)) continue
+    // Do not put a real chain's storefront on a fictional brand's page. If the
+    // request is explicitly about that chain, its photos are allowed.
+    if (COMMERCIAL_CHAIN.test(title) && !COMMERCIAL_CHAIN.test(subject)) continue
     if (seen.has(src)) continue
     seen.add(src)
     photos.push({

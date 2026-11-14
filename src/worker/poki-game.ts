@@ -205,7 +205,7 @@ function play(url){
   if(!parentNav||moved)return false;
   moved=true;
   if(window.parent!==window){
-    try{window.parent.postMessage({type:'quill:preview-navigate',url:url},'*');return true}catch(error){moved=false;return false}
+    try{window.parent.postMessage({type:'stet:preview-navigate',url:url},'*');return true}catch(error){moved=false;return false}
   }
   window.location.href=url;
   return true;

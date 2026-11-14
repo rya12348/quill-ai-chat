@@ -28,8 +28,22 @@ export default defineConfig(({ mode }) => {
       allowedHosts: ['.app.github.dev', '.githubpreview.dev'],
       // Codespaces serves port 5180 on HTTPS 443; point the HMR client there.
       ...(codespaces ? { hmr: { protocol: 'wss', clientPort: 443 } } : {}),
-      // Benchmark runs update these artifacts; they must not reload the app mid-turn.
-      watch: { ignored: ['**/bench/**'] },
+      // Benchmark runs update these artifacts; they must not reload the app
+      // mid-turn. The local Chrome profile writes cookies and session files
+      // continuously, so watching it restarts this server in a loop. Build
+      // output and Wrangler's temp bundle belong to other processes too.
+      watch: {
+        ignored: [
+          '**/bench/**',
+          '**/.ink-chrome-profile/**',
+          '**/.ink-test-profile/**',
+          '**/.ink-live/**',
+          '**/.agents/**',
+          '**/dist/**',
+          '**/.wrangler/**',
+          '**/*.png',
+        ],
+      },
     },
     preview: {
       // `vite preview` needs the same forwarded-host treatment as the dev

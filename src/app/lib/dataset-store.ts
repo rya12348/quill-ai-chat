@@ -4,7 +4,7 @@
 
 import type { DatasetInput } from '../../shared/types'
 
-const DB_NAME = 'quill-datasets'
+const DB_NAME = 'stet-datasets'
 const STORE = 'datasets'
 const VERSION = 1
 

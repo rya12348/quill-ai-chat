@@ -13,6 +13,12 @@ test('short chat questions use one lane instead of drafts and a merge', () => {
   assert.equal(depthFor('What is a monad?', 1), 'quick')
 })
 
+test('a short writing or planning request gets a structured pass', () => {
+  assert.equal(depthFor('Draft a polite follow-up email about a late invoice.', 3), 'standard')
+  assert.equal(depthFor('Create a workout plan for a small room with no equipment.', 3), 'standard')
+  assert.equal(depthFor('Compare tea and coffee.', 3), 'quick')
+})
+
 test('a code request keeps the deep pass even when it is short', () => {
   assert.equal(depthFor('```js\nconsole.log(1)\n```\nWhy is this wrong?', 3), 'deep')
 })

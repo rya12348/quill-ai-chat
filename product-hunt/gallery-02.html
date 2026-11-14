@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ink — Product Hunt gallery 02</title>
+<link rel="stylesheet" href="./assets/base.css" />
+<style>
+  .g2 {
+    background: #17130f;
+    color: #f4efe4;
+  }
+  .g2:before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 760px 620px at 84% 38%, rgba(168,73,20,.23), transparent 67%),
+      radial-gradient(ellipse 480px 420px at 2% 100%, rgba(111,72,37,.18), transparent 70%);
+    z-index: 0;
+  }
+  .g2 .topbar { position: absolute; z-index: 6; top: 40px; left: 64px; right: 62px; display: flex; align-items: center; }
+  .g2 .topbar .top-right { margin-left: auto; display: flex; align-items: center; gap: 25px; }
+  .g2 .top-meta { display: inline-flex; align-items: center; gap: 7px; color: #b4a18a; font-size: 9px; font-weight: 650; letter-spacing: .13em; text-transform: uppercase; }
+  .g2 .top-meta i { width: 6px; height: 6px; border-radius: 50%; background: #d4753c; box-shadow: 0 0 0 3px rgba(212,117,60,.12); }
+  .g2 .corner-index { color: #9b8971; }
+  .g2 .copy { position: absolute; z-index: 4; left: 64px; top: 128px; width: 422px; }
+  .g2 h1 {
+    margin: 17px 0 0;
+    font-family: var(--serif);
+    font-size: 68px;
+    line-height: .95;
+    font-weight: 500;
+    letter-spacing: -.052em;
+    color: #f6ecdc;
+  }
+  .g2 h1 em { color: #d98a56; font-style: italic; font-weight: 430; }
+  .g2 .lede {
+    margin: 20px 0 0;
+    width: 390px;
+    color: #b9a68d;
+    font-size: 15.5px;
+    line-height: 1.58;
+    letter-spacing: -.015em;
+  }
+  .g2 .lede b { color: #f3e7d4; font-weight: 600; }
+  .g2 .mode-list { margin-top: 25px; width: 406px; border-top: 1px solid #362c22; }
+  .g2 .mode {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    min-height: 54px;
+    border-bottom: 1px solid #362c22;
+  }
+  .g2 .mode-icon { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 8px; color: #df8a55; background: rgba(168,73,20,.15); border: 1px solid rgba(217,138,86,.16); }
+  .g2 .mode-icon svg { width: 13px; height: 13px; }
+  .g2 .mode strong { display: block; color: #f1e5d3; font-size: 10.5px; font-weight: 650; letter-spacing: -.01em; }
+  .g2 .mode span { display: block; color: #99866f; font-size: 8.4px; margin-top: 1px; letter-spacing: -.005em; }
+  .g2 .mode .mode-no { margin-left: auto; color: #675a4c; font-size: 7px; letter-spacing: .12em; }
+  .g2 .foot { position: absolute; z-index: 4; left: 64px; bottom: 36px; color: #97846e; font-size: 9.5px; letter-spacing: .015em; display: flex; align-items: center; gap: 10px; width: 407px; }
+  .g2 .foot:after { content: ''; flex: 1; height: 1px; background: #352b21; }
+  .g2 .divider { position: absolute; z-index: 1; left: 519px; top: 94px; width: 1px; height: 574px; background: linear-gradient(to bottom, transparent, #392d22 12%, #392d22 88%, transparent); opacity: .8; }
+  .g2 .app-two { z-index: 3; top: 103px; right: 40px; width: 688px; height: 590px; transform: rotate(1.05deg); }
+  .g2 .app-two .app-side { width: 132px; }
+  .g2 .app-two .thread { padding-top: 14px; gap: 10px; }
+  .g2 .app-two .build-canvas { margin-top: 7px; }
+  .g2 .app-two .thread-head .live { color: #73c398; }
+  .g2 .float-build {
+    position: absolute;
+    z-index: 8;
+    right: 54px;
+    top: 153px;
+    width: 172px;
+    padding: 10px 11px;
+    border: 1px solid rgba(240,226,202,.15);
+    border-radius: 9px;
+    background: rgba(40,32,23,.92);
+    box-shadow: 0 16px 28px -16px rgba(0,0,0,.7);
+    backdrop-filter: blur(8px);
+    transform: rotate(1.05deg);
+  }
+  .g2 .float-build .tiny-label { display: flex; align-items: center; gap: 5px; color: #79c79c; font-size: 7px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+  .g2 .float-build .tiny-label:before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+  .g2 .float-build strong { display: block; margin-top: 5px; color: #f1e4d1; font-family: var(--serif); font-size: 16px; font-weight: 500; letter-spacing: -.02em; }
+  .g2 .float-build span { display: block; margin-top: 3px; color: #a28f77; font-size: 7.5px; line-height: 1.35; }
+  .g2 .ring-a { width: 560px; height: 560px; right: -160px; top: -210px; border-color: rgba(225,165,112,.13); }
+  .g2 .ring-b { width: 300px; height: 300px; right: 196px; bottom: -220px; border-color: rgba(225,165,112,.12); }
+  .g2 .grain { mix-blend-mode: screen; opacity: .035; }
+</style>
+</head>
+<body>
+<div class="stage g2">
+  <div class="ring ring-a"></div>
+  <div class="ring ring-b"></div>
+  <div class="divider"></div>
+
+  <header class="topbar">
+    <div class="brand dark">
+      <span class="mark"><svg viewBox="0 0 64 64" fill="currentColor"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></span>
+      <span class="wordmark">Ink</span>
+    </div>
+    <div class="top-right">
+      <span class="top-meta"><i></i> The workspace, not just the answer</span>
+      <span class="corner-index">02 <span>/ 02</span></span>
+    </div>
+  </header>
+
+  <section class="copy">
+    <p class="eyebrow dim">One thread. Every tool.</p>
+    <h1>From question<br />to <em>finished thing.</em></h1>
+    <p class="lede">Ink notices what the work needs and brings the right tool into the conversation — <b>without the handoffs.</b></p>
+
+    <div class="mode-list">
+      <div class="mode">
+        <span class="mode-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></span>
+        <span><strong>Research</strong><span>Searches the web. Shows its receipts.</span></span>
+        <span class="mode-no">01</span>
+      </div>
+      <div class="mode">
+        <span class="mode-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m14 4 6 6"/><path d="M4 20l3.8-.8L19.2 7.8a2.1 2.1 0 0 0-3-3L4.8 16.2 4 20Z"/></svg></span>
+        <span><strong>Build</strong><span>Brief in. Working page out.</span></span>
+        <span class="mode-no">02</span>
+      </div>
+      <div class="mode">
+        <span class="mode-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 19V9m7 10V5m7 14v-6"/></svg></span>
+        <span><strong>Analyze</strong><span>Python on your CSV, in the thread.</span></span>
+        <span class="mode-no">03</span>
+      </div>
+      <div class="mode">
+        <span class="mode-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></svg></span>
+        <span><strong>Study</strong><span>Flashcards, not busywork.</span></span>
+        <span class="mode-no">04</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="app dark app-two">
+    <div class="app-top">
+      <span class="mini-mark"><svg viewBox="0 0 64 64" fill="currentColor"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></span>
+      <span class="mini-word">Ink</span>
+      <span class="mini-title">Attio launch</span>
+      <span class="top-right"><span class="top-pill">Build · 1 page</span><span class="top-dot"></span></span>
+    </div>
+    <div class="app-main">
+      <aside class="app-side">
+        <div class="side-new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> New chat</div>
+        <div class="side-label">Workspace</div>
+        <div class="side-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 19.5V6a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V6"/></svg> Library</div>
+        <div class="side-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.2 2.2 3.2 5 3.2 8s-1 5.8-3.2 8c-2.2-2.2-3.2-5-3.2-8S9.8 6.2 12 4Z"/></svg> Browser</div>
+        <div class="side-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 5h16v11H8l-4 4V5Z"/></svg> Live room</div>
+        <div class="side-label">Today</div>
+        <div class="side-chat">CRM shortlist for the studio</div>
+        <div class="side-chat active">Attio launch page</div>
+        <div class="side-chat">Q4 planning notes</div>
+        <div class="side-chat">Photosynthesis, explained</div>
+        <div class="side-chat">Invoice logic, checked</div>
+      </aside>
+      <section class="chatpane">
+        <div class="thread-head">Attio launch <span class="live">Build ready</span></div>
+        <div class="thread">
+          <div class="msg-user">Now build a quiet, editorial launch page for Attio. One page, mobile-first.</div>
+          <div class="build-answer">
+            <div class="build-kicker">✦ Build <span class="page-count">1 page · ready to preview</span></div>
+            <h3 class="build-title">The page is in the thread.</h3>
+            <div class="build-canvas">
+              <div class="build-page">
+                <div class="build-page-nav">
+                  <span class="bp-mark"></span><b>Attio</b>
+                  <span class="bp-links"><span>Product</span><span>Pricing</span><span>Customers</span></span>
+                  <span class="bp-cta">Start free</span>
+                </div>
+                <div class="build-page-body">
+                  <div class="bp-eyebrow">A calmer CRM</div>
+                  <h4>Your pipeline,<br />finally clear.</h4>
+                  <p>One place for every conversation, every deal, and the next step that actually matters.</p>
+                  <div class="bp-actions"><span class="bp-primary">Start free</span><span class="bp-secondary">See how it works</span></div>
+                  <div class="bp-stats">
+                    <div class="bp-stat"><strong>12 people</strong><span>one shared view</span></div>
+                    <div class="bp-stat"><strong>0 setup</strong><span>start in minutes</span></div>
+                    <div class="bp-stat"><strong>1 thread</strong><span>from brief to launch</span></div>
+                  </div>
+                  <div class="bp-features">
+                    <div class="bp-feature"><span class="f-ic">Aa</span><strong>Pipeline</strong><span>Every deal in one view.</span></div>
+                    <div class="bp-feature"><span class="f-ic">@</span><strong>Email</strong><span>Your inbox, in context.</span></div>
+                    <div class="bp-feature"><span class="f-ic">↗</span><strong>Reporting</strong><span>Answers, not exports.</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="composer">
+          <div class="composer-label">Follow-up</div>
+          <div class="composer-row">
+            <span class="grow">Now make a quiz to help the team learn it…</span>
+            <span class="tools">✦ Study</span>
+            <span class="arrow">↑</span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="float-build">
+    <div class="tiny-label">Build complete</div>
+    <strong>One page, ready.</strong>
+    <span>Made from the conversation above.</span>
+  </div>
+
+  <footer class="foot">No handoffs. No lost context.</footer>
+  <div class="grain"></div>
+</div>
+</body>
+</html>

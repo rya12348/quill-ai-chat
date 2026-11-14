@@ -12,13 +12,13 @@ export type PendingMessage = {
   projectId: string | null
   content: string
   model: string
-  strategy: 'fast' | 'blend' | 'proof' | 'research' | 'analyze' | 'build' | 'canvas' | 'agent'
+  strategy: 'fast' | 'blend' | 'proof' | 'research' | 'analyze' | 'build' | 'canvas' | 'agent' | 'advisor'
   reasoning: boolean
   effort?: ReasoningEffort
   createdAt: number
 }
 
-const PENDING_KEY = 'quill:pending-send'
+const PENDING_KEY = 'stet:pending-send'
 const listeners = new Set<() => void>()
 
 function parsePending(value: string | null): PendingMessage | null {
@@ -32,7 +32,7 @@ function parsePending(value: string | null): PendingMessage | null {
       projectId: typeof raw.projectId === 'string' ? raw.projectId : null,
       content: raw.content,
       model: typeof raw.model === 'string' ? raw.model : '',
-      strategy: raw.strategy === 'fast' ? 'fast' : raw.strategy === 'proof' ? 'proof' : raw.strategy === 'research' ? 'research' : raw.strategy === 'analyze' ? 'analyze' : raw.strategy === 'build' ? 'build' : raw.strategy === 'canvas' ? 'canvas' : raw.strategy === 'agent' ? 'agent' : 'blend',
+      strategy: raw.strategy === 'fast' ? 'fast' : raw.strategy === 'proof' ? 'proof' : raw.strategy === 'research' ? 'research' : raw.strategy === 'analyze' ? 'analyze' : raw.strategy === 'build' ? 'build' : raw.strategy === 'canvas' ? 'canvas' : raw.strategy === 'advisor' ? 'advisor' : raw.strategy === 'agent' ? 'agent' : 'blend',
       reasoning: raw.reasoning === true,
       ...(raw.effort === 'low' || raw.effort === 'default' || raw.effort === 'max' ? { effort: raw.effort } : {}),
       createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
@@ -81,7 +81,7 @@ export function clearPendingMessage(clientMessageId: string) {
 }
 
 export function draftKey(conversationId: string | undefined): string {
-  return `quill:draft:${conversationId ?? 'new'}`
+  return `stet:draft:${conversationId ?? 'new'}`
 }
 
 export function readDraft(key: string): string {

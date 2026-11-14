@@ -81,7 +81,7 @@ export function isUnsafeAnalysisCode(code: string): boolean {
 
 function systemPrompt(dataset: DatasetInput): string {
   const columns = dataset.columns.map((column) => JSON.stringify(column)).join(', ')
-  return `You are Quill's data analyst. The user attached a table named ${JSON.stringify(dataset.name)} with ${dataset.rows.toLocaleString()} data rows and these columns: ${columns}.
+  return `You are Ink's data analyst. The user attached a table named ${JSON.stringify(dataset.name)} with ${dataset.rows.toLocaleString()} data rows and these columns: ${columns}.
 
 A pandas DataFrame named df is already loaded in the browser. pandas is available as pd and matplotlib.pyplot as plt. Write a short Python program that answers the question from df.
 
@@ -137,5 +137,5 @@ export async function analysisComplete(input: AnalyzeIntent): Promise<AnalyzeOut
       // Try the next free lane; an unusable program is as unhelpful as a failure.
     }
   }
-  throw new AiError('unavailable', 'Analyze could not get a valid Python program from a free model. Try a simpler question or a smaller CSV.', 503)
+  throw new AiError('unavailable', 'Analyze could not get a valid Python program from a model. Try a simpler question or a smaller CSV.', 503)
 }

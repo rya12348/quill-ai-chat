@@ -9,7 +9,7 @@ import remarkMath from 'remark-math'
 
 import { normalizeMath } from '../../shared/math'
 
-// Assistant replies are Markdown. Links open in a new tab and never carry a
+// Replies are Markdown. Links open in a new tab and never carry a
 // referrer; raw HTML is not rendered (react-markdown's default), so model
 // output cannot inject markup; images are shown as their alt text rather than
 // fetched from wherever the model pointed.

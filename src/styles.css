@@ -1,51 +1,55 @@
 @import 'tailwindcss';
 @import '@fontsource-variable/inter';
+@import '@fontsource-variable/newsreader';
 
 @theme {
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: 'Newsreader Variable', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-  --color-bg: #f7f6f2;
-  --color-surface: #ffffff;
-  --color-surface-2: #efede7;
-  --color-raised: #e6e3db;
-  --color-line: #e8e5dd;
-  --color-line-strong: #d6d2c8;
-  --color-fg: #1b1a17;
-  --color-muted: #6b6760;
-  --color-faint: #9d9890;
-  --color-accent: #c2571b;
-  --color-accent-soft: #fbeadf;
-  --color-success: #1f8a5b;
+  --color-bg: #f4efe4;
+  --color-surface: #fdfaf3;
+  --color-surface-2: #ece5d7;
+  --color-raised: #e1d7c5;
+  --color-line: #e4dccd;
+  --color-line-strong: #beaf9a;
+  --color-fg: #211d18;
+  --color-muted: #5b544a;
+  --color-faint: #6d6457;
+  --color-accent: #a84914;
+  --color-accent-strong: #8a3a0e;
+  --color-accent-soft: #f6e4d4;
+  --color-success: #16744a;
   --color-success-soft: #e3f4ea;
-  --color-warning: #b8731a;
+  --color-warning: #94600e;
   --color-warning-soft: #fbf0db;
-  --color-danger: #c93f2e;
+  --color-danger: #b33525;
   --color-danger-soft: #fbe7e3;
 
-  --radius-control: 14px;
-  --radius-card: 20px;
-  --radius-dialog: 24px;
-  --radius-tile: 12px;
-  --radius-bubble: 20px;
+  --radius-control: 10px;
+  --radius-card: 16px;
+  --radius-dialog: 20px;
+  --radius-tile: 8px;
+  --radius-bubble: 18px;
 
   --shadow-card: 0 1px 2px rgb(27 26 23 / 0.04), 0 0 0 1px rgb(27 26 23 / 0.05);
   --shadow-pop: 0 0 0 1px rgb(27 26 23 / 0.06), 0 12px 40px -12px rgb(27 26 23 / 0.25);
   --shadow-dialog: 0 0 0 1px rgb(27 26 23 / 0.06), 0 30px 80px -20px rgb(27 26 23 / 0.35);
-  --shadow-composer: 0 1px 2px rgb(27 26 23 / 0.05), 0 8px 32px -12px rgb(27 26 23 / 0.18), 0 0 0 1px rgb(27 26 23 / 0.06);
+  --shadow-composer: 0 2px 4px rgb(27 26 23 / 0.06), 0 18px 48px -18px rgb(27 26 23 / 0.3), 0 0 0 1px rgb(27 26 23 / 0.1);
 }
 
 html.dark {
-  --color-bg: #141310;
-  --color-surface: #1c1a17;
-  --color-surface-2: #26231e;
-  --color-raised: #322e27;
-  --color-line: #302c26;
-  --color-line-strong: #4a443b;
-  --color-fg: #f2eee5;
-  --color-muted: #b6aea2;
-  --color-faint: #8d857a;
+  --color-bg: #15130f;
+  --color-surface: #1e1b16;
+  --color-surface-2: #28231c;
+  --color-raised: #332d24;
+  --color-line: #322c24;
+  --color-line-strong: #4b4337;
+  --color-fg: #f5efe4;
+  --color-muted: #bbb2a4;
+  --color-faint: #8e8578;
   --color-accent: #e28b50;
+  --color-accent-strong: #f2a36c;
   --color-accent-soft: #3a2418;
   --color-success: #64cb93;
   --color-success-soft: #193326;
@@ -81,8 +85,9 @@ html.dark {
     background: var(--color-bg);
     color: var(--color-fg);
     font-family: var(--font-sans);
-    font-size: 14.5px;
-    letter-spacing: -0.006em;
+    font-size: 15px;
+    letter-spacing: -0.005em;
+    line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -93,6 +98,29 @@ html.dark {
     font: inherit;
     letter-spacing: inherit;
     color: inherit;
+  }
+  /* Any enabled control should advertise that it can be pressed. */
+  button:not(:disabled),
+  a[href],
+  [role='button']:not([aria-disabled='true']),
+  [role='menuitem']:not([aria-disabled='true']),
+  [role='option']:not([aria-disabled='true']),
+  [role='tab']:not([aria-disabled='true']),
+  [role='switch']:not([aria-disabled='true']),
+  [role='link']:not([aria-disabled='true']),
+  summary,
+  label[for],
+  select:not(:disabled),
+  input[type='checkbox']:not(:disabled),
+  input[type='radio']:not(:disabled),
+  input[type='range']:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled,
+  [aria-disabled='true'],
+  select:disabled,
+  input:disabled {
+    cursor: not-allowed;
   }
   :focus-visible {
     outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
@@ -113,7 +141,7 @@ html.dark {
 
 @utility scrollbar-thin {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-line-strong) transparent;
+  scrollbar-color: color-mix(in srgb, var(--color-line-strong) 58%, transparent) transparent;
 }
 @utility text-balance {
   text-wrap: balance;
@@ -257,30 +285,186 @@ html.dark .prose-chat pre {
   }
 }
 
-/* Three dots while waiting for the first token. */
-.thinking span {
-  animation: thinking 1.2s ease-in-out infinite;
-  background: var(--color-faint);
-  border-radius: 50%;
-  display: inline-block;
-  height: 6px;
-  width: 6px;
+/* Three drops breaking a still pool: a small travelling splash rather than
+   a lone droplet. The wave reads at 16px and stays quieter than a spinner. */
+.ink-loading {
+  color: var(--color-accent);
+  display: inline-flex;
+  flex-shrink: 0;
+  height: 18px;
+  width: 25px;
 }
-.thinking span:nth-child(2) {
-  animation-delay: 0.15s;
+.ink-loading svg {
+  height: 100%;
+  overflow: visible;
+  width: 100%;
 }
-.thinking span:nth-child(3) {
-  animation-delay: 0.3s;
+.ink-loading-pool {
+  animation: ink-pool 3.2s ease-in-out infinite;
+  fill: currentColor;
+  opacity: 0.12;
+  transform-box: fill-box;
+  transform-origin: center;
 }
-@keyframes thinking {
+.ink-loading-drop {
+  animation: ink-drop 1.35s cubic-bezier(0.3, 0.7, 0.25, 1) infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.ink-loading-drop path {
+  fill: currentColor;
+}
+.ink-loading-drop-left {
+  animation-delay: 0.05s;
+}
+.ink-loading-drop-mid {
+  animation-delay: 0.22s;
+}
+.ink-loading-drop-right {
+  animation-delay: 0.39s;
+}
+.ink-loading-ring {
+  animation: ink-ring 1.35s cubic-bezier(0.2, 0.7, 0.3, 1) infinite;
+  opacity: 0;
+  stroke: currentColor;
+  stroke-width: 1;
+  transform-box: fill-box;
+  transform-origin: center;
+  vector-effect: non-scaling-stroke;
+}
+.ink-loading-ring-left {
+  animation-delay: 0.12s;
+}
+.ink-loading-ring-mid {
+  animation-delay: 0.29s;
+}
+.ink-loading-ring-right {
+  animation-delay: 0.46s;
+}
+.ink-loading-speck {
+  animation: ink-speck 1.35s ease-in-out infinite;
+  animation-delay: 0.55s;
+  fill: currentColor;
+  opacity: 0;
+}
+.ink-loading-speck-late {
+  animation-delay: 0.78s;
+}
+.ink-loading-compact {
+  height: 15px;
+  width: 21px;
+}
+@keyframes ink-drop {
   0%,
-  60%,
+  46%,
   100% {
-    opacity: 0.35;
+    transform: translateY(0) scale(1);
+  }
+  12% {
+    transform: translateY(-2.8px) scale(1.05);
+  }
+  24% {
+    transform: translateY(-0.4px) scale(0.98);
+  }
+}
+@keyframes ink-ring {
+  0%,
+  10% {
+    opacity: 0;
+    transform: scale(0.32);
+  }
+  20% {
+    opacity: 0.32;
+  }
+  52%,
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+@keyframes ink-speck {
+  0%,
+  40%,
+  100% {
+    opacity: 0;
+    transform: translateY(1px);
+  }
+  16% {
+    opacity: 0.5;
     transform: translateY(0);
   }
-  30% {
-    opacity: 1;
-    transform: translateY(-3px);
+}
+@keyframes ink-pool {
+  0%,
+  100% {
+    opacity: 0.1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+.browser-halo {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border: 1.5px solid color-mix(in srgb, var(--color-accent) 62%, transparent);
+  border-radius: 9999px;
+  box-shadow:
+    0 0 0 5px color-mix(in srgb, var(--color-accent) 9%, transparent),
+    0 0 16px color-mix(in srgb, var(--color-accent) 20%, transparent);
+  animation: browser-halo 1.15s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+.browser-halo-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 9999px;
+  background: var(--color-accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+@keyframes browser-halo {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.55);
+  }
+  68% {
+    opacity: 0.35;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ink-loading-pool,
+  .ink-loading-drop,
+  .ink-loading-ring,
+  .ink-loading-speck {
+    animation: none;
+  }
+  .ink-loading-pool {
+    opacity: 0.14;
+  }
+  .ink-loading-drop {
+    transform: none;
+  }
+  .ink-loading-ring {
+    opacity: 0.18;
+    transform: scale(1);
+  }
+  .ink-loading-speck {
+    opacity: 0.35;
+    transform: none;
+  }
+  .browser-halo {
+    animation: none;
+    opacity: 0.55;
+    transform: none;
   }
 }

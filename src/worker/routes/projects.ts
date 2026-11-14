@@ -125,6 +125,7 @@ projects.delete('/:id', async (c) => {
   const count = await db.prepare(`SELECT COUNT(*) AS n FROM project_conversations WHERE owner_sub = ? AND project_id = ?`).bind(owner, projectId).first<{ n: number }>()
   await db.batch([
     db.prepare(`DELETE FROM project_conversations WHERE owner_sub = ? AND project_id = ?`).bind(owner, projectId),
+    db.prepare(`DELETE FROM project_settings WHERE owner_sub = ? AND project_id = ?`).bind(owner, projectId),
     db.prepare(`DELETE FROM projects WHERE owner_sub = ? AND id = ?`).bind(owner, projectId),
   ])
   return privateJson(c, { ok: true, unassigned: Number(count?.n ?? 0) })

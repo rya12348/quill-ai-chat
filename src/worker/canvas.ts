@@ -142,5 +142,5 @@ Rules:
       // Try another free lane.
     }
   }
-  throw new AiError('unavailable', 'Canvas could not get a usable study set from a free model. Try a narrower topic.', 503)
+  throw new AiError('unavailable', 'Canvas could not get a usable study set from a model. Try a narrower topic.', 503)
 }

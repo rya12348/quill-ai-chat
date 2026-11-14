@@ -121,6 +121,8 @@ export interface ResearchInfo {
   models: string[]
   asOf: number
   reason?: string
+  /** True when this is a document written from general knowledge, not a report. */
+  document?: boolean
 }
 
 /** A profile of a dataset. The rows stay in the browser; only this shape is sent. */
@@ -183,6 +185,30 @@ export interface BuildPage {
   html: string
 }
 
+/** One deterministic check on a generated page. */
+export type BuildCheckStatus = 'pass' | 'warn' | 'fail'
+
+export interface BuildCheck {
+  id: string
+  label: string
+  status: BuildCheckStatus
+  detail?: string
+}
+
+/** The result of running page checks and an independent review on a build. */
+export interface BuildVerification {
+  status: 'verified' | 'warning'
+  checks: BuildCheck[]
+  /** The independent reviewer, when one returned a usable verdict. */
+  reviewer?: string
+  /** A repair pass changed the selected draft. */
+  repaired: boolean
+  /** A compact spec was produced before the draft. */
+  spec: boolean
+  score: number
+  asOf: number
+}
+
 /** A generated page, or a live site shown through the preview proxy. */
 export interface BuildInfo {
   status: 'ready' | 'warning'
@@ -202,6 +228,177 @@ export interface BuildInfo {
   models: string[]
   asOf: number
   reason?: string
+  /** What the quality loop actually checked before showing the page. */
+  verification?: BuildVerification
+}
+
+/** A standalone Web Proxy session, backed by a token-scoped capability. */
+export interface ProxySession {
+  /** The public page after redirects. */
+  url: string
+  title: string
+  /** Same-origin path that serves the live page through the proxy. */
+  proxyPath: string
+}
+
+/** A page element the Browser agent can address without guessing a selector. */
+export interface BrowserElement {
+  /** Short-lived id assigned by the bridge during the last snapshot. */
+  id: string
+  tag: string
+  role: string
+  label: string
+  value?: string
+  placeholder?: string
+  /** HTML input type, so buttons are not mistaken for editable fields. */
+  inputType?: string
+  href?: string
+  /** Visible choices for a native select, so arbitrary forms can be filled. */
+  options?: { label: string; value: string }[]
+  checked?: boolean
+  required?: boolean
+  disabled?: boolean
+  /** A native select or ARIA combobox is currently open. */
+  expanded?: boolean
+  /** The list a combobox controls, when the page exposes it. */
+  ariaControls?: string
+  /** Browser autocomplete hint, such as email, street-address or off. */
+  autocomplete?: string
+  /** True when the element is in the document but outside the current viewport. */
+  offscreen?: boolean
+  rect: { x: number; y: number; width: number; height: number }
+}
+
+/** A video or audio element the planner can wait on without polling a model. */
+export interface BrowserMedia {
+  kind: 'video' | 'audio'
+  duration: number
+  currentTime: number
+  paused: boolean
+  ended: boolean
+}
+
+/** The compact, untrusted page state sent to the Browser planner. */
+export interface BrowserSnapshot {
+  url: string
+  title: string
+  text: string
+  viewport: { width: number; height: number; scrollX: number; scrollY: number; pageHeight: number }
+  active: string
+  elements: BrowserElement[]
+  media: BrowserMedia[]
+  /** Visible headings give the planner a cheap map of the page sections. */
+  headings?: { level: number; text: string }[]
+  /** Embedded documents that may hold the real task, such as an LMS player. */
+  frames?: { url: string; title: string; visible: boolean; rect: { x: number; y: number; width: number; height: number } }[]
+  at: number
+}
+
+/** What an inspect step learned about one page element, or the whole page. */
+export interface BrowserInspectResult {
+  selector: string
+  tag: string
+  matched: number
+  html: string
+  text: string
+  styles: string
+}
+
+/** One screen of a cloud browser session, shown inside the Browser workspace. */
+export interface BrowserViewState {
+  url: string
+  title: string
+  screenshot?: string
+  snapshot: BrowserSnapshot
+  /** Present after an inspect step so the next planner step can use it. */
+  inspect?: BrowserInspectResult
+  /** Result of the last code/inspection action, for the agent to reason from. */
+  observation?: string
+}
+
+export interface BrowserInspectResponse {
+  state: BrowserViewState
+  inspect: BrowserInspectResult
+}
+
+/** One instruction the cloud browser can execute against the live page. */
+export type BrowserAction =
+  | { type: 'click'; x?: number; y?: number; selector?: string }
+  | { type: 'findLink'; text: string }
+  | { type: 'hover'; x?: number; y?: number; selector?: string }
+  | { type: 'drag'; fromSelector: string; toSelector: string }
+  | { type: 'focus'; selector: string }
+  | { type: 'type'; text: string; selector?: string; submit?: boolean }
+  | { type: 'fill'; fields: { selector: string; value: string }[]; submit?: boolean }
+  | { type: 'select'; selector: string; value: string }
+  | { type: 'check'; selector: string; checked: boolean }
+  | { type: 'press'; key: string; modifiers?: ('Alt' | 'Ctrl' | 'Meta' | 'Shift')[] }
+  | { type: 'scroll'; x?: number; y?: number }
+  | { type: 'navigate'; url: string }
+  | { type: 'back' }
+  | { type: 'forward' }
+  | { type: 'reload' }
+  | { type: 'wait'; ms: number }
+  | { type: 'waitFor'; selector?: string; text?: string; state?: 'visible' | 'hidden' | 'ended' | 'time'; timeoutMs?: number }
+  | { type: 'inspect'; selector?: string }
+  | { type: 'screenshot' }
+  | { type: 'style'; css: string }
+  | { type: 'evaluate'; expression: string }
+  | { type: 'ask'; message: string }
+  | { type: 'done'; message: string }
+
+export interface BrowserHistoryEntry {
+  action: string
+  result: string
+}
+
+export interface BrowserActResponse {
+  say: string
+  /** A short, user-visible reason for choosing the next action. */
+  thinking?: string
+  /** Concrete observations and working notes for the current step. */
+  thoughts?: string[]
+  /** The agent's current short plan for the task. */
+  plan?: string[]
+  /** A durable working note the agent wants to carry into later steps. */
+  note?: string
+  /** True when the planner believes this action completes the task. */
+  complete?: boolean
+  action: BrowserAction
+  lane?: string
+}
+
+/** One real browser tab in the cloud browser. */
+export interface BrowserTab {
+  id: string
+  title: string
+  url: string
+  active: boolean
+}
+
+/** The live cloud browser created for the signed-in person. */
+export interface BrowserSessionResponse {
+  sessionId: string
+  expiresAt?: number
+  /** Provider-hosted interactive viewer, used for the low-latency live pane. */
+  liveUrl?: string
+  state: BrowserViewState
+}
+
+/** A same-origin screen capture of the remote browser. */
+export interface BrowserScreen {
+  image: string
+  url: string
+  title: string
+  viewport: { width: number; height: number }
+  at: number
+}
+
+/** The result of the one-call document writer. */
+export interface BrowserWriteResponse {
+  state: BrowserViewState
+  words: number
+  lane?: string
 }
 
 /** One flashcard in a Canvas deck. */
@@ -327,7 +524,7 @@ export interface TeamInfo {
   confidence: TeamConfidence
 }
 
-export type AgentTool = 'research' | 'build' | 'canvas' | 'answer'
+export type AgentTool = 'research' | 'build' | 'canvas' | 'proof' | 'answer'
 export type AgentStepStatus = 'pending' | 'running' | 'done' | 'skipped' | 'failed'
 
 /** One planned step of an Agent run. */
@@ -433,6 +630,8 @@ export interface SharedConversation {
 
 export type ProviderStatus = 'healthy' | 'degraded' | 'down' | 'unknown'
 
+export type LaneBilling = 'free' | 'paid' | 'trial' | 'local'
+
 /** The persisted health of one provider, as GET /api/providers reports it. */
 export interface ProviderHealth {
   id: string
@@ -442,6 +641,8 @@ export interface ProviderHealth {
   model?: string
   /** The model family this lane belongs to, e.g. "Nemotron" or "GPT". */
   family?: string
+  /** Whether this route is free, paid, trial credit or local. */
+  billing?: LaneBilling
   status: ProviderStatus
   lastSuccessAt: number | null
   lastFailureAt: number | null
@@ -462,6 +663,8 @@ export interface ModelInfo {
   available: boolean
   /** One row per family in the picker: every provider of it shares this name. */
   family?: string
+  /** True when routes for this family may spend paid credits. */
+  billing?: LaneBilling
 }
 
 /** One free mode's daily allowance, as GET /api/me reports it. */
@@ -503,7 +706,7 @@ export interface Me {
     /** Agent can plan and run the free-mode tools on this deployment. */
     agent: boolean
     database: boolean
-    auth: 'freebuff' | 'development'
+    auth: 'account' | 'freebuff' | 'development' | 'guest'
   }
   usage: ReplyUsage & {
     /** The separate free-mode caps, so a mode's remaining allowance is known before sending. */
@@ -528,3 +731,52 @@ export type ChatEvent =
   | { type: 'notice'; text: string }
   | { type: 'done'; message: Message; usage: Me['usage'] }
   | { type: 'error'; code: string; message: string }
+
+export type HumanizerTone = 'natural' | 'casual' | 'professional' | 'warm'
+export type HumanizerStrength = 'light' | 'balanced' | 'full'
+export type HumanizerPurpose = 'auto' | 'email' | 'social' | 'essay' | 'note'
+export type HumanizerLength = 'same' | 'tighter'
+
+/** A one-off style edit. The original draft is never returned or stored. */
+export interface HumanizerResult {
+  text: string
+  tone: HumanizerTone
+  strength: HumanizerStrength
+  notice?: string
+}
+
+/** A message in the public live room. */
+export interface RoomMessage {
+  id: string
+  room: string
+  body: string
+  authorName: string
+  /** A short one-way tag; the account id is never sent to the browser. */
+  authorId: string
+  createdAt: number
+}
+
+/** The authoritative snapshot fetched before and after realtime connects. */
+export interface RoomSnapshot {
+  room: string
+  name: string
+  messages: RoomMessage[]
+  /** Lets the browser label its own messages without exposing account ids. */
+  viewerId: string
+  asOf: number
+}
+
+/** One UTC day of aggregate traffic. No individual visitor is exposed. */
+export interface TrafficDay {
+  day: string
+  visitors: number
+  views: number
+}
+
+export interface TrafficSummary {
+  today: { visitors: number; views: number }
+  last7Days: { visitors: number; views: number }
+  allTime: { visitors: number; views: number }
+  days: TrafficDay[]
+  updatedAt: number
+}

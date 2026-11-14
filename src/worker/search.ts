@@ -12,7 +12,7 @@ export type SearchResult = { title: string; url: string; snippet: string; publis
 export type SearchOutcome = { results: SearchResult[]; ok: boolean }
 
 const EXA_URL = 'https://api.exa.ai/search'
-const USER_AGENT = 'Quill/0.1 (Freebuff AI chat; https://freebuff.com)'
+const USER_AGENT = 'Ink/0.1 (Freebuff; https://freebuff.com)'
 const CACHE_TTL = 10 * 60_000
 const CACHE_LIMIT = 200
 const cache = new Map<string, { at: number; results: SearchResult[] }>()
@@ -462,12 +462,25 @@ export async function readPage(raw: string, signal?: AbortSignal): Promise<Sourc
     }
     if (html.length > MAX_PAGE_BYTES) html = html.slice(0, MAX_PAGE_BYTES)
     const title = stripHtml(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? '').slice(0, 200)
-    const cleaned = html
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
-      .replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi, ' ')
-    const text = stripHtml(cleaned).slice(0, 40_000)
+    // Prefer the article body. Reading the whole page mostly captures menus,
+    // cookie banners and related-link rails, which then become the writer's
+    // evidence and make a report sound generic.
+    const scoped =
+      html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1] ??
+      html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] ??
+      html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] ??
+      html
+    const cleaned = scoped
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<(script|style|noscript|svg|nav|header|footer|aside|form|button|select|textarea)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+      .replace(/<(?:script|style|noscript|svg|nav|header|footer|aside|form|button|select|textarea)\b[^>]*\/?>/gi, ' ')
+    // Paragraphs exclude headings, audio controls and related-link rails that
+    // otherwise read like evidence ("Listen to this article..."). Fall back to
+    // the whole scoped article for pages that do not use paragraph markup.
+    const paragraphs = [...cleaned.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
+      .map((match) => stripHtml(match[1] ?? ''))
+      .filter((paragraph) => paragraph.length >= 40)
+    const text = (paragraphs.length >= 2 ? paragraphs.join(' ') : stripHtml(cleaned)).slice(0, 40_000)
     if (text.length < 120) return undefined
     const publishedAt = pagePublishedAt(html)
     return { title: title || current.hostname, text, ...(publishedAt ? { publishedAt } : {}) }

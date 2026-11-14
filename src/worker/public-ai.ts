@@ -9,8 +9,10 @@
 // keyless lanes, and LLM7's anonymous gateway is the last-resort free option.
 // Keys stay on the server.
 
-import { MAX_OUTPUT_TOKENS, PICKER_MODEL_LIMIT } from '../shared/config'
+import { MAX_OUTPUT_TOKENS, PICKER_MODEL_DESCRIPTIONS, PICKER_MODEL_LIMIT, PICKER_MODEL_NAMES } from '../shared/config'
 import { splitThinking } from '../shared/thinking'
+import { isProviderLimitText } from '../shared/agent'
+import type { LaneBilling } from '../shared/types'
 import { AiError, readSse, textFromContent, type ChatMessage, type StreamPiece } from './ai'
 import type { Env } from './env'
 
@@ -18,6 +20,7 @@ const POLLINATIONS_KEYED_URL = 'https://gen.pollinations.ai/v1/chat/completions'
 const POLLINATIONS_KEYLESS_URL = 'https://text.pollinations.ai/openai'
 const AIHUBMIX_URL = 'https://aihubmix.com/v1/chat/completions'
 const LLM7_URL = 'https://api.llm7.io/v1/chat/completions'
+const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions'
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const MISTRAL_URL = 'https://api.mistral.ai/v1/chat/completions'
@@ -112,7 +115,7 @@ const CLOUDFLARE_MODELS = [
   '@cf/meta/llama-4-scout-17b-16e-instruct',
   '@cf/mistralai/mistral-small-3.1-24b-instruct',
 ]
-// BlockRun's live free list. It exposes several models beyond the two Quill
+// BlockRun's live free list. It exposes several models beyond the two Ink
 // originally used, all through the same keyless endpoint.
 const BLOCKRUN_MODELS = [
   'nvidia/nemotron-3-super-120b',
@@ -128,6 +131,8 @@ export type PublicLane = {
   model: string
   label: string
   description: string
+  /** Whether using this lane can spend real credits. */
+  billing?: LaneBilling
   /** True when the provider accepts OpenAI-style image_url content parts. */
   vision?: boolean
   /** Sent as a bearer token; LLM7 documents the literal "unused" for anonymous use. */
@@ -152,8 +157,12 @@ type LaneInput = {
   fallbackToReasoning?: boolean
   /** Override the streaming deadline for short internal calls. */
   timeoutMs?: number
+  /** Abort only after this long with no streamed piece; resets on activity. */
+  idleMs?: number
   /** Allow a lane to retry after its in-isolate cooldown; the provider's own 429 still applies. */
   allowCooling?: boolean
+  /** Keep a complete-looking partial answer if the lane goes quiet near the end. */
+  keepPartial?: boolean
 }
 
 /** One lane's outcome, for the persisted provider-health table. */
@@ -177,6 +186,8 @@ const cooldowns = new Map<string, number>()
 
 export const laneKey = (lane: PublicLane) => `${new URL(lane.url).host}|${lane.model}`
 const isCooling = (lane: PublicLane) => (cooldowns.get(laneKey(lane)) ?? 0) > Date.now()
+/** Lets an engine sort active lanes before a resting lane it may still retry. */
+export const laneIsCooling = (lane: PublicLane) => isCooling(lane)
 const cool = (lane: PublicLane, ms: number) => {
   cooldowns.set(laneKey(lane), Date.now() + ms)
 }
@@ -219,7 +230,7 @@ function requestBody(lane: PublicLane, input: LaneInput, stream: boolean): Recor
 function labelFor(id: string): string {
   const lower = id.toLowerCase()
   if (lower.includes('deepseek-r1-distill-qwen-32b')) return 'DeepSeek R1 Distill 32B'
-  if (lower.includes('deepseek-v4.1')) return 'DeepSeek V4.1 Flash'
+  if (lower === 'deepseek-flash' || lower === 'deepseek-flash-latest' || lower.includes('deepseek-v4.1')) return 'DeepSeek V4.1 Flash'
   if (lower.includes('deepseek-v3.2')) return 'DeepSeek V3.2'
   if (lower.includes('deepseek-v3.1')) return 'DeepSeek V3.1'
   if (lower.includes('deepseek-v4-pro')) return 'DeepSeek V4 Pro'
@@ -233,9 +244,15 @@ function labelFor(id: string): string {
     const name = version ? `GLM-${version}` : 'GLM'
     return lower.includes('flash') ? `${name} Flash` : name
   }
+  if (lower.includes('gpt-6.1-sol')) return 'GPT-6.1 Sol'
+  if (lower.includes('gpt-6.1')) return 'GPT-6.1'
   if (lower.includes('gpt-6')) return 'GPT-6'
   if (lower.includes('openrouter/free')) return 'OpenRouter Free Router'
+  if (lower.includes('claude-sonnet-5-5')) return 'Claude Sonnet 5.5'
+  if (lower.includes('claude-sonnet-5')) return 'Claude Sonnet 5'
+  if (lower.includes('claude-opus-5')) return 'Claude Opus 5'
   if (lower.includes('claude')) return 'Claude'
+  if (lower.includes('gemini-4-argon')) return 'Gemini 4 Argon'
   if (lower.includes('gemini-4')) return 'Gemini 4'
   if (lower.includes('gemini-3.8')) return 'Gemini 3.8 Flash'
   if (lower.includes('gemini-3.6')) return 'Gemini 3.6 Flash'
@@ -376,7 +393,30 @@ export function pickPickerFamilies(
   lanes: PublicLane[],
   statusById: ReadonlyMap<string, string> = new Map(),
 ): { family: string; lane: PublicLane }[] {
-  return pickModelFamilies(lanes, statusById).slice(0, PICKER_MODEL_LIMIT)
+  const families = pickModelFamilies(lanes, statusById)
+  const visible = families.slice(0, PICKER_MODEL_LIMIT)
+  // DeepSeek V4.1 is a deliberate product choice, not just whichever family
+  // happened to win the strength sort. Pin the exact V4.1 lane into the
+  // shortlist whenever one is configured, replacing the last row rather than
+  // hiding it (and replacing a stronger non-4.1 DeepSeek representative too).
+  const exact = lanes.find((lane) => /(?:deepseek-flash|deepseek-v4\.1)/i.test(`${lane.model} ${lane.label}`))
+  if (exact) {
+    const row = { family: 'DeepSeek', lane: exact }
+    const at = visible.findIndex(({ family }) => family === 'DeepSeek')
+    if (at >= 0) visible[at] = row
+    else visible.splice(PICKER_MODEL_LIMIT - 1, 1, row)
+  }
+  return visible
+}
+
+/** The short display name for a picker row; upstream families stay internal. */
+export function pickerModelName(index: number): string {
+  return PICKER_MODEL_NAMES[index] ?? 'Ink'
+}
+
+/** The one-line description shown under a picker row. */
+export function pickerModelDescription(index: number): string {
+  return PICKER_MODEL_DESCRIPTIONS[index] ?? 'A capable everyday model.'
 }
 
 export function laneStrength(model: string, url?: string): number {
@@ -502,11 +542,13 @@ export function publicLanes(env: Env): PublicLane[] {
       .map((model) => model.trim())
       .filter(Boolean) ?? OPENROUTER_FREE_MODELS
     for (const model of models) {
+      const free = model === 'openrouter/free' || /:free$/i.test(model)
       lanes.push({
         url: OPENROUTER_URL,
         model,
         label: labelFor(model),
-        description: 'Free with an OpenRouter key',
+        description: free ? 'Included via your OpenRouter key' : 'Paid via your OpenRouter key',
+        billing: free ? 'free' : 'paid',
         key: env.OPENROUTER_API_KEY,
       })
     }
@@ -522,6 +564,19 @@ export function publicLanes(env: Env): PublicLane[] {
         key: env.NVIDIA_API_KEY,
       })
     }
+  }
+
+  if (env.DEEPSEEK_API_KEY) {
+    // DeepSeek's current `deepseek-flash` id is served by V4.1-Flash-1017;
+    // keep an override so the exact dated checkpoint can be pinned later.
+    const model = env.DEEPSEEK_MODEL?.trim() || 'deepseek-flash'
+    lanes.push({
+      url: DEEPSEEK_URL,
+      model,
+      label: labelFor(model),
+      description: 'Free credit via DeepSeek',
+      key: env.DEEPSEEK_API_KEY,
+    })
   }
 
   if (env.LLM7_API_KEY) {
@@ -776,59 +831,159 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
   if (isCooling(lane) && !input.allowCooling) throw new AiError('busy', `${lane.label} is taking a short break.`, 429)
   const startedAt = Date.now()
   const timeout = AbortSignal.timeout(input.timeoutMs ?? 240_000)
-  const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout
+  // A total deadline is only a backstop. A long answer that keeps producing
+  // tokens is healthy; abort it only when the lane goes silent.
+  let lastPieceAt = Date.now()
+  const idle = input.idleMs ? new AbortController() : undefined
+  const idleTimer = input.idleMs
+    ? setInterval(() => {
+        if (Date.now() - lastPieceAt > input.idleMs!) idle?.abort()
+      }, 500)
+    : undefined
+  const deadline = idle ? AbortSignal.any([timeout, idle.signal]) : timeout
+  const signal = input.signal ? AbortSignal.any([input.signal, deadline]) : deadline
 
-  let response: Response
   try {
-    response = await fetch(lane.url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-        ...(lane.key ? { authorization: `Bearer ${lane.key}` } : {}),
-      },
-      body: JSON.stringify(requestBody(lane, input, true)),
-      signal,
-    })
-  } catch {
-    if (input.signal?.aborted) return
-    cool(lane, COOLDOWN_ERROR)
-    const failure = timeout.aborted ? new AiError('timeout', 'The free model took too long to answer.', 504) : new AiError('network', `Could not reach ${lane.label}.`, 503)
-    input.onLaneResult?.(failureResult(lane, failure, startedAt))
-    throw failure
-  }
-  if (!response.ok) {
-    const failure = await laneFailure(lane, response)
-    input.onLaneResult?.(failureResult(lane, failure, startedAt))
-    throw failure
-  }
-
-  let text = ''
-  let reasoning = ''
-  try {
-    for await (const piece of readSse(response, { client: input.signal, timeout })) {
-      if (piece.type === 'text') text += piece.text
-      else reasoning += piece.text
-      yield piece
-    }
-  } catch (error) {
-    if (!input.signal?.aborted) {
+    let response: Response
+    try {
+      response = await fetch(lane.url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          ...(lane.key ? { authorization: `Bearer ${lane.key}` } : {}),
+        },
+        body: JSON.stringify(requestBody(lane, input, true)),
+        signal,
+      })
+    } catch {
+      if (input.signal?.aborted) return
       cool(lane, COOLDOWN_ERROR)
-      input.onLaneResult?.(failureResult(lane, error, startedAt))
-    }
-    throw error
-  }
-  if (!text.trim()) {
-    if (input.fallbackToReasoning && reasoning.trim()) {
-      yield { type: 'text', text: reasoning }
-    } else {
-      cool(lane, COOLDOWN_ERROR)
-      const failure = new AiError('empty', `${lane.label} returned an empty reply.`, 502)
+      const failure = deadline.aborted ? new AiError('timeout', 'The model took too long to answer.', 504) : new AiError('network', `Could not reach ${lane.label}.`, 503)
       input.onLaneResult?.(failureResult(lane, failure, startedAt))
       throw failure
     }
+    if (!response.ok) {
+      const failure = await laneFailure(lane, response)
+      input.onLaneResult?.(failureResult(lane, failure, startedAt))
+      throw failure
+    }
+
+    let text = ''
+    let reasoning = ''
+    let buffered = ''
+    let released = false
+    try {
+      for await (const piece of readSse(response, { client: input.signal, timeout: deadline })) {
+        lastPieceAt = Date.now()
+        if (piece.type !== 'text') {
+          reasoning += piece.text
+          yield piece
+          continue
+        }
+        text += piece.text
+        if (released) {
+          yield piece
+          continue
+        }
+        // A few free gateways return a quota notice as a normal 200 response.
+        // Hold the first short stretch so that text never becomes a chat reply.
+        buffered += piece.text
+        if (isProviderLimitText(buffered)) {
+          cool(lane, COOLDOWN_MODEL)
+          const failure = new AiError('quota', `${lane.label} has no free quota left right now.`, 429)
+          input.onLaneResult?.(failureResult(lane, failure, startedAt))
+          throw failure
+        }
+        if (buffered.length < 120) continue
+        released = true
+        yield { type: 'text', text: buffered }
+      }
+    } catch (error) {
+      if (!input.signal?.aborted) {
+        cool(lane, COOLDOWN_ERROR)
+        input.onLaneResult?.(failureResult(lane, error, startedAt))
+      }
+      throw error
+    }
+    if (!released && buffered.trim()) yield { type: 'text', text: buffered }
+    if (!text.trim()) {
+      if (input.fallbackToReasoning && reasoning.trim()) {
+        yield { type: 'text', text: reasoning }
+      } else {
+        cool(lane, COOLDOWN_ERROR)
+        const failure = new AiError('empty', `${lane.label} returned an empty reply.`, 502)
+        input.onLaneResult?.(failureResult(lane, failure, startedAt))
+        throw failure
+      }
+    }
+    if (isProviderLimitText(text)) {
+      cool(lane, COOLDOWN_MODEL)
+      const failure = new AiError('quota', `${lane.label} has no free quota left right now.`, 429)
+      input.onLaneResult?.(failureResult(lane, failure, startedAt))
+      throw failure
+    }
+    input.onLaneResult?.({ lane, ok: true, latencyMs: Date.now() - startedAt })
+  } finally {
+    if (idleTimer) clearInterval(idleTimer)
   }
-  input.onLaneResult?.({ lane, ok: true, latencyMs: Date.now() - startedAt })
+}
+
+/**
+ * A complete answer with an inactivity deadline. A fixed total timeout kills a
+ * model that is still producing valid output; this version only stops when the
+ * lane goes quiet for `idleMs`, and resets on every streamed piece.
+ */
+export async function laneTextStreaming(
+  lane: PublicLane,
+  input: LaneInput & { idleMs?: number },
+): Promise<string> {
+  const idle = new AbortController()
+  let lastPieceAt = Date.now()
+  const idleMs = input.idleMs ?? 15_000
+  const timer = setInterval(() => {
+    if (Date.now() - lastPieceAt > idleMs) idle.abort()
+  }, 250)
+  let text = ''
+  try {
+    for await (const piece of streamLane(lane, {
+      ...input,
+      fallbackToReasoning: true,
+      signal: input.signal ? AbortSignal.any([input.signal, idle.signal]) : idle.signal,
+      // The total ceiling is only a backstop for a runaway stream. The idle
+      // timer is what protects an actively answering model.
+      // This function owns the idle deadline. Passing it to streamLane as well
+      // made every brief silence look like a provider failure, cooling lanes
+      // that were still healthy and leaving later browser steps with fewer
+      // models to choose from.
+      idleMs: undefined,
+      timeoutMs: input.timeoutMs ?? 180_000,
+    })) {
+      lastPieceAt = Date.now()
+      if (piece.type === 'text') text += piece.text
+    }
+    if (idle.signal.aborted) {
+      const partial = text.trim()
+      if (input.keepPartial && partial.length >= 40 && /[.!?)]$/.test(partial)) return partial
+      throw new AiError('timeout', `${lane.label} stopped sending output for ${Math.max(1, Math.round(idleMs / 1_000))} seconds.`, 504)
+    }
+    return text
+  } catch (error) {
+    if (idle.signal.aborted) {
+      const partial = text.trim()
+      if (input.keepPartial && partial.length >= 40 && /[.!?)]$/.test(partial)) return partial
+      throw new AiError('timeout', `${lane.label} stopped sending output for ${Math.max(1, Math.round(idleMs / 1_000))} seconds.`, 504)
+    }
+    if (text || input.signal?.aborted) throw error
+    // A few gateways accept stream:true but still return one JSON body. Retry
+    // those without streaming rather than treating a valid model as empty.
+    if (error instanceof AiError && (error.code === 'empty' || error.code === 'malformed' || error.code === 'interrupted')) {
+      return await laneText(lane, { ...input, timeoutMs: Math.min(input.timeoutMs ?? 60_000, 60_000) })
+    }
+    throw error
+  } finally {
+    clearInterval(timer)
+  }
 }
 
 /** One complete answer from a lane, used as a draft, a plan or a review. */
@@ -838,14 +993,19 @@ export async function laneText(lane: PublicLane, input: LaneInput): Promise<stri
   // forwards only reasoning to the caller; the final content is still returned.
   if (input.onReasoning) {
     let text = ''
-    for await (const piece of streamLane(lane, { ...input, fallbackToReasoning: true, timeoutMs: 90_000 })) {
+    for await (const piece of streamLane(lane, {
+      ...input,
+      fallbackToReasoning: true,
+      timeoutMs: input.timeoutMs ?? 600_000,
+      idleMs: input.idleMs ?? 90_000,
+    })) {
       if (piece.type === 'text') text += piece.text
       else await input.onReasoning(piece.text)
     }
     return text
   }
   const startedAt = Date.now()
-  const timeout = AbortSignal.timeout(90_000)
+  const timeout = AbortSignal.timeout(input.timeoutMs ?? 90_000)
   const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout
 
   let response: Response
@@ -861,9 +1021,18 @@ export async function laneText(lane: PublicLane, input: LaneInput): Promise<stri
       signal,
     })
   } catch {
+    // A caller-supplied deadline used to be reported as a manual stop because
+    // it aborts the same signal. Check the internal deadline first so the UI
+    // can say “timed out” instead of “reply was stopped”.
+    if (timeout.aborted) {
+      cool(lane, COOLDOWN_ERROR)
+      const failure = new AiError('timeout', `${lane.label} took too long to answer.`, 504)
+      input.onLaneResult?.(failureResult(lane, failure, startedAt))
+      throw failure
+    }
     if (input.signal?.aborted) throw new AiError('aborted', 'The reply was stopped.', 499)
     cool(lane, COOLDOWN_ERROR)
-    const failure = timeout.aborted ? new AiError('timeout', `${lane.label} took too long to answer.`, 504) : new AiError('network', `Could not reach ${lane.label}.`, 503)
+    const failure = new AiError('network', `Could not reach ${lane.label}.`, 503)
     input.onLaneResult?.(failureResult(lane, failure, startedAt))
     throw failure
   }
@@ -890,6 +1059,14 @@ export async function laneText(lane: PublicLane, input: LaneInput): Promise<stri
     input.onLaneResult?.(failureResult(lane, failure, startedAt))
     throw failure
   }
+  // Some providers answer HTTP 200 with a quota notice in the content. That is
+  // a lane failure, never an answer, and it must not be recorded as healthy.
+  if (isProviderLimitText(text)) {
+    cool(lane, COOLDOWN_MODEL)
+    const failure = new AiError('quota', `${lane.label} has no free quota left right now.`, 429)
+    input.onLaneResult?.(failureResult(lane, failure, startedAt))
+    throw failure
+  }
   input.onLaneResult?.({ lane, ok: true, latencyMs: Date.now() - startedAt })
   return text
 }
@@ -905,7 +1082,11 @@ export async function* publicComplete(lanes: PublicLane[], input: LaneInput): As
     if (input.signal?.aborted) return
     let yieldedText = false
     try {
-      for await (const piece of streamLane(lane, input)) {
+      for await (const piece of streamLane(lane, {
+        ...input,
+        timeoutMs: input.timeoutMs ?? 600_000,
+        idleMs: input.idleMs ?? 90_000,
+      })) {
         if (piece.type === 'text') yieldedText = true
         yield piece
       }
@@ -917,5 +1098,5 @@ export async function* publicComplete(lanes: PublicLane[], input: LaneInput): As
     }
   }
   if (lastError instanceof AiError && lastError.code === 'invalid_key') throw lastError
-  throw new AiError('busy', 'The free models are busy right now. Try again in a minute.', 429)
+  throw new AiError('busy', 'The models are busy right now. Try again in a minute.', 429)
 }

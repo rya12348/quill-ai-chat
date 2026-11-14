@@ -3,5 +3,6 @@
   "compatibilityDate": "2026-09-29",
   "modules": [{ "name": "index.js", "type": "esm", "path": "./dist/ai_chat/index.js" }],
   "assetsDirectory": "./dist/client",
-  "spa": true
+  "spa": true,
+  "realtime": true
 }

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "producthunt": {
+      "type": "http",
+      "url": "https://mcp.producthunt.com/mcp"
+    }
+  }
+}

@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router'
 
 import type { ArtifactKind, ArtifactStatus, ArtifactSummary } from '../../shared/types'
 import { formatBytes } from '../../shared/pdf'
+import { BrandArt } from '../components/BrandArt'
 import { ShareDialog } from '../components/ShareDialog'
 import { Badge, Spinner, useToast } from '../components/ui'
 import { downloadArtifact, useArtifacts, useDuplicateArtifact, usePinArtifact, useReviewSummary } from '../lib/api'
@@ -63,7 +64,7 @@ function remixText(item: ArtifactSummary): string {
 }
 
 const ACTION =
-  'inline-flex h-7 items-center gap-1 rounded-tile px-1.5 text-[11px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-3.5 [&_svg]:shrink-0'
+  'inline-flex h-8 items-center gap-1 rounded-tile px-2 text-[12px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0'
 
 function ArtifactCard({
   item,
@@ -95,7 +96,7 @@ function ArtifactCard({
           <Icon className="size-3.5" />
         </span>
         <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-faint">{meta.label}</span>
-        <Badge tone={statusTone(item.status)} className="ml-auto h-5 px-1.5 text-[10.5px]">
+        <Badge tone={statusTone(item.status)} className="ml-auto h-5 px-1.5 text-[11.5px]">
           {STATUS_LABEL[item.status]}
         </Badge>
         <button
@@ -114,10 +115,10 @@ function ArtifactCard({
         </button>
       </div>
       <Link to={`/c/${item.conversationId}#message-${item.messageId}`} className="group mt-3 block">
-        <h2 className="line-clamp-2 text-[14px] font-medium leading-snug text-fg">{item.title}</h2>
-        <p className="mt-1 line-clamp-2 text-[11.5px] leading-relaxed text-muted">{item.detail}</p>
+        <h2 className="line-clamp-2 text-[15px] font-medium leading-snug text-fg">{item.title}</h2>
+        <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-muted">{item.detail}</p>
       </Link>
-      <div className="mt-auto flex items-end justify-between gap-3 pt-3 text-[10.5px] text-faint">
+      <div className="mt-auto flex items-end justify-between gap-3 pt-3 text-[11.5px] text-faint">
         <span className="min-w-0">
           <span className="flex min-w-0 items-center gap-1.5">
             <MessageCircle className="size-3 shrink-0" />
@@ -220,12 +221,11 @@ export function Library() {
   return (
     <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[920px] px-4 pb-14 pt-8 md:px-6 md:pt-10">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">Library</p>
         <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-[28px] font-semibold tracking-[-0.02em]">Artifacts</h1>
-            <p className="mt-1 max-w-[480px] text-[13px] leading-relaxed text-muted">
-              Pages, spreadsheet analyses, study sets and research reports saved alongside your chats.
+            <h1 className="font-display text-[38px] font-medium leading-tight tracking-[-0.03em]">Saved work</h1>
+            <p className="mt-1.5 max-w-[620px] text-[14.5px] leading-relaxed text-muted">
+              Pages, spreadsheet analyses, study sets and research reports, saved next to the chat that made them.
             </p>
           </div>
           {items.length > 0 && <span className="text-[11.5px] tabular-nums text-faint">{items.length} saved</span>}
@@ -235,14 +235,14 @@ export function Library() {
           to="/tools/pdf"
           className="mt-5 flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3 shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-colors hover:border-line-strong hover:bg-surface-2/40"
         >
-          <span className="grid size-8 shrink-0 place-items-center rounded-tile bg-fg text-bg">
-            <FileText className="size-4" />
+          <span className="grid size-9 shrink-0 place-items-center rounded-tile bg-accent text-bg">
+            <FileText className="size-[17px]" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-[12.5px] font-medium">PDF Studio</span>
-            <span className="mt-0.5 block text-[11.5px] text-muted">Merge, split, compress, sign and convert documents privately.</span>
+            <span className="block text-[13.5px] font-medium">PDF Studio</span>
+            <span className="mt-0.5 block text-[12.5px] text-muted">Merge, split, compress, sign and convert documents privately.</span>
           </span>
-          <span className="inline-flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-muted">
+          <span className="inline-flex shrink-0 items-center gap-1 text-[12.5px] font-medium text-muted">
             Open
             <ArrowUpRight className="size-3.5" />
           </span>
@@ -255,7 +255,7 @@ export function Library() {
                 <HardDrive className="size-3.5 text-faint" />
                 PDF Studio files
               </h2>
-              <span className="text-[10.5px] text-faint">On this device · {localFiles.length}</span>
+              <span className="text-[11.5px] text-faint">On this device · {localFiles.length}</span>
             </div>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
               {localFiles.map((file) => (
@@ -265,7 +265,7 @@ export function Library() {
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[12px] font-medium" title={file.name}>{file.name}</p>
-                    <p className="mt-0.5 text-[10.5px] text-faint">
+                    <p className="mt-0.5 text-[11.5px] text-faint">
                       {formatBytes(file.size)}{file.pages ? ` · ${file.pages} page${file.pages === 1 ? '' : 's'}` : ''} · {when(file.createdAt)}
                     </p>
                   </div>
@@ -314,11 +314,11 @@ export function Library() {
                   onClick={() => setFilter(option.id)}
                   className={cx(
                     'inline-flex h-8 items-center gap-1.5 rounded-tile px-3 text-[12.5px] font-medium transition-colors',
-                    selected ? 'bg-fg text-bg' : 'text-muted hover:bg-surface-2 hover:text-fg',
+                    selected ? 'bg-accent text-bg shadow-[0_3px_10px_-4px_rgb(168_73_20/0.5)]' : 'text-muted hover:bg-surface-2 hover:text-fg',
                   )}
                 >
                   {option.label}
-                  <span className={cx('text-[10.5px] tabular-nums', selected ? 'text-bg/60' : 'text-faint')}>{count(option.id)}</span>
+                  <span className={cx('text-[11.5px] tabular-nums', selected ? 'text-bg' : 'text-faint')}>{count(option.id)}</span>
                 </button>
               )
             })}
@@ -339,11 +339,9 @@ export function Library() {
           </div>
         ) : items.length === 0 ? (
           <div className="mt-10 rounded-card border border-dashed border-line bg-surface/50 px-5 py-12 text-center">
-            <span className="mx-auto grid size-10 place-items-center rounded-tile bg-surface-2 text-faint">
-              <Layers className="size-4" />
-            </span>
-            <p className="mt-3 text-[14px] font-medium">Nothing saved yet</p>
-            <p className="mx-auto mt-1 max-w-[360px] text-[12.5px] leading-relaxed text-muted">
+            <BrandArt variant="horizon" className="mx-auto w-[260px] max-w-full" />
+            <p className="mt-3 text-[15.5px] font-medium">Nothing saved yet</p>
+            <p className="mx-auto mt-1.5 max-w-[390px] text-[13.5px] leading-relaxed text-muted">
               Build a page, analyze a spreadsheet, study a topic or run research. The result will appear here automatically.
             </p>
             <Link to="/" className="mt-4 inline-flex h-8 items-center rounded-tile border border-line bg-surface px-3 text-[12.5px] font-medium text-muted transition-colors hover:text-fg">

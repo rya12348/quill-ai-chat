@@ -201,6 +201,11 @@ test('splits a multi-page build and drops a broken page', () => {
   assert.equal(two.length, 2)
   assert.equal(two[0].name, 'index.html')
   assert.equal(two[1].name, 'menu.html')
+  // The deterministic foundation keeps an unconstrained image inside its
+  // column and gives a fixed-ratio hero room for a mobile form.
+  assert.match(two[0].html, /data-stet-base/)
+  assert.match(two[0].html, /img\{max-width:100%\}/)
+  assert.match(two[0].html, /min-height:360px/)
   // A nav link to a generated page becomes a preview tab link.
   assert.match(two[0].html, /href="#page:menu"/)
   // A truncated second page is dropped rather than failing the whole build.
@@ -243,8 +248,12 @@ test('turns a request into a photo subject, not web-page words', () => {
     photoQuery('Build a 2-page website for a neighborhood bakery called Crumb & Co, with photos and gentle animations'),
     'neighborhood bakery',
   )
-  assert.equal(photoQuery('Build a landing page for a coffee shop with animations'), 'coffee shop')
+  assert.equal(photoQuery('Build a landing page for a coffee shop with animations'), 'coffee beans')
   assert.equal(photoQuery('make me a portfolio for a wedding photographer named Ana'), 'wedding photographer')
+  assert.equal(
+    photoQuery('Build a landing page for Ember & Oak, a small specialty coffee roaster in Portland. Include the roast menu, the sourcing story, and a visit section.'),
+    'coffee beans',
+  )
 })
 
 test('keeps only usable landscape photographs from Commons', () => {
@@ -268,7 +277,9 @@ test('keeps only usable landscape photographs from Commons', () => {
       { title: 'File:Bakery logo.svg', imageinfo: info(1200, 800, 'image/svg+xml', 'CC0') },
       { title: 'File:Map of bakeries.jpg', imageinfo: info(2000, 1200, 'image/jpeg', 'CC BY 4.0') },
       { title: 'File:The Erotic Bakery, Seattle.jpg', imageinfo: info(2500, 1600, 'image/jpeg', 'CC BY 3.0') },
+      { title: 'File:National Portrait Gallery.jpg', imageinfo: info(3000, 2000, 'image/jpeg', 'CC BY 2.0') },
       { title: 'File:Bakery ovens.jpg', imageinfo: info(3000, 2000, 'image/jpeg', 'CC BY 2.0') },
+      { title: "File:Peet's Coffee at Universal CityWalk Beijing.jpg", imageinfo: info(3000, 2000, 'image/jpeg', 'CC BY-SA 4.0') },
     ],
     4,
     'bakery',

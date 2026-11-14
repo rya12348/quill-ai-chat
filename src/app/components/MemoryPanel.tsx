@@ -6,7 +6,7 @@ import { useConversationMemory, useEditConversationMemory, useForgetConversation
 import { cx } from '../lib/cx'
 
 /**
- * What Quill carries forward from turns that left the recent-message window.
+ * What Ink carries forward from turns that left the recent-message window.
  * It is written by the summarizer, sent with every new question, and can be
  * rewritten or forgotten here. Forgetting removes the memory, not the messages.
  */
@@ -61,7 +61,7 @@ export function MemoryPanel({ conversationId }: { conversationId: string }) {
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11.5px] font-medium text-muted transition-colors hover:text-fg"
       >
         <Brain className="size-3.5 shrink-0 text-accent" />
-        <span className="min-w-0 flex-1 truncate">What Quill remembers</span>
+        <span className="min-w-0 flex-1 truncate">What Ink remembers</span>
         <span className="hidden shrink-0 text-[11px] text-faint sm:inline">
           {memory.summary.length.toLocaleString()} characters · updated {new Date(memory.updatedAt).toLocaleDateString()}
         </span>
@@ -76,7 +76,7 @@ export function MemoryPanel({ conversationId }: { conversationId: string }) {
                 onChange={(event) => setDraft(event.target.value)}
                 rows={6}
                 maxLength={MAX_SUMMARY_CHARS}
-                aria-label="What Quill remembers"
+                aria-label="What Ink remembers"
                 className="w-full resize-y rounded-[8px] border border-line bg-surface px-2.5 py-2 text-[12.5px] leading-relaxed text-fg outline-none focus:border-line-strong"
               />
               <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -100,7 +100,7 @@ export function MemoryPanel({ conversationId }: { conversationId: string }) {
                   <X className="size-3" />
                   Cancel
                 </button>
-                <span className="text-[10.5px] text-faint">
+                <span className="text-[11.5px] text-faint">
                   {draft.trim().length.toLocaleString()} / {MAX_SUMMARY_CHARS.toLocaleString()}
                 </span>
               </div>
@@ -150,7 +150,7 @@ export function MemoryPanel({ conversationId }: { conversationId: string }) {
             </>
           )}
           {error ? <p className="mt-2 text-[11px] text-danger">{error}</p> : null}
-          <p className="mt-2 text-[10.5px] leading-relaxed text-faint">
+          <p className="mt-2 text-[11.5px] leading-relaxed text-faint">
             This summary is sent with each new question once earlier turns fall outside the recent-message window. Forgetting it
             removes the summary, not the chat messages.
           </p>

@@ -10,7 +10,7 @@ export type ChatRequest = {
   projectId?: string | null
   model?: string
   regenerate?: boolean
-  strategy?: 'fast' | 'blend' | 'proof' | 'research' | 'analyze' | 'build' | 'canvas' | 'agent'
+  strategy?: 'fast' | 'blend' | 'proof' | 'research' | 'analyze' | 'build' | 'canvas' | 'agent' | 'advisor'
   reasoning?: boolean
   effort?: ReasoningEffort
   /** Stable id for this send, so an offline retry cannot create a duplicate. */
@@ -26,7 +26,13 @@ export async function streamChat(body: ChatRequest, options: { signal: AbortSign
   const response = await fetch('/api/chat', {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+    headers: {
+      'content-type': 'application/json',
+      accept: 'text/event-stream',
+      // The service worker may replay this request once after a handoff. The
+      // client message id makes the replay idempotent on the server.
+      ...(body.clientMessageId ? { 'x-stet-idempotent': '1' } : {}),
+    },
     body: JSON.stringify(body),
     signal: options.signal,
   })
@@ -48,7 +54,14 @@ export async function streamChat(body: ChatRequest, options: { signal: AbortSign
           .filter((line) => line.startsWith('data:'))
           .map((line) => line.slice(5).trimStart())
           .join('\n')
-        if (data) options.onEvent(JSON.parse(data) as ChatEvent)
+        if (data) {
+          try {
+            options.onEvent(JSON.parse(data) as ChatEvent)
+          } catch {
+            // A proxy or a truncated frame can leave one bad event. Ignore it
+            // and keep the stream alive instead of failing the whole reply.
+          }
+        }
       }
     }
   } finally {

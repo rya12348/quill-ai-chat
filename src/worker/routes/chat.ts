@@ -5,23 +5,25 @@
 import { Hono } from 'hono'
 import { streamSSE, type SSEStreamingApi } from 'hono/streaming'
 
-import { ANALYZE_DAILY_LIMIT, BUILD_DAILY_LIMIT, DAILY_MESSAGE_LIMIT, DEFAULT_MODEL, MAX_CONTEXT_MESSAGES, MAX_INSTRUCTIONS_CHARS, MAX_MESSAGE_CHARS, RESEARCH_DAILY_LIMIT, SYSTEM_PROMPT, type ModelId } from '../../shared/config'
+import { ADVISOR_PROMPT, ANALYZE_DAILY_LIMIT, BUILD_DAILY_LIMIT, DAILY_MESSAGE_LIMIT, DEFAULT_MODEL, MAX_CONTEXT_MESSAGES, MAX_INSTRUCTIONS_CHARS, MAX_MESSAGE_CHARS, RESEARCH_DAILY_LIMIT, STOPPED_REPLY, SYSTEM_PROMPT, toolModeNudge, type ModelId } from '../../shared/config'
 import type { AgentInfo, AgentTool, AnalysisInfo, AnalysisJob, BuildInfo, CanvasInfo, ChatEvent, Message, ProofInfo, ProofJob, ResearchInfo } from '../../shared/types'
+import { isAnalyzeIntent, isBuildRequest, isCanvasRequest, isResearchIntent, isSmallTalk, isWritingRequest, needsCurrentFacts, SUGGESTED_MODE_LABEL, suggestToolMode } from '../../shared/agent'
 import { agentComplete } from '../agent'
 import { AiError, aiConfigured, complete, isModelId, type ChatMessage } from '../ai'
 import { AttachmentValidationError, attachmentMeta, loadAttachmentsForMessages, messageWithAttachments, parseAttachments, type StoredAttachment } from '../attachments'
-import { analyzeEnabledFor, buildEnabledFor, isOwner, researchEnabledFor } from '../auth'
+import { analyzeEnabledFor, appOrigin, buildEnabledFor, isGuestUser, isOwner, researchEnabledFor } from '../auth'
 import { blendComplete, depthFor, type Depth } from '../blend'
-import { chooseDepth, depthBucket, loadDepthQuality, loadLaneQuality, type LaneRecord, type LaneRoute, type StoredLaneRoute } from '../lane-routing'
+import { chooseDepth, depthBucket, loadDepthQuality, loadLaneQuality, loadTaskQuality, type LaneRecord, type LaneRoute, type StoredLaneRoute } from '../lane-routing'
 import { analysisComplete, parseDataset } from '../analysis'
-import { buildComplete, buildEmbed } from '../build'
+import { buildComplete, buildEmbed, buildReference, isProxyRequest } from '../build'
 import { canvasComplete } from '../canvas'
 import { kindFor, proofComplete, proofSignature, streamChunks } from '../proof'
-import { analysisToday, buildToday, id, mapConversation, mapMessage, now, repliesToday, researchToday, titleFrom, usageToday, utcDay } from '../db'
+import { analysisToday, buildToday, claimGuestTurn, claimGuestUsage, guestUsageToday, id, mapConversation, mapMessage, now, parseBuild, repliesToday, researchToday, titleFrom, usageToday, utcDay } from '../db'
 import { refreshConversationSummary } from '../memory'
 import { activeLanes, laneKey, orderLanes, publicComplete, publicLanes, type LaneResult } from '../public-ai'
 import { healthRows, recordProviderResult } from '../provider-health'
 import { planAndRetrieve } from '../plan'
+import { guestUsageKey, RATE_WINDOWS, rateLimit, tooManyRequests } from '../rate-limit'
 import { researchComplete } from '../research'
 import { findSiteTarget, webProxyPath, webProxyToken } from '../site-proxy'
 import { searchConfigured, searchPrompt, shouldSearch, type SearchResult } from '../search'
@@ -52,11 +54,65 @@ const inflightCount = (owner: string) => {
 // runtimes do not all report a closed connection, and a blocked write would
 // otherwise hold the upstream request (and the credits it spends) open.
 const WRITE_TIMEOUT = 10_000
+// In a Build chat, these words can edit the existing page without naming a
+// page, site or app again.
+const BUILD_EDIT_REQUEST = /\b(?:change|make|add|remove|update|fix|move|resize|recolor|rename|edit|replace|center|align|dark|light|bigger|smaller|wider|narrower|color|colour|font|header|footer|section|layout|button|text|image|photo|logo|nav|sidebar)\b/i
+
+/** The latest editable page in a conversation, so Build follow-ups still work. */
+async function latestBuild(db: D1Database, owner: string, conversationId: string, before: number): Promise<BuildInfo | undefined> {
+  const rows = await db
+    .prepare(
+      `SELECT mb.content FROM message_build mb
+       JOIN messages m ON m.id = mb.message_id AND m.owner_sub = mb.owner_sub
+       WHERE mb.owner_sub = ? AND m.conversation_id = ? AND m.role = 'assistant' AND m.created_at < ?
+       ORDER BY m.created_at DESC LIMIT 5`,
+    )
+    .bind(owner, conversationId, before)
+    .all<{ content: string }>()
+  for (const candidate of rows.results) {
+    try {
+      const info = (JSON.parse(candidate.content) as { info?: BuildInfo }).info
+      if (info && info.kind !== 'embed' && info.html) return info
+    } catch {
+      /* an older or malformed row must not block a new build */
+    }
+  }
+  return undefined
+}
+
+/** Structural summaries of builds this owner rated helpful, never their copy. */
+async function loadBuildReferences(db: D1Database, owner: string): Promise<string[]> {
+  try {
+    const rows = await db
+      .prepare(
+        `SELECT mb.content
+         FROM message_build mb
+         JOIN message_feedback f ON f.message_id = mb.message_id AND f.owner_sub = mb.owner_sub
+         WHERE mb.owner_sub = ? AND f.rating = 'up'
+         ORDER BY f.created_at DESC LIMIT 3`,
+      )
+      .bind(owner)
+      .all<{ content: string }>()
+    return rows.results
+      .flatMap((row) => {
+        const info = parseBuild(row.content)
+        return info && info.kind !== 'embed' ? [buildReference(info)] : []
+      })
+      .slice(0, 2)
+  } catch {
+    return []
+  }
+}
 
 chat.post('/', async (c) => {
   const db = c.get('db')
   const user = c.get('user')
   const owner = user.sub
+  // Guest allowances live in a separate, address-keyed ledger. Their cookie
+  // still owns conversations; it just cannot be the quota identity.
+  const guestKey = isGuestUser(user) ? await guestUsageKey(c.req.raw) : undefined
+  const limit = await rateLimit(db, 'chat', c.req.raw, 30, RATE_WINDOWS.chat)
+  if (!limit.allowed) return tooManyRequests(c, limit)
   const unlimitedBuilds = isOwner(c.env, user, c.req.raw)
   const input = await c.req.json<Input>().catch(() => ({}) as Input)
   let incomingAttachments: StoredAttachment[] = []
@@ -153,7 +209,7 @@ chat.post('/', async (c) => {
   if (wantsAnalysis && (usingApi || !analyzeEnabled)) {
     return c.json({ error: 'analyze_unavailable', message: 'Analyze is not enabled on this deployment.' }, 503)
   }
-  if (wantsAnalysis) {
+  if (wantsAnalysis && (analyzeDataset || isAnalyzeIntent(content))) {
     if (regenerate || attachments.length || !analyzeDataset) {
       return c.json({ error: 'attachment', message: 'Analyze needs one CSV, TSV or XLSX dataset. Attach it and ask a question.' }, 400)
     }
@@ -174,6 +230,7 @@ chat.post('/', async (c) => {
     return c.json({ error: 'empty', message: 'Describe what the flashcards or quiz should cover.' }, 400)
   }
   const wantsAgent = input.strategy === 'agent'
+  const wantsAdvisor = input.strategy === 'advisor'
   if (wantsAgent && (usingApi || !allLanes.length)) {
     return c.json({ error: 'agent_unavailable', message: 'Agent needs the free hosted models.' }, 503)
   }
@@ -192,14 +249,40 @@ chat.post('/', async (c) => {
     return c.json({ error: 'vision_unavailable', message: 'No free image-capable model is configured right now. Add an OpenRouter or Gemini key and try again.' }, 503)
   }
   if (wantsResearch && !allLanes.length) {
-    return c.json({ error: 'research_unavailable', message: 'No free model lanes are configured for Research.' }, 503)
+    return c.json({ error: 'research_unavailable', message: 'No models are configured for Research.' }, 503)
   }
-  const research = wantsResearch
-  const analyze = wantsAnalysis
+  // A selected mode should not force its artifact onto an unrelated message.
+  // Greetings and other requests fall through to normal chat; Build can still
+  // edit a page already in this conversation.
+  const priorBuild = wantsBuild && conversationRow
+    ? await latestBuild(db, owner, String(conversationRow.id), t)
+    : undefined
+  const buildTarget = wantsBuild ? findSiteTarget(content) : undefined
+  const research = wantsResearch && !isSmallTalk(content) && isResearchIntent(content)
+  const analyze = wantsAnalysis && Boolean(analyzeDataset) && !regenerate && isAnalyzeIntent(content)
   const build = wantsBuild
-  const canvas = wantsCanvas
+    && !isSmallTalk(content)
+    && (isBuildRequest(content) || Boolean(buildTarget) || (Boolean(priorBuild) && BUILD_EDIT_REQUEST.test(content)))
+  const canvas = wantsCanvas && !isSmallTalk(content) && isCanvasRequest(content)
+  // A plain Chat reply can hand the request to the mode that actually does the
+  // work. The model gets one short nudge naming that mode; the UI offers the
+  // switch beside the reply. Capability checks keep the nudge truthful.
+  const hasAttachments = attachments.length > 0
+  const hasDataAttachment = attachments.some((attachment) => /\.(?:csv|tsv|xlsx)$/i.test(attachment.name))
+  let suggestedMode = !usingApi && (input.strategy === 'fast' || input.strategy === undefined)
+    ? suggestToolMode(content, { hasAttachments, hasDataAttachment })
+    : null
+  if (suggestedMode === 'research' && !researchEnabled) suggestedMode = null
+  if (suggestedMode === 'analyze' && !analyzeEnabled) suggestedMode = null
+  if (suggestedMode === 'build' && !buildEnabled) suggestedMode = null
+  if ((suggestedMode === 'canvas' || suggestedMode === 'agent' || suggestedMode === 'proof') && !lanes.length) suggestedMode = null
+  // A school essay can be written without browsing, but once the request asks
+  // for sources or citations, Research mode should actually research them.
+  const wantsSources = /\b(?:sources?|cite|citations?|references?|bibliography)\b/i.test(content)
+  const wantsResearchPaper = /\bresearch\s+(?:paper|report|essay|project)\b/i.test(content)
+  const writingDocument = research && isWritingRequest(content) && !needsCurrentFacts(content) && !wantsSources && !wantsResearchPaper
   const agent = wantsAgent
-  if (research) {
+  if (research && !writingDocument) {
     const reports = await researchToday(db, owner)
     if (reports >= RESEARCH_DAILY_LIMIT) {
       return c.json({ error: 'research_limit', message: `You have reached today's limit of ${RESEARCH_DAILY_LIMIT} research reports.`, resetsAt: utcDay().end }, 429)
@@ -216,6 +299,39 @@ chat.post('/', async (c) => {
     if (builds >= BUILD_DAILY_LIMIT) {
       return c.json({ error: 'build_limit', message: `You have reached today's limit of ${BUILD_DAILY_LIMIT} builds.`, resetsAt: utcDay().end }, 429)
     }
+  }
+  // A guest's cookie is disposable, so the guest allowance is claimed against
+  // a hashed address too. The claim is atomic: a shared network cannot race
+  // several fresh cookies past the same daily caps, and a failed mode check
+  // never spends the reply slot.
+  const guestTurn = guestKey
+    ? await claimGuestTurn(
+        db,
+        guestKey,
+        { research, analyze, build: build && !unlimitedBuilds },
+        {
+          replies: DAILY_MESSAGE_LIMIT,
+          research: RESEARCH_DAILY_LIMIT,
+          analyze: ANALYZE_DAILY_LIMIT,
+          build: BUILD_DAILY_LIMIT,
+        },
+      )
+    : undefined
+  if (guestKey && !guestTurn) {
+    const counts = await guestUsageToday(db, guestKey)
+    if (counts.replies >= DAILY_MESSAGE_LIMIT) {
+      return c.json({ error: 'limit', message: `You have reached today's limit of ${DAILY_MESSAGE_LIMIT} replies.`, resetsAt: utcDay().end }, 429)
+    }
+    if (research && counts.research >= RESEARCH_DAILY_LIMIT) {
+      return c.json({ error: 'research_limit', message: `You have reached today's limit of ${RESEARCH_DAILY_LIMIT} research reports.`, resetsAt: utcDay().end }, 429)
+    }
+    if (analyze && counts.analyze >= ANALYZE_DAILY_LIMIT) {
+      return c.json({ error: 'analyze_limit', message: `You have reached today's limit of ${ANALYZE_DAILY_LIMIT} analyses.`, resetsAt: utcDay().end }, 429)
+    }
+    if (build && !unlimitedBuilds && counts.build >= BUILD_DAILY_LIMIT) {
+      return c.json({ error: 'build_limit', message: `You have reached today's limit of ${BUILD_DAILY_LIMIT} builds.`, resetsAt: utcDay().end }, 429)
+    }
+    return c.json({ error: 'limit', message: 'You have reached a daily guest limit.', resetsAt: utcDay().end }, 429)
   }
   // Blend is the default: two free models draft, one merges. 'team' uses the
   // same free-lane engine with the full independent draft/review/verify pass.
@@ -381,10 +497,29 @@ chat.post('/', async (c) => {
     let agentInfo: AgentInfo | undefined
     let embedToken: string | undefined
     let embedUrl: string | undefined
+    let buildProxyToken: string | undefined
+    let buildProxyUrl: string | undefined
     let proofJob: ProofJob | undefined
     let laneRoute: LaneRoute | undefined
     let chosenDepth: Depth | undefined
     let gone = false
+    // A proxy app is generated by Build but needs a real server-side page
+    // fetcher. The token is the capability; it can load public pages only.
+    const prepareBuildProxy = async (question: string, previous?: BuildInfo): Promise<string | undefined> => {
+      if (!isProxyRequest(question)) return undefined
+      const existing = previous?.html.match(/\/api\/web-proxy\/([a-f0-9]{48})/)?.[1]
+      const token = existing ?? webProxyToken()
+      buildProxyToken = token
+      buildProxyUrl = new URL(webProxyPath(token), appOrigin(c.env, c.req.raw)).href
+      return buildProxyUrl
+    }
+    const storeBuildProxy = async () => {
+      if (!buildProxyToken || !buildProxyUrl) return
+      await db
+        .prepare(`INSERT OR REPLACE INTO build_embeds (token, message_id, owner_sub, url, created_at) VALUES (?, ?, ?, ?, ?)`)
+        .bind(buildProxyToken, assistantMessageId, owner, 'https://example.com/', replyAt)
+        .run()
+    }
     // Health writes are awaited before the turn ends: a fire-and-forget write
     // can be dropped when the stream closes, and a reload would then show the
     // previous status even though this send just succeeded.
@@ -450,6 +585,17 @@ chat.post('/', async (c) => {
               assistantMessageId,
               owner,
               embedUrl,
+              replyAt,
+            ),
+          )
+        }
+        if (buildProxyToken && buildProxyUrl) {
+          statements.push(
+            db.prepare(`INSERT OR REPLACE INTO build_embeds (token, message_id, owner_sub, url, created_at) VALUES (?, ?, ?, ?, ?)`).bind(
+              buildProxyToken,
+              assistantMessageId,
+              owner,
+              'https://example.com/',
               replyAt,
             ),
           )
@@ -566,12 +712,15 @@ chat.post('/', async (c) => {
         db.prepare(`DELETE FROM build_embeds WHERE owner_sub = ? AND message_id = ?`).bind(owner, assistantMessageId),
         db.prepare(`DELETE FROM messages WHERE owner_sub = ? AND id = ?`).bind(owner, assistantMessageId),
       ])
-    // The user stopped or left: stop upstream, keep what arrived (or nothing).
+    // The user stopped or left: stop upstream and keep a visible stopped
+    // reply. Without the fallback text an empty assistant row is hidden on the
+    // next load, which made Stop look like it deleted the answer.
     const abandon = async () => {
       if (gone) return
       gone = true
       controller.abort()
-      await (text ? save(true) : discard())
+      if (!text.trim()) text = STOPPED_REPLY
+      await save(true)
     }
     stream.onAbort(() => void abandon())
     // Some proxies close an SSE response that has sent no bytes for ~30s.
@@ -677,7 +826,8 @@ chat.post('/', async (c) => {
 
       const system = [
         `Today is ${new Date().toISOString().slice(0, 10)} (UTC). Treat this as the current date; use it when deciding whether a fact is current, and prefer recent sources over older ones.`,
-        SYSTEM_PROMPT,
+        wantsAdvisor ? ADVISOR_PROMPT : SYSTEM_PROMPT,
+        suggestedMode ? toolModeNudge(SUGGESTED_MODE_LABEL[suggestedMode]) : '',
         customInstructions ? `Standing instructions from the person you are helping:\n${customInstructions}` : '',
         projectInstructions ? `Instructions for this project (they refine, but never override, a safety rule or the request itself):\n${projectInstructions}` : '',
         memory ? `Rolling memory from earlier in this conversation. Use it for details that are no longer in the recent messages. Do not mention the memory or say that earlier context was condensed:\n${memory}` : '',
@@ -709,11 +859,16 @@ chat.post('/', async (c) => {
           loadDepthQuality(db, owner, kind, bucket),
         ])
         laneQuality = quality
-        chosenDepth = input.strategy === 'team'
-          ? 'deep'
-          : laneCount < 2
+        // Effort is the person's explicit compute budget. Max gets the deep
+        // plan/draft/review pass even for a short question; Low skips it.
+        chosenDepth =
+          effort === 'low'
             ? 'quick'
-            : chooseDepth(userMessage.content, depthFor(userMessage.content, laneCount), depthQuality)
+            : effort === 'max' || input.strategy === 'team'
+              ? 'deep'
+              : laneCount < 2
+                ? 'quick'
+                : chooseDepth(userMessage.content, depthFor(userMessage.content, laneCount), depthQuality)
       }
       if (agent) {
         // Agent reuses the free-mode engines as tools. The plan is untrusted,
@@ -722,14 +877,25 @@ chat.post('/', async (c) => {
         const checkTool = async (tool: AgentTool): Promise<string | null> => {
           if (tool === 'research') {
             const reports = await researchToday(db, owner)
-            return reports >= RESEARCH_DAILY_LIMIT ? `Daily research limit reached (${RESEARCH_DAILY_LIMIT}/day)` : null
+            if (reports >= RESEARCH_DAILY_LIMIT) return `Daily research limit reached (${RESEARCH_DAILY_LIMIT}/day)`
+            if (guestKey && !(await claimGuestUsage(db, guestKey, 'research', RESEARCH_DAILY_LIMIT))) {
+              return `Daily research limit reached (${RESEARCH_DAILY_LIMIT}/day)`
+            }
           }
           if (tool === 'build' && !unlimitedBuilds) {
             const builds = await buildToday(db, owner)
-            return builds >= BUILD_DAILY_LIMIT ? `Daily build limit reached (${BUILD_DAILY_LIMIT}/day)` : null
+            if (builds >= BUILD_DAILY_LIMIT) return `Daily build limit reached (${BUILD_DAILY_LIMIT}/day)`
+            if (guestKey && !(await claimGuestUsage(db, guestKey, 'build', BUILD_DAILY_LIMIT))) {
+              return `Daily build limit reached (${BUILD_DAILY_LIMIT}/day)`
+            }
           }
           return null
         }
+        const buildProxyPath = await prepareBuildProxy(userMessage.content)
+        const [buildQuality, buildReferences] = await Promise.all([
+          loadTaskQuality(db, owner, 'build'),
+          loadBuildReferences(db, owner),
+        ])
         const outcome = await agentComplete({
           lanes: orderLanes(lanes, model),
           question: userMessage.content,
@@ -738,6 +904,11 @@ chat.post('/', async (c) => {
           env: c.env,
           signal: controller.signal,
           messageId: assistantMessageId,
+          buildProxyPath,
+          buildQuality,
+          buildReferences,
+          system,
+          context: prompt.slice(1),
           health: new Map(
             (await healthRows(db, owner)).map((row) => [row.provider_id, { status: row.status, latencyMs: row.latency_ms }]),
           ),
@@ -754,11 +925,15 @@ chat.post('/', async (c) => {
         researchInfo = outcome.research
         buildInfo = outcome.build
         canvasInfo = outcome.canvas
+        proofInfo = outcome.proof
+        proofJob = outcome.proofJob ? { ...outcome.proofJob, messageId: assistantMessageId } : undefined
         results = outcome.sources
+        if (buildInfo) await storeBuildProxy()
         if (results.length && !(await send({ type: 'sources', sources: results }))) return await abandon()
         if (researchInfo && !(await send({ type: 'research', research: researchInfo }))) return await abandon()
         if (buildInfo && !(await send({ type: 'build', build: buildInfo }))) return await abandon()
         if (canvasInfo && !(await send({ type: 'canvas', canvas: canvasInfo }))) return await abandon()
+        if (proofInfo && !(await send({ type: 'proof', proof: proofInfo, ...(proofJob ? { job: proofJob } : {}) }))) return await abandon()
         for await (const piece of streamChunks(outcome.text, controller.signal)) {
           if (gone) return
           text += piece.text
@@ -798,29 +973,11 @@ chat.post('/', async (c) => {
         // A follow-up in a Build chat edits the previous page instead of
         // replacing it with an unrelated design. Embeds have no editable
         // document, so only page builds qualify.
-        let previous: BuildInfo | undefined
-        if (!target) {
-          const rows = await db
-            .prepare(
-              `SELECT mb.content FROM message_build mb
-               JOIN messages m ON m.id = mb.message_id AND m.owner_sub = mb.owner_sub
-               WHERE mb.owner_sub = ? AND m.conversation_id = ? AND m.role = 'assistant' AND m.created_at < ?
-               ORDER BY m.created_at DESC LIMIT 5`,
-            )
-            .bind(owner, conversation.id, replyAt)
-            .all<{ content: string }>()
-          for (const candidate of rows.results) {
-            try {
-              const info = (JSON.parse(candidate.content) as { info?: BuildInfo }).info
-              if (info && info.kind !== 'embed' && info.html) {
-                previous = info
-                break
-              }
-            } catch {
-              /* an older or malformed row must not block a new build */
-            }
-          }
-        }
+        let previous: BuildInfo | undefined = target ? undefined : priorBuild
+        const buildProxyPath = target ? undefined : await prepareBuildProxy(userMessage.content, previous)
+        const [buildQuality, buildReferences] = target
+          ? [new Map(), []]
+          : await Promise.all([loadTaskQuality(db, owner, 'build'), loadBuildReferences(db, owner)])
         const outcome = target
           ? await buildEmbed({
               target,
@@ -837,11 +994,16 @@ chat.post('/', async (c) => {
               signal: controller.signal,
               onStatus: (status) => { void send({ type: 'status', text: status }) },
               onLaneResult: recordLane,
+              quality: buildQuality,
+              references: buildReferences,
               previous,
+              proxyPath: buildProxyPath,
             })
         if (gone) return
         buildInfo = outcome.build
+        laneRoute = outcome.route
         if (buildInfo.kind === 'embed') embedUrl = buildInfo.sourceUrl
+        if (buildInfo.kind === 'page') await storeBuildProxy()
         for await (const piece of streamChunks(outcome.text, controller.signal)) {
           if (gone) return
           text += piece.text
@@ -876,10 +1038,17 @@ chat.post('/', async (c) => {
           onLaneResult: recordLane,
         })
         if (gone) return
-        results = outcome.sources
-        researchInfo = outcome.research
-        if (results.length && !(await send({ type: 'sources', sources: results }))) return await abandon()
-        if (!(await send({ type: 'research', research: researchInfo }))) return await abandon()
+        const document = outcome.research.document === true || writingDocument
+        if (document) {
+          results = outcome.sources
+          researchInfo = undefined
+          if (results.length && !(await send({ type: 'sources', sources: results }))) return await abandon()
+        } else {
+          results = outcome.sources
+          researchInfo = outcome.research
+          if (results.length && !(await send({ type: 'sources', sources: results }))) return await abandon()
+          if (!(await send({ type: 'research', research: researchInfo }))) return await abandon()
+        }
         for await (const piece of streamChunks(outcome.text, controller.signal)) {
           if (gone) return
           text += piece.text
@@ -909,7 +1078,7 @@ chat.post('/', async (c) => {
           onLaneResult: recordLane,
         })
         if (gone) return
-        if (!outcome.text.trim()) throw new AiError('unavailable', 'Proof could not get an answer from a free model. Try again.', 503)
+        if (!outcome.text.trim()) throw new AiError('unavailable', 'Proof could not get an answer from a model. Try again.', 503)
         proofInfo = outcome.proof
         proofJob = outcome.job ? { ...outcome.job, messageId: assistantMessageId } : undefined
         if (!(await send({ type: 'proof', proof: proofInfo, ...(proofJob ? { job: proofJob } : {}) }))) return await abandon()
@@ -958,6 +1127,7 @@ chat.post('/', async (c) => {
         }
       }
       if (gone) return
+      if (!text.trim()) throw new AiError('empty', 'The model returned an empty reply. Try again or switch models.', 502)
       if (reasoning && reasoningMs === undefined) reasoningMs = Date.now() - (reasoningStartedAt ?? startedAt)
       await save(false)
       // The keyed API path has no lane callbacks; record and await its health
@@ -987,12 +1157,12 @@ chat.post('/', async (c) => {
       // The mode counters are read after save(), so the reply just finished is
       // already counted and the composer shows the new allowances immediately.
       // One statement: the D1 session rejects several statements per request.
-      const counts = await usageToday(db, owner)
+      const counts = guestKey ? await guestUsageToday(db, guestKey) : await usageToday(db, owner)
       await send({
         type: 'done',
         message,
         usage: {
-          used: used + 1,
+          used: guestTurn ? guestTurn.replies : used + 1,
           limit: DAILY_MESSAGE_LIMIT,
           resetsAt: utcDay().end,
           modes: {

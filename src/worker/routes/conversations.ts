@@ -192,7 +192,7 @@ conversations.patch('/:id/memory', async (c) => {
   const conversationId = c.req.param('id')
   const input = await c.req.json<{ summary?: unknown }>().catch(() => ({} as { summary?: unknown }))
   if (typeof input.summary !== 'string') {
-    return c.json({ error: 'summary', message: 'Write what Quill should remember.' }, 400)
+    return c.json({ error: 'summary', message: 'Write what Ink should remember.' }, 400)
   }
   const summary = normalizeMemory(input.summary)
   if (!summary) return c.json({ error: 'summary', message: 'The memory cannot be empty. Forget it instead.' }, 400)
@@ -327,6 +327,7 @@ conversations.delete('/:id', async (c) => {
     db.prepare(`DELETE FROM message_canvas WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_agent WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM canvas_reviews WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
+    db.prepare(`DELETE FROM pinned_artifacts WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM build_embeds WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_attachments WHERE owner_sub = ? AND conversation_id = ?`).bind(owner, conversationId),
     db.prepare(`DELETE FROM conversation_shares WHERE owner_sub = ? AND conversation_id = ?`).bind(owner, conversationId),

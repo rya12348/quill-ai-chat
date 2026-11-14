@@ -288,6 +288,106 @@ const SCHEMA = [
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS message_agent_owner_created ON message_agent(owner_sub, created_at DESC)`,
+  // Public live-room history. author_sub is only used for rate limiting and
+  // account cleanup; the browser receives author_id instead. Messages expire
+  // after thirty minutes and are purged on room reads and writes.
+  `CREATE TABLE IF NOT EXISTS room_messages (
+    id TEXT PRIMARY KEY,
+    room TEXT NOT NULL,
+    author_sub TEXT NOT NULL,
+    author_id TEXT NOT NULL,
+    author_name TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS room_messages_room_created ON room_messages(room, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS room_messages_author_created ON room_messages(author_sub, room, created_at DESC)`,
+  // Humanizer usage only. The pasted draft and the rewrite are never stored;
+  // these rows exist to enforce the per-user daily cap and cooldown.
+  `CREATE TABLE IF NOT EXISTS humanizer_runs (
+    id TEXT PRIMARY KEY,
+    owner_sub TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS humanizer_runs_owner_created ON humanizer_runs(owner_sub, created_at DESC)`,
+  // A saved Browserbase profile per account. Contexts keep site cookies, so a
+  // person signs into Gmail or Sheets once and later cloud browser sessions
+  // start with that login still present.
+  `CREATE TABLE IF NOT EXISTS browser_contexts (
+    owner_sub TEXT PRIMARY KEY,
+    context_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  // One active cloud browser per account. The Worker holds the session id so
+  // a browser tab never has to trust a client-supplied session.
+  `CREATE TABLE IF NOT EXISTS browser_sessions (
+    owner_sub TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    context_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+  // Short-lived reservations used to cap concurrent cloud browsers without
+  // letting two simultaneous starts race past the total limit. The row is
+  // removed once the provider session is saved (or the start fails).
+  `CREATE TABLE IF NOT EXISTS browser_session_slots (
+    owner_sub TEXT PRIMARY KEY,
+    token TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS browser_session_slots_created ON browser_session_slots(created_at)`,
+  // First-party email/password accounts. The browser keeps only a random
+  // session token; only its SHA-256 hash is stored here.
+  `CREATE TABLE IF NOT EXISTS auth_users (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    password_hash TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS auth_sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS auth_sessions_user ON auth_sessions(user_id, expires_at)`,
+  `CREATE INDEX IF NOT EXISTS auth_sessions_expiry ON auth_sessions(expires_at)`,
+  // Abuse protection for routes that can spend the owner's API credits or
+  // create remote browser sessions. The key is a hash of the client address,
+  // never a raw IP, and reset_at makes the window self-healing.
+  `CREATE TABLE IF NOT EXISTS rate_limits (
+    bucket TEXT PRIMARY KEY,
+    count INTEGER NOT NULL,
+    reset_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS rate_limits_reset ON rate_limits(reset_at)`,
+  // Aggregate first-party traffic. visitor_hash is a one-way hash of the
+  // address and user agent; raw addresses and query strings are never stored.
+  `CREATE TABLE IF NOT EXISTS site_visits (
+    day TEXT NOT NULL,
+    visitor_hash TEXT NOT NULL,
+    path TEXT NOT NULL,
+    hits INTEGER NOT NULL DEFAULT 1,
+    last_seen INTEGER NOT NULL,
+    PRIMARY KEY (day, visitor_hash, path)
+  )`,
+  `CREATE INDEX IF NOT EXISTS site_visits_day ON site_visits(day)`,
+  // Guests are identified by a cookie, so deleting it used to create a fresh
+  // allowance. This ledger keeps their daily spend against a hashed client
+  // address instead; it is separate from message ownership, so shared networks
+  // never share conversations. Add new statements at the end of SCHEMA.
+  `CREATE TABLE IF NOT EXISTS guest_daily_usage (
+    ip_hash TEXT NOT NULL,
+    day_start INTEGER NOT NULL,
+    replies INTEGER NOT NULL DEFAULT 0,
+    research INTEGER NOT NULL DEFAULT 0,
+    analyze INTEGER NOT NULL DEFAULT 0,
+    build INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (ip_hash, day_start)
+  )`,
+  `CREATE INDEX IF NOT EXISTS guest_daily_usage_day ON guest_daily_usage(day_start)`,
 ]
 
 let ready: Promise<void> | undefined
@@ -347,7 +447,7 @@ function parseSources(value: unknown): Source[] | undefined {
     const sources = parsed.flatMap((item) => {
       if (!item || typeof item !== 'object') return []
       const { title, url, snippet, publishedAt } = item as { title?: unknown; url?: unknown; snippet?: unknown; publishedAt?: unknown }
-      if (typeof title !== 'string' || typeof url !== 'string') return []
+      if (typeof title !== 'string' || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return []
       return [{
         title,
         url,
@@ -607,6 +707,36 @@ export function parseCanvas(value: unknown): CanvasInfo | undefined {
     const models = Array.isArray(info.models)
       ? info.models.filter((model): model is string => typeof model === 'string' && Boolean(model.trim())).map((model) => model.trim().slice(0, 80)).slice(0, 4)
       : []
+    const verification = (() => {
+      const raw = info.verification
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+      const value = raw as Record<string, unknown>
+      if (value.status !== 'verified' && value.status !== 'warning') return undefined
+      const checks = (Array.isArray(value.checks) ? value.checks : [])
+        .flatMap((item) => {
+          if (!item || typeof item !== 'object') return []
+          const row = item as Record<string, unknown>
+          if (typeof row.id !== 'string' || typeof row.label !== 'string') return []
+          if (row.status !== 'pass' && row.status !== 'warn' && row.status !== 'fail') return []
+          return [{
+            id: row.id.slice(0, 80),
+            label: row.label.slice(0, 160),
+            status: row.status,
+            ...(typeof row.detail === 'string' && row.detail ? { detail: row.detail.slice(0, 300) } : {}),
+          }]
+        })
+        .slice(0, 24)
+      if (!checks.length) return undefined
+      return {
+        status: value.status,
+        checks,
+        ...(typeof value.reviewer === 'string' && value.reviewer.trim() ? { reviewer: value.reviewer.trim().slice(0, 80) } : {}),
+        repaired: value.repaired === true,
+        spec: value.spec === true,
+        score: Number.isFinite(Number(value.score)) ? Math.max(0, Math.min(100, Number(value.score))) : 0,
+        asOf: Number.isFinite(Number(value.asOf)) ? Number(value.asOf) : Date.now(),
+      }
+    })()
     return {
       status: info.status,
       kind: info.kind,
@@ -616,6 +746,7 @@ export function parseCanvas(value: unknown): CanvasInfo | undefined {
       models,
       asOf: Number.isFinite(Number(info.asOf)) ? Number(info.asOf) : Date.now(),
       ...(typeof info.reason === 'string' && info.reason ? { reason: info.reason.slice(0, 200) } : {}),
+      ...(verification ? { verification } : {}),
     }
   } catch {
     return undefined
@@ -695,7 +826,7 @@ export function parseAgent(value: unknown): AgentInfo | undefined {
             if (!step || typeof step !== 'object') return []
             const row = step as Record<string, unknown>
             const tool: AgentTool | null =
-              row.tool === 'research' || row.tool === 'build' || row.tool === 'canvas' || row.tool === 'answer' ? row.tool : null
+              row.tool === 'research' || row.tool === 'build' || row.tool === 'canvas' || row.tool === 'proof' || row.tool === 'answer' ? row.tool : null
             if (!tool) return []
             const state: AgentStep['status'] | null =
               row.status === 'pending' || row.status === 'running' || row.status === 'done' || row.status === 'skipped' || row.status === 'failed'
@@ -724,14 +855,14 @@ export function parseAgent(value: unknown): AgentInfo | undefined {
               ...(artifactMessageId ? { artifactMessageId } : {}),
             }]
           })
-          .slice(0, 6)
+          .slice(0, 7)
       : []
     if (!steps.length) return undefined
     const models = Array.isArray(info.models)
       ? info.models
           .filter((model): model is string => typeof model === 'string' && Boolean(model.trim()))
           .map((model) => model.trim().slice(0, 80))
-          .slice(0, 6)
+          .slice(0, 8)
       : []
     const receipt = typeof info.receipt === 'string' ? info.receipt.replace(/\s+/g, ' ').trim().slice(0, 400) : ''
     const asOf = Number.isFinite(Number(info.asOf)) ? Number(info.asOf) : Date.now()
@@ -854,6 +985,98 @@ export async function usageToday(
     analyze: Number(row?.analyze ?? 0),
     build: Number(row?.build ?? 0),
   }
+}
+
+export type GuestUsage = { replies: number; research: number; analyze: number; build: number }
+export type GuestUsageKind = keyof GuestUsage
+export type GuestUsageLimits = GuestUsage
+
+/**
+ * The cookie-independent guest allowance for today. `key` is a hashed client
+ * address, never a raw address. A guest who clears their cookie gets a new
+ * conversation identity but the same ledger row and the same remaining quota.
+ */
+export async function guestUsageToday(db: D1Database, key: string): Promise<GuestUsage> {
+  const { start } = utcDay()
+  const row = await db
+    .prepare(`SELECT replies, research, analyze, build FROM guest_daily_usage WHERE ip_hash = ? AND day_start = ?`)
+    .bind(key, start)
+    .first<GuestUsage>()
+  return {
+    replies: Number(row?.replies ?? 0),
+    research: Number(row?.research ?? 0),
+    analyze: Number(row?.analyze ?? 0),
+    build: Number(row?.build ?? 0),
+  }
+}
+
+/**
+ * Claim one guest turn atomically. The reply counter is always claimed; a
+ * research, analyze or build counter is claimed only when that mode will run.
+ * Returning null means one of those allowances was already full, and no
+ * counter was changed.
+ */
+export async function claimGuestTurn(
+  db: D1Database,
+  key: string,
+  needs: { research?: boolean; analyze?: boolean; build?: boolean },
+  limits: GuestUsageLimits,
+): Promise<GuestUsage | null> {
+  const { start } = utcDay()
+  const research = needs.research ? 1 : 0
+  const analyze = needs.analyze ? 1 : 0
+  const build = needs.build ? 1 : 0
+  const row = await db
+    .prepare(
+      `INSERT INTO guest_daily_usage (ip_hash, day_start, replies, research, analyze, build, updated_at)
+       VALUES (?, ?, 1, ?, ?, ?, ?)
+       ON CONFLICT(ip_hash, day_start) DO UPDATE SET
+         replies = guest_daily_usage.replies + 1,
+         research = guest_daily_usage.research + excluded.research,
+         analyze = guest_daily_usage.analyze + excluded.analyze,
+         build = guest_daily_usage.build + excluded.build,
+         updated_at = excluded.updated_at
+       WHERE guest_daily_usage.replies < ?
+         AND (? = 0 OR guest_daily_usage.research < ?)
+         AND (? = 0 OR guest_daily_usage.analyze < ?)
+         AND (? = 0 OR guest_daily_usage.build < ?)
+       RETURNING replies, research, analyze, build`,
+    )
+    .bind(key, start, research, analyze, build, now(), limits.replies, research, limits.research, analyze, limits.analyze, build, limits.build)
+    .first<GuestUsage>()
+  await pruneGuestUsage(db, start)
+  return row
+    ? { replies: Number(row.replies), research: Number(row.research), analyze: Number(row.analyze), build: Number(row.build) }
+    : null
+}
+
+/** Claim one extra guest tool use, used by Agent right before it runs a tool. */
+export async function claimGuestUsage(db: D1Database, key: string, kind: GuestUsageKind, limit: number): Promise<boolean> {
+  const { start } = utcDay()
+  const row = await db
+    .prepare(
+      `INSERT INTO guest_daily_usage (ip_hash, day_start, ${kind}, updated_at)
+       VALUES (?, ?, 1, ?)
+       ON CONFLICT(ip_hash, day_start) DO UPDATE SET
+         ${kind} = guest_daily_usage.${kind} + 1,
+         updated_at = excluded.updated_at
+       WHERE guest_daily_usage.${kind} < ?
+       RETURNING ${kind} AS used`,
+    )
+    .bind(key, start, now(), limit)
+    .first<{ used: number }>()
+  await pruneGuestUsage(db, start)
+  return Boolean(row)
+}
+
+/** Keep the ledger bounded without adding housekeeping to every request. */
+async function pruneGuestUsage(db: D1Database, todayStart: number): Promise<void> {
+  if (Math.random() >= 0.02) return
+  await db
+    .prepare('DELETE FROM guest_daily_usage WHERE day_start < ?')
+    .bind(todayStart - 3 * 86_400_000)
+    .run()
+    .catch(() => undefined)
 }
 
 /** A conversation title from its first message: the first line, cut at a word. */

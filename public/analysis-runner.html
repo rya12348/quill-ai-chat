@@ -43,7 +43,7 @@
                 stdout += text.endsWith('\n') ? text : `${text}\n`
               },
             })
-            py.globals.set('__quill_csv', csv)
+            py.globals.set('__stet_csv', csv)
             py.runPython(`
 import io
 import pandas as pd
@@ -51,7 +51,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 plt.close('all')
-df = pd.read_csv(io.StringIO(__quill_csv), sep=None, engine='python')
+df = pd.read_csv(io.StringIO(__stet_csv), sep=None, engine='python')
 `)
             try {
               await py.runPythonAsync(code)
@@ -72,12 +72,12 @@ df = pd.read_csv(io.StringIO(__quill_csv), sep=None, engine='python')
               chart = String(py.runPython(`
 import base64
 import io
-__quill_chart = ''
+__stet_chart = ''
 if plt.get_fignums():
-    __quill_buffer = io.BytesIO()
-    plt.savefig(__quill_buffer, format='png', bbox_inches='tight', dpi=110)
-    __quill_chart = 'data:image/png;base64,' + base64.b64encode(__quill_buffer.getvalue()).decode('ascii')
-__quill_chart
+    __stet_buffer = io.BytesIO()
+    plt.savefig(__stet_buffer, format='png', bbox_inches='tight', dpi=110)
+    __stet_chart = 'data:image/png;base64,' + base64.b64encode(__stet_buffer.getvalue()).decode('ascii')
+__stet_chart
 `) || '')
             } catch {
               chart = ''

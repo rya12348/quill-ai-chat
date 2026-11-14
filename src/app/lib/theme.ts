@@ -26,11 +26,17 @@ function readTheme(): Theme {
   return document.documentElement.classList.contains('dark') ? 'dark' : 'light'
 }
 
+function isRetro() {
+  return typeof document !== 'undefined' && document.documentElement.classList.contains('retro')
+}
+
 function applyTheme(theme: Theme, persist: boolean) {
   if (typeof document === 'undefined') return
   document.documentElement.classList.toggle('dark', theme === 'dark')
   document.documentElement.style.colorScheme = theme
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#141310' : '#f7f6f2')
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute('content', isRetro() ? '#f0e0bd' : theme === 'dark' ? '#141310' : '#f7f6f2')
   if (persist) {
     try {
       window.localStorage.setItem(STORAGE_KEY, theme)
@@ -44,6 +50,10 @@ function applyTheme(theme: Theme, persist: boolean) {
 export function initTheme() {
   if (initialized || typeof window === 'undefined') return
   initialized = true
+  if (isRetro()) {
+    applyTheme('light', false)
+    return
+  }
   const saved = savedTheme()
   applyTheme(saved ?? systemTheme(), false)
   if (saved) return

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 272 160" shape-rendering="crispEdges">
+  <defs>
+    <pattern id="rl-scan" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="1" fill="#1b1712" opacity=".055"/>
+    </pattern>
+    <pattern id="rl-dither" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect width="4" height="4" fill="#f0e0bd" opacity=".1"/>
+    </pattern>
+  </defs>
+
+  <g>
+    <rect x="180" y="12" width="24" height="4" fill="#d9682a"/>
+    <rect x="172" y="16" width="40" height="4" fill="#d9682a"/>
+    <rect x="164" y="20" width="56" height="4" fill="#e3a72f"/>
+    <rect x="160" y="24" width="64" height="8" fill="#e3a72f"/>
+    <rect x="160" y="32" width="64" height="12" fill="#d9682a"/>
+    <rect x="164" y="44" width="56" height="8" fill="#d9682a"/>
+    <rect x="172" y="52" width="40" height="8" fill="#b8471b"/>
+    <rect x="180" y="60" width="24" height="4" fill="#b8471b"/>
+    <rect x="188" y="64" width="8" height="4" fill="#b8471b"/>
+  </g>
+
+  <g fill="#1b1712">
+    <rect x="47" y="31" width="20" height="4"/>
+    <rect x="43" y="35" width="8" height="4"/>
+    <rect x="67" y="35" width="8" height="4"/>
+    <rect x="75" y="39" width="4" height="4"/>
+    <rect x="231" y="43" width="4" height="4"/>
+    <rect x="239" y="39" width="4" height="4"/>
+    <rect x="247" y="43" width="8" height="4"/>
+    <rect x="103" y="48" width="4" height="4"/>
+  </g>
+
+  <path d="M0 92H20V88H40V84H60V88H80V92H96V88H116V84H136V88H156V92H176V96H196V92H216V88H236V92H256V88H272V160H0V92Z" fill="#2f6f68"/>
+  <path d="M0 108H20V104H44V108H68V112H92V108H116V104H140V108H164V112H188V108H212V104H236V108H260V104H272V160H0V108Z" fill="#2f6f68"/>
+  <path d="M0 112H28V116H52V112H76V116H100V120H124V116H148V112H172V116H196V120H220V116H244V112H272V160H0V112Z" fill="#b8471b"/>
+  <path d="M0 128H32V124H64V128H96V132H128V128H160V124H192V128H224V132H256V128H272V160H0V128Z" fill="#1b1712"/>
+  <rect y="92" width="272" height="40" fill="url(#rl-dither)"/>
+  <rect width="272" height="160" fill="url(#rl-scan)"/>
+</svg>

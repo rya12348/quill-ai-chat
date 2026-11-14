@@ -5,11 +5,29 @@ export interface Env {
   // Attached by Freebuff Sites once provisioned (sites_add_storage). Optional so
   // the app can explain what is missing instead of crashing.
   DB?: D1Database
+  // Optional override: "browserbase", "hyperbrowser" or "steel". Browserbase
+  // is the default when configured because it is the more reliable session path.
+  BROWSER_PROVIDER?: string
+  // Optional model id for browser planning only. The default is a fast
+  // Qwen 3.8 lane; set this to pin another browser-capable model.
+  BROWSER_MODEL?: string
+  // Optional last-resort browser planner. With OPENAI_API_KEY it defaults to
+  // Sable (claude-sonnet-5-5); without a key it uses the free Sable lane.
+  // Fast Qwen-class lanes run first. Set "off" to disable the last resort.
+  BROWSER_ASSISTANT_MODEL?: string
   // The Freebuff API key. Locally from `.env`; on Sites from Sites → Secrets.
   // It is read here and nowhere else, and never leaves the Worker.
   OPENAI_API_KEY?: string
   // Optional override of the API origin; defaults to the Freebuff API.
   OPENAI_BASE_URL?: string
+  // Optional loopback bridge that runs @codebuff/sdk for the Buffy chat page.
+  // Defaults to http://127.0.0.1:8766 on a loopback development origin.
+  BUFFY_BRIDGE_URL?: string
+  // Optional shared secret sent to the bridge as a bearer token.
+  BUFFY_BRIDGE_TOKEN?: string
+  // Optional Sapling API key for detector-guided rewrite selection. Kept on the
+  // server; the browser never sees it.
+  SAPLING_API_KEY?: string
   // Optional free Pollinations key (enter.pollinations.ai). With it the free
   // hosted lane serves Kimi K3; without it, the keyless lane serves GPT-OSS 20B.
   POLLINATIONS_API_KEY?: string
@@ -35,6 +53,10 @@ export interface Env {
   // Nemotron 3.5 Super VL and Nemotron 3 Ultra, free to prototype with.
   NVIDIA_API_KEY?: string
   NVIDIA_MODEL?: string
+  // Optional DeepSeek API key (platform.deepseek.com). `deepseek-flash` is
+  // served by DeepSeek V4.1 Flash; DEEPSEEK_MODEL can pin another checkpoint.
+  DEEPSEEK_API_KEY?: string
+  DEEPSEEK_MODEL?: string
   // Optional free LLM7 token (dash.llm7.io). Free tokens reach LLM7's "turbo"
   // models only (GPT-OSS 20B, Codestral, Mistral Nemo); the pro ids need a paid
   // plan. Without a token, the anonymous turbo lanes are still available.
@@ -66,7 +88,7 @@ export interface Env {
   OLLAMA_API_KEY?: string
   OLLAMA_MODEL?: string
   // Optional local Ollama endpoint, e.g.
-  // http://127.0.0.1:11434/v1/chat/completions. This only works while Quill
+  // http://127.0.0.1:11434/v1/chat/completions. This only works while Ink
   // runs on the same computer as Ollama; a deployed Worker cannot reach it.
   OLLAMA_LOCAL_URL?: string
   // Comma-separated local model ids. Defaults to qwen2.5-coder:3b and
@@ -111,6 +133,20 @@ export interface Env {
   FREEBUFF_CLIENT_ID?: string
   FREEBUFF_ISSUER?: string
   APP_ORIGIN?: string
+  // Optional Browserbase key for the hosted cloud-browser workspace. The
+  // Worker creates and controls a remote Chrome session; no browser extension
+  // is installed and nothing runs on the visitor's computer.
+  BROWSERBASE_API_KEY?: string
+  // Optional Hyperbrowser key. When present it is preferred over Browserbase;
+  // its free account includes 5,000 credits, about 50 browser hours.
+  HYPERBROWSER_API_KEY?: string
+  // Optional Steel.dev key. Its Launch plan includes $30 of one-time usage
+  // credits (about 300 browser hours), 10 concurrent sessions and 15-minute
+  // sessions. Used as a third provider when set.
+  STEEL_API_KEY?: string
+  // Injected by Freebuff Sites when the deploy manifest enables realtime.
+  // Local testing points this at freebuff-realtime/wrangler.jsonc.
+  REALTIME?: DurableObjectNamespace
 }
 
 export type Variables = {

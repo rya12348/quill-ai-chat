@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 272 92" shape-rendering="crispEdges">
+  <defs>
+    <pattern id="rh-scan" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="1" fill="#1b1712" opacity=".06"/>
+    </pattern>
+  </defs>
+
+  <!-- Eight-bit sun, banded like an old screen. -->
+  <g>
+    <rect x="188" y="8" width="16" height="4" fill="#d9682a"/>
+    <rect x="184" y="12" width="24" height="4" fill="#d9682a"/>
+    <rect x="180" y="16" width="32" height="4" fill="#d9682a"/>
+    <rect x="176" y="20" width="40" height="4" fill="#e3a72f"/>
+    <rect x="172" y="24" width="48" height="8" fill="#e3a72f"/>
+    <rect x="172" y="32" width="48" height="8" fill="#d9682a"/>
+    <rect x="176" y="40" width="40" height="8" fill="#d9682a"/>
+    <rect x="180" y="48" width="32" height="4" fill="#b8471b"/>
+    <rect x="184" y="52" width="24" height="4" fill="#b8471b"/>
+    <rect x="188" y="56" width="16" height="4" fill="#b8471b"/>
+  </g>
+
+  <g fill="#1b1712">
+    <rect x="59" y="22" width="16" height="4"/>
+    <rect x="55" y="26" width="8" height="4"/>
+    <rect x="79" y="26" width="8" height="4"/>
+    <rect x="83" y="30" width="4" height="4"/>
+    <rect x="225" y="30" width="4" height="4"/>
+    <rect x="233" y="26" width="4" height="4"/>
+    <rect x="241" y="30" width="8" height="4"/>
+  </g>
+
+  <!-- Stepped ridgelines, no curves. -->
+  <path d="M0 64H16V60H36V56H56V60H76V64H96V60H116V56H136V60H156V64H176V66H200V62H220V58H240V62H256V66H272V92H0V64Z" fill="#2f6f68"/>
+  <path d="M0 72H24V68H48V72H68V68H92V64H116V68H140V72H164V76H188V72H212V68H236V72H260V68H272V92H0V72Z" fill="#b8471b"/>
+  <path d="M0 82H28V78H56V82H84V78H112V82H140V86H168V82H196V78H224V82H252V78H272V92H0V82Z" fill="#1b1712"/>
+  <rect width="272" height="92" fill="url(#rh-scan)"/>
+</svg>

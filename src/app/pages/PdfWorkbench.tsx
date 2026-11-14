@@ -165,7 +165,7 @@ function SignaturePad({ onChange }: { onChange: (dataUrl: string) => void }) {
           onPointerCancel={finish}
           onPointerLeave={finish}
         />
-        <span className="pointer-events-none absolute bottom-2 left-3 text-[10px] text-[#9d9890]">Sign above</span>
+        <span className="pointer-events-none absolute bottom-2 left-3 text-[11.5px] text-[#9d9890]">Sign above</span>
       </div>
       <div className="mt-2 flex gap-2">
         <input
@@ -474,13 +474,12 @@ export function PdfWorkbench() {
       <div className="mx-auto w-full max-w-[1160px] px-4 pb-16 pt-8 md:px-6 md:pt-10">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">PDF Studio</p>
-            <h1 className="mt-1 text-[28px] font-semibold tracking-[-0.02em]">Every page, handled here.</h1>
-            <p className="mt-1 max-w-[560px] text-[13px] leading-relaxed text-muted">
+            <h1 className="mt-1 font-display text-[38px] font-medium leading-tight tracking-[-0.03em]">PDF tools that stay local.</h1>
+            <p className="mt-1.5 max-w-[600px] text-[14.5px] leading-relaxed text-muted">
               Merge, split, compress, sign and convert documents without sending the file to a server.
             </p>
           </div>
-          <span className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[11.5px] font-medium text-muted">
+          <span className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 text-[12.5px] font-medium text-muted">
             <ShieldCheck className="size-3.5 text-success" />
             Private by default
           </span>
@@ -489,8 +488,8 @@ export function PdfWorkbench() {
         <div className="mt-7 grid gap-3 lg:grid-cols-[300px_minmax(0,1fr)]">
           <aside className="h-fit rounded-card border border-line bg-surface p-4 shadow-card">
             <div className="flex items-center justify-between">
-              <h2 className="text-[13px] font-semibold">Your files</h2>
-              {files.length > 0 && <span className="text-[11px] tabular-nums text-faint">{files.length} loaded</span>}
+              <h2 className="text-[15px] font-semibold">Your files</h2>
+              {files.length > 0 && <span className="text-[12px] tabular-nums text-faint">{files.length} loaded</span>}
             </div>
             <div
               data-testid="pdf-dropzone"
@@ -526,11 +525,11 @@ export function PdfWorkbench() {
                 type="button"
                 onClick={() => inputRef.current?.click()}
                 disabled={busyNow}
-                className="mt-2 block w-full text-[12.5px] font-medium text-fg disabled:opacity-50"
+                className="mt-2 block w-full text-[13.5px] font-medium text-fg disabled:opacity-50"
               >
                 Choose files
               </button>
-              <p className="mt-1 text-[10.5px] leading-relaxed text-faint">or drop them here · PDF, Word, text, Excel</p>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-faint">or drop them here · PDF, Word, text, Excel</p>
             </div>
 
             {files.length > 0 && (
@@ -551,8 +550,8 @@ export function PdfWorkbench() {
                           <FileIcon className="size-3.5" />
                         </span>
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[12px] font-medium text-fg">{file.file.name}</span>
-                          <span className="mt-0.5 block text-[10.5px] text-faint">
+                          <span className="block truncate text-[13px] font-medium text-fg">{file.file.name}</span>
+                          <span className="mt-0.5 block text-[11.5px] text-faint">
                             {formatBytes(file.file.size)}
                             {file.pages ? ` · ${file.pages} page${file.pages === 1 ? '' : 's'}` : ''}
                           </span>
@@ -573,7 +572,7 @@ export function PdfWorkbench() {
               </ul>
             )}
 
-            <p className="mt-4 flex gap-1.5 border-t border-line pt-3 text-[10.5px] leading-relaxed text-faint">
+            <p className="mt-4 flex gap-1.5 border-t border-line pt-3 text-[11.5px] leading-relaxed text-faint">
               <ShieldCheck className="mt-0.5 size-3 shrink-0 text-success" />
               Files are processed in this browser. Saved results stay on this device.
             </p>
@@ -589,8 +588,8 @@ export function PdfWorkbench() {
                   disabled={busyNow}
                   aria-pressed={tab === item.id}
                   className={cx(
-                    'h-8 shrink-0 rounded-tile px-3 text-[12px] font-medium transition-colors disabled:opacity-50',
-                    tab === item.id ? 'bg-fg text-bg' : 'text-muted hover:bg-surface-2 hover:text-fg',
+                    'h-9 shrink-0 rounded-tile px-3.5 text-[13px] font-medium transition-colors disabled:opacity-50',
+                    tab === item.id ? 'bg-accent text-bg shadow-[0_3px_10px_-4px_rgb(168_73_20/0.5)]' : 'text-muted hover:bg-surface-2 hover:text-fg',
                   )}
                 >
                   {item.label}
@@ -604,8 +603,8 @@ export function PdfWorkbench() {
                   <span className="mx-auto grid size-12 place-items-center rounded-[16px] bg-accent-soft text-accent">
                     <Sparkles className="size-5" />
                   </span>
-                  <h2 className="mt-4 text-[18px] font-semibold">One PDF tool, many jobs.</h2>
-                  <p className="mx-auto mt-1 max-w-[430px] text-[12.5px] leading-relaxed text-muted">
+                  <h2 className="mt-4 text-[22px] font-semibold">One PDF tool, many jobs.</h2>
+                  <p className="mx-auto mt-1.5 max-w-[460px] text-[13.5px] leading-relaxed text-muted">
                     Add a document to start. The Studio keeps your files local and puts the finished result one click away.
                   </p>
                   <div className="mx-auto mt-6 grid max-w-[500px] gap-2 text-left sm:grid-cols-3">
@@ -619,7 +618,7 @@ export function PdfWorkbench() {
                         <div key={feature.title} className="rounded-tile border border-line bg-surface-2/35 p-3">
                           <FeatureIcon className="size-4 text-muted" />
                           <p className="mt-2 text-[11.5px] font-medium">{feature.title}</p>
-                          <p className="mt-0.5 text-[10.5px] leading-relaxed text-faint">{feature.copy}</p>
+                          <p className="mt-0.5 text-[11.5px] leading-relaxed text-faint">{feature.copy}</p>
                         </div>
                       )
                     })}
@@ -669,7 +668,7 @@ export function PdfWorkbench() {
                           </div>
                         </div>
                         <div className="mt-3 flex flex-wrap items-end gap-2">
-                          <label className="min-w-[150px] flex-1 text-[10.5px] font-medium text-muted">
+                          <label className="min-w-[150px] flex-1 text-[11.5px] font-medium text-muted">
                             Pages
                             <input value={splitPages} onChange={(event) => setSplitPages(event.target.value)} placeholder="1-3, 5" className="mt-1 h-9 w-full rounded-control border border-line-strong bg-surface px-2.5 text-[12.5px] focus:border-fg/40 focus:outline-none" />
                           </label>
@@ -688,11 +687,11 @@ export function PdfWorkbench() {
                           </div>
                         </div>
                         <div className="mt-3 flex flex-wrap items-end gap-2">
-                          <label className="min-w-[150px] flex-1 text-[10.5px] font-medium text-muted">
+                          <label className="min-w-[150px] flex-1 text-[11.5px] font-medium text-muted">
                             Pages
                             <input value={rotatePages} onChange={(event) => setRotatePages(event.target.value)} placeholder="All pages" className="mt-1 h-9 w-full rounded-control border border-line-strong bg-surface px-2.5 text-[12.5px] focus:border-fg/40 focus:outline-none" />
                           </label>
-                          <label className="w-[104px] text-[10.5px] font-medium text-muted">
+                          <label className="w-[104px] text-[11.5px] font-medium text-muted">
                             Angle
                             <select value={rotateAngle} onChange={(event) => setRotateAngle(event.target.value)} className={cx(selectClass, 'mt-1')}>
                               <option value="90">90°</option>
@@ -733,7 +732,7 @@ export function PdfWorkbench() {
                             )}
                           >
                             <span className="text-[12px] font-semibold">{option.title}</span>
-                            <span className="mt-0.5 block text-[10.5px] text-muted">{option.copy}</span>
+                            <span className="mt-0.5 block text-[11.5px] text-muted">{option.copy}</span>
                           </button>
                         ))}
                       </div>
@@ -754,7 +753,7 @@ export function PdfWorkbench() {
                           </div>
                         </div>
                         <div className="mt-3 flex flex-wrap items-end gap-2">
-                          <label className="min-w-[220px] flex-1 text-[10.5px] font-medium text-muted">
+                          <label className="min-w-[220px] flex-1 text-[11.5px] font-medium text-muted">
                             Words or phrases
                             <input value={redactTerms} onChange={(event) => setRedactTerms(event.target.value)} placeholder="e.g. account number, Jordan Lee" className="mt-1 h-9 w-full rounded-control border border-line-strong bg-surface px-2.5 text-[12.5px] focus:border-fg/40 focus:outline-none" />
                           </label>
@@ -762,7 +761,7 @@ export function PdfWorkbench() {
                             Redact
                           </Button>
                         </div>
-                        <p className="mt-2 flex items-start gap-1.5 text-[10.5px] leading-relaxed text-warning"><Info className="mt-0.5 size-3 shrink-0" />Check the result yourself before sharing a sensitive document.</p>
+                        <p className="mt-2 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-warning"><Info className="mt-0.5 size-3 shrink-0" />Check the result yourself before sharing a sensitive document.</p>
                       </section>
 
                       <section className="border-t border-line pt-5">
@@ -777,7 +776,7 @@ export function PdfWorkbench() {
                           <SignaturePad onChange={setSignature} />
                         </div>
                         <div className="mt-3 flex flex-wrap items-end gap-2">
-                          <label className="w-[112px] text-[10.5px] font-medium text-muted">
+                          <label className="w-[112px] text-[11.5px] font-medium text-muted">
                             Page
                             <input type="number" min="1" max={selected?.pages ?? 1} value={signPage} onChange={(event) => setSignPage(event.target.value)} className="mt-1 h-9 w-full rounded-control border border-line-strong bg-surface px-2.5 text-[12.5px] focus:border-fg/40 focus:outline-none" />
                           </label>
@@ -808,7 +807,7 @@ export function PdfWorkbench() {
                         <>
                           <div className="mt-4 grid gap-3 sm:grid-cols-2">
                             {formFields.map((field) => (
-                              <label key={field.name} className="block min-w-0 text-[10.5px] font-medium text-muted">
+                              <label key={field.name} className="block min-w-0 text-[11.5px] font-medium text-muted">
                                 <span className="block truncate" title={field.name}>{field.name}</span>
                                 {field.kind === 'checkbox' ? (
                                   <span className="mt-1 flex h-9 items-center gap-2 rounded-control border border-line-strong bg-surface px-2.5 text-[12.5px]">
@@ -883,7 +882,7 @@ export function PdfWorkbench() {
                         <ScanText />
                         Extract text with OCR
                       </Button>
-                      <p className="mt-2 text-[10.5px] leading-relaxed text-faint">OCR is not perfect. Review names, numbers and punctuation before relying on the output.</p>
+                      <p className="mt-2 text-[11.5px] leading-relaxed text-faint">OCR is not perfect. Review names, numbers and punctuation before relying on the output.</p>
                     </div>
                   )}
                 </>
@@ -903,8 +902,8 @@ export function PdfWorkbench() {
                   <div className="min-w-[200px] flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-success">Ready</p>
-                      {result.pages ? <span className="text-[10.5px] text-faint">{result.pages} page{result.pages === 1 ? '' : 's'}</span> : null}
-                      <span className="text-[10.5px] text-faint">{formatBytes(result.blob.size)}</span>
+                      {result.pages ? <span className="text-[11.5px] text-faint">{result.pages} page{result.pages === 1 ? '' : 's'}</span> : null}
+                      <span className="text-[11.5px] text-faint">{formatBytes(result.blob.size)}</span>
                     </div>
                     <h3 className="mt-1 truncate text-[13px] font-semibold">{result.name}</h3>
                     <p className="mt-1 text-[11.5px] leading-relaxed text-muted">{result.note}</p>
@@ -925,7 +924,7 @@ export function PdfWorkbench() {
           </section>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[10.5px] text-faint">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11.5px] text-faint">
           <span>Nothing leaves this browser unless you download or save it.</span>
           <span className="inline-flex items-center gap-1"><ShieldCheck className="size-3" /> PDF Studio</span>
         </div>

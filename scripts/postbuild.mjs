@@ -31,15 +31,30 @@ const dist = fileURLToPath(new URL('../dist', import.meta.url))
 clean(dist)
 
 // A redeploy changes the cache names, so users cannot be pinned to a shell
-// whose hashed assets no longer exist. The hash covers the HTML and every
-// emitted asset name and size.
+// whose hashed assets no longer exist. The hash covers the HTML, the service
+// worker and every emitted asset name and size.
 const client = join(dist, 'client')
+// Always start from the source template. A previous postbuild may have left a
+// substituted sw.js in dist, and Vite can skip copying an older public file
+// over it on a later build.
+const swSource = readFileSync(fileURLToPath(new URL('../public/sw.js', import.meta.url)), 'utf8')
+if (!swSource.includes('__STET_VERSION__') || !swSource.includes('__STET_PRECACHE__')) {
+  throw new Error('service worker placeholders are missing from public/sw.js')
+}
 const digest = createHash('sha256')
 digest.update(readFileSync(join(client, 'index.html')))
+digest.update(swSource)
 const assetDir = join(client, 'assets')
 for (const name of readdirSync(assetDir).sort()) {
   digest.update(name)
   digest.update(String(statSync(join(assetDir, name)).size))
+}
+// Public files keep stable names, so hash their contents too; otherwise a
+// changed illustration can stay behind the previous service-worker cache.
+for (const file of listFiles(client).sort()) {
+  if (file.startsWith('assets/')) continue
+  digest.update(file)
+  digest.update(readFileSync(join(client, file)))
 }
 const version = digest.digest('hex').slice(0, 12)
 
@@ -49,10 +64,7 @@ const precache = listFiles(client)
   .map((file) => (file === 'index.html' ? '/' : `/${file.replaceAll('\\', '/')}`))
 
 const swPath = join(client, 'sw.js')
-const sw = readFileSync(swPath, 'utf8')
-if (!sw.includes('__QUILL_VERSION__') || !sw.includes('__QUILL_PRECACHE__')) {
-  throw new Error('service worker placeholders are missing from dist/client/sw.js')
-}
-writeFileSync(swPath, sw.replaceAll('__QUILL_VERSION__', version).replace('__QUILL_PRECACHE__', JSON.stringify(precache)))
+const sw = swSource
+writeFileSync(swPath, sw.replaceAll('__STET_VERSION__', version).replace('__STET_PRECACHE__', JSON.stringify(precache)))
 console.log(`service worker cache version ${version}`)
 console.log(`precached ${precache.length} shell URLs`)

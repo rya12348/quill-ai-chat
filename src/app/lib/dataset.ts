@@ -5,6 +5,7 @@ import { MAX_DATASET_BYTES, MAX_DATASET_COLUMNS, MAX_DATASET_ROWS, MAX_DATASET_S
 import { profileCsv } from '../../shared/csv'
 import type { DatasetInput } from '../../shared/types'
 import type { PendingAttachment } from './attachments'
+import { readXlsxCsv } from './xlsx-reader'
 
 export const DATA_EXTENSIONS = new Set(['csv', 'tsv', 'xlsx', 'xls'])
 export const DATA_ACCEPT = '.csv,.tsv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel'
@@ -27,13 +28,9 @@ export function buildDataset(name: string, mime: string, size: number, csv: stri
   }
 }
 
-/** Converts the first sheet of an XLSX workbook to CSV entirely in the browser. */
+/** Converts the first sheet of an XLSX workbook to CSV in an isolated worker. */
 async function xlsxToCsv(file: File): Promise<string> {
-  const XLSX = await import('xlsx')
-  const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true })
-  const first = workbook.SheetNames[0]
-  if (!first) throw new Error('That workbook has no sheets.')
-  return XLSX.utils.sheet_to_csv(workbook.Sheets[first]!, { blankrows: false }).replace(/\r\n?/g, '\n')
+  return readXlsxCsv(await file.arrayBuffer())
 }
 
 /** Reads a table file and returns the composer attachment plus its profile. */

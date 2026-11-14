@@ -1,29 +1,114 @@
 import { Hono } from 'hono'
+import { getCookie, setCookie } from 'hono/cookie'
 
 import { aiConfigured } from './ai'
-import { appOrigin, authMode, getAuth, isCodespacesRequest, requireUser } from './auth'
+import { allowsMutation, appOrigin, authMode, getAuth, GUEST_COOKIE, isCodespacesRequest, isGuestId, requireUser } from './auth'
 import { requireDb } from './db'
+import { RATE_WINDOWS, rateLimit, tooManyRequests } from './rate-limit'
 import type { AppContext, Env } from './env'
 import { isPokiGameId, isPokiGameWrapperUrl, isSafeGameSegment, pokiGameStartUrl, proxyPokiGameAsset } from './poki-game'
-import { escapeHtml, fetchSiteAsset, fetchSitePage, fetchSiteRequest, googleSearchQuery, googleTopResult, installFrameBridge, isWebProxyToken, normalizeSiteUrl, renderProxyPage, renderSearchResults, resolveProxyTarget, rewriteAssetContent, SiteError, webProxyPath } from './site-proxy'
+import { fetchSiteAsset, fetchSitePage, fetchSiteRequest, fetchWebSearchResults, googleSearchQuery, googleTopResult, installFrameBridge, isWebProxyToken, normalizeSiteUrl, renderProxyErrorPage, renderProxyPage, renderSearchResults, resolveProxyTarget, rewriteAssetContent, SiteError, webProxyPath } from './site-proxy'
 import { account } from './routes/account'
+import { analytics } from './routes/analytics'
 import { analysis } from './routes/analysis'
 import { artifacts } from './routes/artifacts'
 import { attachments } from './routes/attachments'
+import { browser } from './routes/browser'
+import { buffy } from './routes/buffy'
 import { chat } from './routes/chat'
+import { humanizer } from './routes/humanizer'
+import { localAuth } from './routes/local-auth'
 import { conversations } from './routes/conversations'
 import { messages } from './routes/messages'
 import { proof } from './routes/proof'
 import { projects } from './routes/projects'
+import { proxy as proxyTool } from './routes/proxy'
 import { providers } from './routes/providers'
 import { review } from './routes/review'
+import { room } from './routes/room'
 import { settings } from './routes/settings'
 import { shares } from './routes/shares'
+import { traffic } from './routes/traffic'
 
 const app = new Hono<AppContext>()
 
+const APP_CSP = [
+  "default-src 'self'",
+  // The generated page previews use srcdoc and may include inline scripts and
+  // remote libraries. They stay inside a sandboxed frame; the app shell itself
+  // is React-rendered and never injects untrusted HTML.
+  "script-src 'self' 'unsafe-inline' https:",
+  "style-src 'self' 'unsafe-inline' https:",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data: https:",
+  "connect-src 'self' https: wss: ws:",
+  "media-src 'self' data: blob: https:",
+  "worker-src 'self' blob:",
+  "frame-src 'self' blob: https:",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self' https:",
+  "frame-ancestors 'none'",
+  "manifest-src 'self'",
+].join('; ')
+
+// These responses are intentionally embeddable or need their own policy:
+// live-site previews, Poki assets, and the Pyodide runner pages.
+const SECURITY_EXEMPT_PREFIXES = ['/api/web-proxy/', '/api/poki-game/', '/analysis-runner.html', '/proof-runner.html']
+
+app.use('*', async (c, next) => {
+  const url = new URL(c.req.url)
+  const path = url.pathname
+  const baseHeaders: Record<string, string> = {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Permitted-Cross-Domain-Policies': 'none',
+    'X-Download-Options': 'noopen',
+    'Referrer-Policy': 'no-referrer',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+    ...(url.protocol === 'https:' ? { 'Strict-Transport-Security': 'max-age=31536000' } : {}),
+  }
+  // Vite's development client uses its own inline bootstrap and HMR sockets;
+  // keep the local loopback preview usable and apply the hardened document
+  // policy to deployed origins.
+  const appDocument = !SECURITY_EXEMPT_PREFIXES.some((prefix) => path.startsWith(prefix)) && authMode(c.env, c.req.raw) !== 'development'
+  const documentHeaders: Record<string, string> = appDocument
+    ? {
+        'Content-Security-Policy': APP_CSP,
+        'X-Frame-Options': 'DENY',
+        'Cross-Origin-Resource-Policy': 'same-origin',
+      }
+    : {}
+  for (const [name, value] of Object.entries({ ...baseHeaders, ...documentHeaders })) c.header(name, value)
+  await next()
+  const policy = { ...baseHeaders, ...documentHeaders }
+  // Static-asset responses from the ASSETS binding often have immutable header
+  // guards, so mutate a clone instead of relying on c.header surviving the
+  // fetcher's response. API and SSE responses already carry the context headers
+  // and are left untouched.
+  if (!path.startsWith('/api/')) {
+    try {
+      const current = c.res
+      const headers = new Headers(current.headers)
+      for (const [name, value] of Object.entries(policy)) headers.set(name, value)
+      c.res = new Response(current.body, {
+        status: current.status,
+        statusText: current.statusText,
+        headers,
+      })
+    } catch {
+      /* a locked or already-consumed stream keeps its context headers */
+    }
+  } else {
+    try {
+      for (const [name, value] of Object.entries(policy)) c.res.headers.set(name, value)
+    } catch {
+      /* SSE streams already carry the context headers */
+    }
+  }
+})
+
 // The loopback preview hostname exists only to isolate browsed sites from the
-// app origin. It must not serve Quill itself: development auth does not require
+// app origin. It must not serve Ink itself: development auth does not require
 // a cookie, so exposing app APIs there would defeat the isolation.
 app.use('*', async (c, next) => {
   if (!isIsolatedPreviewRequest(c.req.raw)) return next()
@@ -36,14 +121,48 @@ app.get('/api/auth/status', (c) => {
   c.header('Cache-Control', 'private, no-store')
   return c.json({ mode: authMode(c.env, c.req.raw), database: Boolean(c.env.DB), ai: aiConfigured(c.env) })
 })
-app.get('/api/health', (c) => c.json({ ok: true }))
+app.post('/api/auth/guest', requireDb, async (c) => {
+  if (!allowsMutation(c.env, c.req.raw)) return c.json({ error: 'Cross-origin request refused.' }, 403)
+  const limit = await rateLimit(c.get('db'), 'auth:guest', c.req.raw, 20, RATE_WINDOWS.guest)
+  if (!limit.allowed) return tooManyRequests(c, limit)
+  const form = (await c.req.parseBody().catch(() => ({}))) as Record<string, string | File>
+  const requested = typeof form.returnTo === 'string' ? form.returnTo : '/'
+  const returnTo = requested.startsWith('/') && !requested.startsWith('//') && !/[\r\n]/.test(requested) ? requested.slice(0, 2048) : '/'
+  const secure = new URL(appOrigin(c.env, c.req.raw)).protocol === 'https:'
+  // Reuse an existing guest identity so repeated guest entries count as one
+  // person, and create the analytics-visible user row now rather than waiting
+  // for the app shell to call /api/me.
+  const existingGuest = getCookie(c, GUEST_COOKIE)
+  const guestId = isGuestId(existingGuest) ? existingGuest : crypto.randomUUID()
+  await c
+    .get('db')
+    .prepare(`INSERT OR IGNORE INTO users (owner_sub, created_at) VALUES (?, ?)`)
+    .bind(`guest:${guestId}`, Date.now())
+    .run()
+    .catch(() => undefined)
+  setCookie(c, GUEST_COOKIE, guestId, {
+    httpOnly: true,
+    secure,
+    sameSite: 'Lax',
+    path: '/',
+    maxAge: 60 * 60 * 24 * 365,
+  })
+  return c.redirect(returnTo, 303)
+})
+app.route('/api/auth', localAuth)
+app.get('/api/health', (c) => {
+  c.header('Cache-Control', 'private, no-store')
+  return c.json({ ok: true })
+})
 
 const ASSET_HEADERS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS',
   'access-control-allow-headers': '*, authorization, content-type, accept, x-requested-with, x-api-key, range',
   'cross-origin-resource-policy': 'cross-origin',
-  'cache-control': 'private, max-age=300',
+  // Live preview assets can change between deploys; never let a browser keep
+  // an old game script that still redirects an embedded frame to an ad wrapper.
+  'cache-control': 'private, no-store',
   'x-content-type-options': 'nosniff',
 }
 
@@ -61,12 +180,12 @@ const PROXY_HEADERS = {
 
 /**
  * Loopback development serves the same app on a second hostname so the live
- * preview is a different origin from Quill (and from its session). Only that
+ * preview is a different origin from Ink (and from its session). Only that
  * hostname may keep a real origin inside the sandbox: sites such as FreezeNova
  * write their game into an about:blank frame, which needs same-origin access,
  * and remote code there then still cannot reach the app origin.
  */
-const ISOLATED_PREVIEW_HOST = 'quill-preview.localhost'
+const ISOLATED_PREVIEW_HOST = 'stet-preview.localhost'
 
 function isIsolatedPreviewRequest(request: Request): boolean {
   try {
@@ -80,7 +199,7 @@ function proxyPageHeaders(request: Request): Record<string, string> {
   if (!isIsolatedPreviewRequest(request)) return PROXY_HEADERS
   // The frame keeps its own sandbox. A CSP sandbox on top of it makes Chrome
   // leave requestFullscreen() pending forever, so the game's fullscreen button
-  // never completes. The isolated host is still cross-origin from Quill and the
+  // never completes. The isolated host is still cross-origin from Ink and the
   // iframe sandbox still blocks top navigation, popup escape and native storage
   // access outside the preview.
   return {
@@ -202,22 +321,28 @@ app.get('/api/web-proxy/:token', requireDb, async (c) => {
   if (!target) return c.body('That page is not available.', 400, { 'content-type': 'text/plain; charset=utf-8' })
   const proxyOrigin = proxyOriginFor(c.env, c.req.raw)
   const proxyUrl = new URL(webProxyPath(token), proxyOrigin).href
-  // Codespaces requires its own authorisation for navigations started in a
-  // sandboxed frame. Let Quill's parent page perform them instead.
-  const parentNavigation = isCodespacesRequest(c.env, c.req.raw)
+  // Embedded frames are always driven by their parent, so a sandbox cannot
+  // swallow a link or game click. Codespaces separately needs this to carry
+  // its forwarded-port authorisation into the next document.
+  const parentNavigation =
+    isCodespacesRequest(c.env, c.req.raw) || c.req.header('sec-fetch-dest')?.toLowerCase() === 'iframe'
   try {
+    // Google's result document is a redirect/challenge shell for server
+    // fetches; loading it would leave the proxy on an empty page. Resolve the
+    // query to Google's top result and render a usable result instead.
     const query = googleSearchQuery(target)
     if (query) {
-      const top = await googleTopResult(query, c.req.raw.signal)
-      const results = top
-        ? [
-            {
-              title: new URL(top).hostname.replace(/^www\./, ''),
-              url: top,
-              snippet: `Google's top result for “${query}”. Open it inside this preview.`,
-            },
-          ]
-        : []
+      const results = await fetchWebSearchResults(query, c.req.raw.signal)
+      if (!results.length) {
+        const top = await googleTopResult(query, c.req.raw.signal)
+        if (top) {
+          results.push({
+            title: new URL(top).hostname.replace(/^www\./, ''),
+            url: top,
+            snippet: `Google's top result for “${query}”. Open it inside this proxy.`,
+          })
+        }
+      }
       return c.body(renderProxyPage(renderSearchResults(query, target, results), target, proxyUrl, parentNavigation, isIsolatedPreviewRequest(c.req.raw)), 200, proxyPageHeaders(c.req.raw))
     }
     const page = await fetchSitePage(target, c.req.raw.signal)
@@ -235,9 +360,25 @@ app.get('/api/web-proxy/:token', requireDb, async (c) => {
   } catch (error) {
     if (!(error instanceof SiteError)) console.error(error)
     const failure = error instanceof SiteError ? error : new SiteError(502, 'The site could not be loaded.')
-    const message = escapeHtml(failure.message)
-    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Preview unavailable</title><style>body{margin:0;font:16px/1.6 system-ui,sans-serif;background:#f6f4ef;color:#24221d}main{max-width:620px;margin:14vh auto;padding:0 28px}h1{font-size:2rem;line-height:1.1;letter-spacing:-.03em;margin:0 0 .5em}p{color:#6f695f}</style></head><body><main><h1>Preview unavailable</h1><p>${message}</p></main></body></html>`
-    const status = failure.status === 400 ? 400 : failure.status === 413 ? 413 : failure.status === 415 ? 415 : failure.status === 504 ? 504 : 502
+    const html = renderProxyErrorPage(failure, target)
+    const status =
+      failure.status === 400
+        ? 400
+        : failure.status === 403
+          ? 403
+          : failure.status === 407
+            ? 407
+            : failure.status === 413
+              ? 413
+              : failure.status === 415
+                ? 415
+                : failure.status === 429
+                  ? 429
+                  : failure.status === 451
+                    ? 451
+                    : failure.status === 504
+                      ? 504
+                      : 502
     return c.body(html, status, { ...PROXY_HEADERS, 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'" })
   }
 })
@@ -288,22 +429,34 @@ app.get('/api/poki-game/:token/:gameId/:version/:path{.*}', requireDb, async (c)
 })
 
 const api = new Hono<AppContext>()
-api.use('*', requireUser, requireDb)
+// The database must be ready before the session lookup. Email/password
+// sessions live in D1; a guest can still use the API when no account cookie is
+// present.
+api.use('*', requireDb, requireUser)
 api.route('/', account)
+api.route('/analytics', analytics)
 api.route('/analysis', analysis)
 api.route('/artifacts', artifacts)
 api.route('/attachments', attachments)
+api.route('/browser', browser)
+api.route('/buffy', buffy)
 api.route('/conversations', conversations)
 api.route('/chat', chat)
+api.route('/humanize', humanizer)
 api.route('/messages', messages)
 api.route('/proof', proof)
 api.route('/projects', projects)
+api.route('/proxy', proxyTool)
 api.route('/providers', providers)
 api.route('/review', review)
+api.route('/', room)
 api.route('/settings', settings)
 // Public read-only links live outside the authenticated /api subapp. The
 // random token is scoped to one conversation and only GET is implemented.
 app.route('/api/share', shares)
+// The page-view beacon is public and aggregate-only; it must stay outside the
+// authenticated API subapp so the sign-in screen can be counted too.
+app.route('/api/traffic', traffic)
 app.route('/api', api)
 
 app.onError((error, c) => {

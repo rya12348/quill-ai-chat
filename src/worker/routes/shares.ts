@@ -6,6 +6,7 @@ import { groupAttachmentMeta } from '../attachments'
 import { mapMessage, requireDb } from '../db'
 import type { AppContext, Env } from '../env'
 import { publicLanes } from '../public-ai'
+import { RATE_WINDOWS, rateLimit, tooManyRequests } from '../rate-limit'
 
 export const shares = new Hono<AppContext>()
 
@@ -17,6 +18,8 @@ function modelName(env: Env, model: string | null | undefined): string | undefin
 }
 
 shares.get('/:token', async (c) => {
+  const limit = await rateLimit(c.get('db'), 'share', c.req.raw, 120, RATE_WINDOWS.share)
+  if (!limit.allowed) return tooManyRequests(c, limit)
   // A live link is checked on every load. Keep this response out of caches.
   c.header('Cache-Control', 'no-store')
   const db = c.get('db')
@@ -97,6 +100,8 @@ shares.get('/:token', async (c) => {
 })
 
 shares.get('/:token/attachments/:id', async (c) => {
+  const limit = await rateLimit(c.get('db'), 'share', c.req.raw, 120, RATE_WINDOWS.share)
+  if (!limit.allowed) return tooManyRequests(c, limit)
   // Images in a shared chat are public only while the share link is live.
   const row = await c
     .get('db')

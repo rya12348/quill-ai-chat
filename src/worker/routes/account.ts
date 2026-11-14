@@ -3,11 +3,12 @@ import { Hono } from 'hono'
 import { ANALYZE_DAILY_LIMIT, BUILD_DAILY_LIMIT, DAILY_MESSAGE_LIMIT, MODELS, RESEARCH_DAILY_LIMIT } from '../../shared/config'
 import type { Me, ModelInfo } from '../../shared/types'
 import { aiConfigured, availableModels } from '../ai'
-import { analyzeEnabledFor, authMode, buildEnabledFor, isOwner, privateJson, researchEnabledFor } from '../auth'
-import { now, utcDay, usageToday } from '../db'
+import { analyzeEnabledFor, authMode, buildEnabledFor, isAccountUser, isGuestUser, isOwner, privateJson, researchEnabledFor } from '../auth'
+import { guestUsageToday, now, utcDay, usageToday } from '../db'
 import type { AppContext } from '../env'
-import { pickPickerFamilies, publicLanes } from '../public-ai'
+import { pickPickerFamilies, pickerModelDescription, pickerModelName, publicLanes } from '../public-ai'
 import { healthRows } from '../provider-health'
+import { guestUsageKey } from '../rate-limit'
 import { searchConfigured } from '../search'
 import { seedStatements } from '../seed'
 
@@ -26,13 +27,15 @@ account.get('/me', async (c) => {
     await db.batch(statements)
   }
   const lanes = aiConfigured(c.env) ? [] : publicLanes(c.env)
-  const counts = await usageToday(db, user.sub)
+  // Guests may have cleared their cookie; show the same address-keyed
+  // allowance the chat route enforces instead of a misleading fresh count.
+  const counts = isGuestUser(user) ? await guestUsageToday(db, await guestUsageKey(c.req.raw)) : await usageToday(db, user.sub)
   const body: Me = {
     user: { sub: user.sub, name: user.name, email: user.email, picture: user.picture },
     capabilities: {
       ai: true,
       mode: aiConfigured(c.env) ? 'api' : 'public',
-      model: lanes[0]?.label,
+      model: pickerModelName(0),
       search: searchConfigured(c.env),
       // The free chain can expose reasoning when a lane supports it.
       reasoning: lanes.length > 1,
@@ -44,7 +47,7 @@ account.get('/me', async (c) => {
       // Agent orchestrates the free-mode engines, so it needs at least one lane.
       agent: !aiConfigured(c.env) && lanes.length > 0,
       database: true,
-      auth: mode === 'freebuff' ? 'freebuff' : 'development',
+      auth: isGuestUser(user) ? 'guest' : isAccountUser(user) ? 'account' : mode === 'freebuff' ? 'freebuff' : 'development',
     },
     usage: {
       used: counts.replies,
@@ -72,8 +75,8 @@ account.get('/models', async (c) => {
     c.header('Cache-Control', 'private, max-age=60')
     return c.json({ items })
   }
-  // No key: five rows, one per model family, named just "Nemotron", "GPT" and
-  // so on. Each family is represented by its best currently working lane —
+  // No key: five rows, one per model family, each with a short display name.
+  // Each family is represented by its best currently working lane —
   // healthy before merely strong — so the picker stays short and the site
   // chooses the variant instead of making people compare provider suffixes.
   let statuses = new Map<string, string>()
@@ -82,12 +85,13 @@ account.get('/models', async (c) => {
   } catch {
     // A fresh deployment has no health rows yet; strength alone still works.
   }
-  const items: ModelInfo[] = pickPickerFamilies(publicLanes(c.env), statuses).map(({ family, lane }) => ({
+  const items: ModelInfo[] = pickPickerFamilies(publicLanes(c.env), statuses).map(({ family, lane }, index) => ({
     id: lane.model,
-    name: family,
-    description: lane.description,
+    name: pickerModelName(index),
+    description: pickerModelDescription(index),
     available: true,
     family,
+    ...(lane.billing ? { billing: lane.billing } : {}),
   }))
   c.header('Cache-Control', 'private, no-store')
   return c.json({ items })
@@ -109,12 +113,15 @@ account.delete('/account/conversations', async (c) => {
     db.prepare(`DELETE FROM message_canvas WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM message_agent WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM canvas_reviews WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM pinned_artifacts WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM build_embeds WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM message_attachments WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM proof_runs WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM research_runs WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM proof_library WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM user_settings WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM room_messages WHERE author_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM humanizer_runs WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM conversation_shares WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM conversation_summaries WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM project_conversations WHERE owner_sub = ?`).bind(owner),

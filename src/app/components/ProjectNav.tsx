@@ -9,7 +9,7 @@ import { cx } from '../lib/cx'
 import { Button, ConfirmDialog, Dialog, Input, inputClass, Menu, useToast } from './ui'
 
 export function ProjectNav({ selectedId, totalChats }: { selectedId: string | null; totalChats: number }) {
-  const { data, isLoading } = useProjects()
+  const { data } = useProjects()
   const projects = data?.items ?? []
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Project | null>(null)
@@ -31,7 +31,7 @@ export function ProjectNav({ selectedId, totalChats }: { selectedId: string | nu
   return (
     <div className="mt-4">
       <div className="flex items-center justify-between px-3 pb-1.5">
-        <h2 className="text-[11.5px] font-medium text-faint">Projects</h2>
+        <h2 className="text-[12.5px] font-medium text-faint">Projects</h2>
         <Button variant="ghost" size="icon-sm" className="size-7" aria-label="New project" title="New project" onClick={openNew}>
           <Plus />
         </Button>
@@ -41,13 +41,13 @@ export function ProjectNav({ selectedId, totalChats }: { selectedId: string | nu
           <Link
             to="/"
             className={cx(
-              'flex h-8 items-center gap-2 rounded-control px-3 text-[13px] transition-colors',
-              !selectedId ? 'bg-surface text-fg shadow-card' : 'text-muted hover:bg-surface hover:text-fg',
+              'flex h-9 items-center gap-2 rounded-control px-3 text-[14px] transition-colors',
+              !selectedId ? 'bg-surface-2/60 font-medium text-fg' : 'text-muted hover:bg-surface-2/50 hover:text-fg',
             )}
           >
             <Folder className="size-3.5 shrink-0" />
             <span className="min-w-0 flex-1 truncate">All chats</span>
-            <span className="text-[11px] tabular-nums text-faint">{totalChats}</span>
+            <span className="text-[12px] tabular-nums text-faint">{totalChats}</span>
           </Link>
         </li>
         {projects.map((project) => (
@@ -61,7 +61,6 @@ export function ProjectNav({ selectedId, totalChats }: { selectedId: string | nu
           />
         ))}
       </ul>
-      {!isLoading && projects.length === 0 && <p className="px-3 pb-1 pt-1 text-[11.5px] leading-relaxed text-faint">Group related chats together.</p>}
 
       <ProjectDialog open={dialogOpen} project={editing} onClose={() => setDialogOpen(false)} />
       <InstructionsDialog project={instructionsFor} onClose={() => setInstructionsFor(null)} />
@@ -105,13 +104,13 @@ function ProjectRow({
       <Link
         to={`/?project=${encodeURIComponent(project.id)}`}
         className={cx(
-          'flex h-8 items-center gap-2 rounded-control pl-3 pr-9 text-[13px] transition-colors',
-          selected ? 'bg-surface text-fg shadow-card' : 'text-muted hover:bg-surface hover:text-fg',
+          'flex h-9 items-center gap-2 rounded-control pl-3 pr-9 text-[14px] transition-colors',
+          selected ? 'bg-surface-2/60 font-medium text-fg' : 'text-muted hover:bg-surface-2/50 hover:text-fg',
         )}
       >
         <Folder className="size-3.5 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{project.name}</span>
-        <span className="text-[11px] tabular-nums text-faint">{project.conversationCount}</span>
+        <span className="text-[12px] tabular-nums text-faint">{project.conversationCount}</span>
       </Link>
       <span className={cx('absolute right-1 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100', selected && 'opacity-100')}>
         <Menu
@@ -172,7 +171,7 @@ function ProjectDialog({ open, project, onClose }: { open: boolean; project: Pro
           save()
         }}
       >
-        <label htmlFor="project-name" className="text-[12.5px] font-medium text-fg">
+        <label htmlFor="project-name" className="text-[13.5px] font-medium text-fg">
           Project name
         </label>
         <Input id="project-name" value={name} maxLength={60} onChange={(event) => setName(event.target.value)} placeholder="e.g. Client work" className="mt-2" />
@@ -216,7 +215,7 @@ function InstructionsDialog({ project, onClose }: { project: Project | null; onC
         </>
       }
     >
-      <label htmlFor="project-instructions" className="text-[12.5px] font-medium text-fg">
+      <label htmlFor="project-instructions" className="text-[13.5px] font-medium text-fg">
         Instructions
       </label>
       <textarea

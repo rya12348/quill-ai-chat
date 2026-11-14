@@ -1,6 +1,7 @@
 import { ArrowLeft, LockKeyhole } from 'lucide-react'
 import { Link, useParams } from 'react-router'
 
+import { modelDisplayName } from '../../shared/model-display'
 import { AssistantMessage, UserMessage } from '../components/Message'
 import { Mark } from '../components/Shell'
 import { Spinner } from '../components/ui'
@@ -16,7 +17,7 @@ export function SharedChat() {
         <div className="mx-auto flex h-14 max-w-[760px] items-center gap-2.5 px-4 md:px-6">
           <Link to="/" className="inline-flex items-center gap-2.5 text-[15px] font-semibold tracking-tight">
             <Mark size={26} />
-            Quill
+            Ink
           </Link>
           <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-[11.5px] font-medium text-muted">
             <LockKeyhole className="size-3.5" />
@@ -36,7 +37,7 @@ export function SharedChat() {
             <p className="mt-2 text-[13.5px] leading-relaxed text-muted">The owner may have revoked it, or the chat may have been deleted.</p>
             <Link to="/" className="mt-5 inline-flex items-center gap-1.5 text-[13.5px] font-medium text-fg underline underline-offset-2 hover:text-muted">
               <ArrowLeft className="size-4" />
-              Open Quill
+              Open Ink
             </Link>
           </div>
         </div>
@@ -47,7 +48,7 @@ export function SharedChat() {
             <p className="mt-2 text-[13.5px] leading-relaxed text-muted">Check the link and try again.</p>
             <Link to="/" className="mt-5 inline-flex items-center gap-1.5 text-[13.5px] font-medium text-fg underline underline-offset-2 hover:text-muted">
               <ArrowLeft className="size-4" />
-              Open Quill
+              Open Ink
             </Link>
           </div>
         </div>
@@ -55,7 +56,7 @@ export function SharedChat() {
         <main className="mx-auto w-full max-w-[760px] px-4 pb-14 pt-8 md:px-6 md:pt-10">
           <div className="rounded-card border border-line bg-surface px-5 py-4 shadow-card">
             <h1 className="text-[21px] font-semibold tracking-[-0.02em]">{data.title || 'Shared conversation'}</h1>
-            <p className="mt-1 text-[12.5px] text-faint">Shared from Quill · read-only</p>
+            <p className="mt-1 text-[12.5px] text-faint">Shared from Ink · read-only</p>
           </div>
 
           <div className="mt-8 space-y-7">
@@ -77,7 +78,7 @@ export function SharedChat() {
                     build={message.build}
                     canvas={message.canvas}
                     agent={message.agent}
-                    model={message.modelName ?? message.model ?? ''}
+                    model={modelDisplayName(message.modelName ?? message.model ?? '')}
                     interrupted={message.interrupted}
                   />
                 ),

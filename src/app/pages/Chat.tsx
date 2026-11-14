@@ -1,18 +1,20 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
-import { ArrowUpRight, Bot, Brain, Download, FileSpreadsheet, Folder, FolderX, Hammer, Layers, Menu as MenuIcon, MessageCircle, Search, Share2, ShieldCheck, Sparkles, type LucideIcon } from 'lucide-react'
+import { Bot, Brain, Compass, Download, FileSpreadsheet, FileText, Folder, FolderX, Globe2, Hammer, Layers, Menu as MenuIcon, MessageCircle, Monitor, Search, Share2, ShieldCheck, Sparkles, type LucideIcon } from 'lucide-react'
 
-import { BRAND, DEFAULT_MODEL, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, MODELS, SUGGESTIONS } from '../../shared/config'
+import { DEFAULT_MODEL, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, MODELS, SUGGESTIONS } from '../../shared/config'
+import { modelDisplayName } from '../../shared/model-display'
+import { suggestToolMode, type SuggestedToolMode } from '../../shared/agent'
 import type { Conversation, Message, ModeUsage, ReasoningEffort } from '../../shared/types'
+import { BrandArt } from '../components/BrandArt'
 import { Composer, type ComposerToggle } from '../components/Composer'
 import { AssistantMessage, UserMessage } from '../components/Message'
 import { MemoryPanel } from '../components/MemoryPanel'
 import { Mark, useMobileNav } from '../components/Shell'
 import { ShareDialog } from '../components/ShareDialog'
 import { ThemeToggle } from '../components/ThemeToggle'
-import { Menu, Spinner, useToast } from '../components/ui'
+import { Button, Dialog, Menu, Spinner, useToast } from '../components/ui'
 import { ApiError, useConversation, useMe, useMessageFeedback, useModels, useProjects, useProviders, useReviewSummary, useSetConversationModel, useSetConversationProject } from '../lib/api'
 import { cx } from '../lib/cx'
 import { untilLabel } from '../lib/format'
@@ -20,15 +22,92 @@ import { resolvePresetModel, type ModelChoice, type ModelPreset } from '../lib/m
 import { AttachmentError, clipboardFiles, readAttachment, type PendingAttachment } from '../lib/attachments'
 import { buildDataset, isDataFile, readDataFile } from '../lib/dataset'
 import { getDataset, putDataset } from '../lib/dataset-store'
-import { setOffline, useOffline } from '../lib/offline'
+import { checkConnection, useOffline } from '../lib/offline'
 import { clearPendingMessage, draftKey, queueMessage, readDraft, usePendingMessage, writeDraft } from '../lib/outbox'
 import { dismissTurn, refreshConversationTitle, settleAnalysis, startTurn, useTurn } from '../lib/turn'
 
-const MODEL_KEY = 'model'
-const MODEL_PRESET_KEY = 'model:preset'
+// Versioned so the new mid-list default reaches people who had the old first model saved.
+const MODEL_KEY = 'model:v2'
+const MODEL_PRESET_KEY = 'model:preset:v2'
 const EFFORT_KEY = 'effort:level'
 
-type TaskId = 'agent' | 'research' | 'analyze' | 'build' | 'canvas'
+type TaskId = 'advisor' | 'agent' | 'research' | 'analyze' | 'build' | 'canvas'
+
+const TASK_MODE_PREFIX = 'stet:task-mode:'
+
+const CHAT_PLACEHOLDER_PROMPTS = [
+  'Summarize this document in five bullets',
+  'Compare two vendors and cite the sources',
+  'Turn these notes into a project brief',
+  'Build a one-page site for my idea',
+  'Make flashcards from this chapter',
+  'Chart the trend in this spreadsheet',
+]
+
+const MODE_SUGGESTION_COPY: Record<SuggestedToolMode, { label: string; title: string; description: string; icon: LucideIcon }> = {
+  research: {
+    label: 'Research',
+    title: 'Want sources for this?',
+    description: 'Research mode searches the web and cites its findings.',
+    icon: Search,
+  },
+  analyze: {
+    label: 'Analyze',
+    title: 'Want to analyze the data?',
+    description: 'Analyze mode runs Python on a CSV, TSV or XLSX file.',
+    icon: FileSpreadsheet,
+  },
+  build: {
+    label: 'Build',
+    title: 'Want this built?',
+    description: 'Build mode makes the page, tool or app.',
+    icon: Hammer,
+  },
+  canvas: {
+    label: 'Study',
+    title: 'Want this as a study set?',
+    description: 'Study mode turns your request into flashcards or a quiz.',
+    icon: Layers,
+  },
+  agent: {
+    label: 'Agent',
+    title: 'Want this handled end to end?',
+    description: 'Agent mode plans the steps and uses the right tools.',
+    icon: Bot,
+  },
+  advisor: {
+    label: 'Advisor',
+    title: 'Want a decision brief?',
+    description: 'Advisor mode weighs the options and makes a recommendation.',
+    icon: Compass,
+  },
+  proof: {
+    label: 'Proof',
+    title: 'Want this checked?',
+    description: 'Proof mode verifies code, math and dates before you rely on it.',
+    icon: ShieldCheck,
+  },
+}
+
+function readTaskMode(id: string | undefined): TaskId | null {
+  if (!id || typeof localStorage === 'undefined') return null
+  try {
+    const value = localStorage.getItem(`${TASK_MODE_PREFIX}${id}`)
+    return value === 'advisor' || value === 'agent' || value === 'research' || value === 'analyze' || value === 'build' || value === 'canvas' ? value : null
+  } catch {
+    return null
+  }
+}
+
+function writeTaskMode(id: string | undefined, mode: TaskId | null) {
+  if (!id || typeof localStorage === 'undefined') return
+  try {
+    if (mode) localStorage.setItem(`${TASK_MODE_PREFIX}${id}`, mode)
+    else localStorage.removeItem(`${TASK_MODE_PREFIX}${id}`)
+  } catch {
+    /* storage can be unavailable; the mode still works for this visit */
+  }
+}
 
 export function Chat() {
   const { id } = useParams()
@@ -58,25 +137,54 @@ export function Chat() {
   const [newModel, setNewModel] = useState(() => localStorage.getItem(MODEL_KEY) ?? DEFAULT_MODEL)
   const [modelPreset, setModelPreset] = useState<ModelChoice>(() => {
     const saved = localStorage.getItem(MODEL_PRESET_KEY)
-    return saved === 'auto' || saved === 'fast' || saved === 'best' || saved === 'manual' ? saved : localStorage.getItem(MODEL_KEY) ? 'manual' : 'auto'
+    return saved === 'auto' || saved === 'fast' || saved === 'best' || saved === 'manual' ? saved : 'manual'
   })
-  const [proof, setProof] = useState(() => localStorage.getItem('proof') === 'on')
-  const [blend, setBlend] = useState(() => localStorage.getItem('blend') !== 'off')
-  // A task mode belongs to a conversation, not to the app: Home starts in plain
-  // chat even if the last chat was set to Build, Analyze, Research or Canvas.
-  const [research, setResearch] = useState(() => id !== undefined && localStorage.getItem('research') === 'on')
-  const [analyze, setAnalyze] = useState(() => id !== undefined && localStorage.getItem('analyze') === 'on')
-  const [build, setBuild] = useState(() => id !== undefined && localStorage.getItem('build') === 'on')
-  const [canvas, setCanvas] = useState(() => id !== undefined && localStorage.getItem('canvas') === 'on')
-  const [agentMode, setAgentMode] = useState(() => id !== undefined && localStorage.getItem('agent') === 'on')
+  // A new chat starts in plain Chat only. Modes are opt-in, and a mode chosen
+  // in one conversation should not silently carry into the next new chat.
+  const [proof, setProof] = useState(() => Boolean(id) && localStorage.getItem('proof') === 'on')
+  const [blend, setBlend] = useState(() => Boolean(id) && localStorage.getItem('blend') === 'on')
+  // A task mode belongs to one conversation. It is saved under that chat's id
+  // so a reload keeps a Build/Study/Research follow-up, but opening another
+  // chat can never inherit the previous chat's mode and spend its allowance.
+  const [taskMode, setTaskMode] = useState<TaskId | null>(() => readTaskMode(id))
+  const research = taskMode === 'research'
+  const analyze = taskMode === 'analyze'
+  const build = taskMode === 'build'
+  const canvas = taskMode === 'canvas'
+  const agentMode = taskMode === 'agent'
+  const advisorOn = taskMode === 'advisor'
   const [effort, setEffort] = useState<ReasoningEffort>(() => {
     const saved = localStorage.getItem(EFFORT_KEY)
     return saved === 'low' || saved === 'default' || saved === 'max' ? saved : 'default'
   })
   const [shareOpen, setShareOpen] = useState(false)
+  const [toolPrompt, setToolPrompt] = useState<{ content: string; mode: SuggestedToolMode } | null>(null)
+  const [queuedToolSend, setQueuedToolSend] = useState<{ content: string; mode: SuggestedToolMode } | null>(null)
+  const skipToolSuggestion = useRef(false)
+  const queuedSendActive = useRef(false)
   // The conversation this page created from "/", so it keeps showing the
   // reply during the moment between the server naming it and the URL changing.
   const owned = useRef<string | null>(null)
+  const lastConversationId = useRef(id)
+  useEffect(() => {
+    const changed = lastConversationId.current !== id
+    lastConversationId.current = id
+    if (id) {
+      if (changed) setTaskMode(readTaskMode(id))
+      return
+    }
+    // Landing on a fresh chat is always Chat only, even if the previous chat
+    // used Deep, Proof, Build or another mode.
+    setTaskMode(null)
+    setProof(false)
+    setBlend(false)
+    try {
+      localStorage.setItem('proof', 'off')
+      localStorage.setItem('blend', 'off')
+    } catch {
+      /* storage can be unavailable; the in-memory state is still Chat only */
+    }
+  }, [id])
   const draftKeyRef = useRef(draftStoreKey)
   useEffect(() => {
     if (draftKeyRef.current === draftStoreKey) return
@@ -110,29 +218,36 @@ export function Chat() {
 
   const openCreated = useCallback(
     (created: Conversation) => {
+      // A task chosen on Home belongs to the conversation it creates. Store it
+      // under that id before navigation so a remount restores the same mode.
+      if (taskMode) writeTaskMode(created.id, taskMode)
       owned.current = created.id
       const projectQuery = selectedProjectId ? `?project=${encodeURIComponent(selectedProjectId)}` : ''
       navigate(`/c/${created.id}${projectQuery}`, { replace: true })
       void client.invalidateQueries({ queryKey: ['projects'] })
     },
-    [client, navigate, selectedProjectId],
+    [client, navigate, selectedProjectId, taskMode],
   )
 
   const conversation = page.data?.conversation
   const currentProject = conversation?.projectId ? projects.find((project) => project.id === conversation.projectId) : undefined
   const saved = page.data?.messages ?? []
   const availableModels = models?.items ?? MODELS.map((m) => ({ ...m, available: true }))
+  // `/api/models` can include a useful disabled row (for example DeepSeek 4.1
+  // before a provider key is added). Never send a disabled id to the server.
+  const usableModels = availableModels.filter((model) => model.available)
   // Presets should not send people to a lane whose last check failed. The
   // picker has the same health data; this keeps the resolved id in step with it.
   const healthyModels = health
-    ? availableModels.filter((candidate) => {
+    ? usableModels.filter((candidate) => {
         const lanes = health.items.filter((item) => item.model === candidate.id)
         if (!lanes.length) return health.mode !== 'api' || !health.items[0] || health.items[0].status !== 'down'
         return lanes.some((lane) => lane.status !== 'down' && lane.lastErrorCode !== 'invalid_key' && lane.lastErrorCode !== 'unavailable')
       })
     : availableModels
-  const presetModels = healthyModels.length ? healthyModels : availableModels
-  const selectedModel = availableModels.some((m) => m.id === newModel) ? newModel : availableModels[0]?.id ?? DEFAULT_MODEL
+  const presetModels = healthyModels.length ? healthyModels : usableModels
+  const fallbackModel = usableModels[Math.floor((usableModels.length - 1) / 2)] ?? usableModels[0]
+  const selectedModel = usableModels.some((m) => m.id === newModel) ? newModel : fallbackModel?.id ?? DEFAULT_MODEL
   const mine = turn !== null && (turn.conversationId === (id ?? null) || (id === undefined && turn.conversationId === owned.current))
   const busy = mine && turn.status !== 'error'
   const mode = me?.capabilities.mode
@@ -150,12 +265,15 @@ export function Chat() {
   const canCanvas = me?.capabilities.canvas === true
   const canvasOn = canvas && canCanvas
   const canAgent = me?.capabilities.agent === true
+  const canAdvisor = me?.capabilities.ai === true && mode !== 'api'
   const agentOn = agentMode && canAgent
-  const strategy: 'proof' | 'blend' | 'fast' | 'research' | 'analyze' | 'build' | 'canvas' | 'agent' =
-    agentOn ? 'agent' : buildOn ? 'build' : analyzeOn ? 'analyze' : researchOn ? 'research' : canvasOn ? 'canvas' : proof ? 'proof' : blend ? 'blend' : 'fast'
+  const strategy: 'proof' | 'blend' | 'fast' | 'research' | 'analyze' | 'build' | 'canvas' | 'agent' | 'advisor' =
+    agentOn ? 'agent' : advisorOn ? 'advisor' : buildOn ? 'build' : analyzeOn ? 'analyze' : researchOn ? 'research' : canvasOn ? 'canvas' : proof ? 'proof' : blend ? 'blend' : 'fast'
   const modeLabel =
     strategy === 'agent'
       ? 'Agent'
+      : strategy === 'advisor'
+        ? 'Advisor'
       : strategy === 'proof'
         ? 'Proof'
         : strategy === 'research'
@@ -170,12 +288,21 @@ export function Chat() {
                   ? 'Deep'
                   : 'Chat'
   const presetModel = resolvePresetModel(modelPreset, strategy, presetModels)
-  const model = presetModel ?? (conversation?.model && availableModels.some((m) => m.id === conversation.model) ? conversation.model : selectedModel)
+  const model = presetModel ?? (conversation?.model && usableModels.some((m) => m.id === conversation.model) ? conversation.model : selectedModel)
   // Fast is the plain chat: hide exposed reasoning, including older replies,
   // until an advanced mode is selected. The model can still reason internally.
   const showReasoning = strategy !== 'fast'
   const limitReached = me ? me.usage.used >= me.usage.limit && !busy : false
   const pendingHere = pending !== null && (pending.conversationId ?? null) === (id ?? null)
+  const canOfferMode = (candidate: SuggestedToolMode) => {
+    if (candidate === 'research') return canResearch && researchLeft !== 0
+    if (candidate === 'analyze') return canAnalyze && analyzeLeft !== 0
+    if (candidate === 'build') return canBuild && buildLeft !== 0
+    if (candidate === 'canvas') return canCanvas
+    if (candidate === 'agent') return canAgent
+    if (candidate === 'proof') return me?.capabilities.mode === 'public'
+    return canAdvisor
+  }
 
   const addFiles = useCallback(
     (files: File[]) => {
@@ -295,6 +422,18 @@ export function Chat() {
         toast('A saved message is already waiting to send.', 'danger')
         return
       }
+      if (skipToolSuggestion.current) {
+        skipToolSuggestion.current = false
+      } else if (!busy && !limitReached && strategy === 'fast' && !taskMode && !proof && !blend) {
+        const suggested = suggestToolMode(content, {
+          hasAttachments: outgoing.length > 0,
+          hasDataAttachment: outgoing.some((attachment) => isDataFile(attachment.name)),
+        })
+        if (suggested && canOfferMode(suggested)) {
+          setToolPrompt({ content, mode: suggested })
+          return
+        }
+      }
       const clientMessageId = crypto.randomUUID()
       let dataset = outgoing[0]?.dataset
       if (analyzeOn && outgoing[0]) {
@@ -342,23 +481,14 @@ export function Chat() {
         })
         if (stored) {
           setDraft(content)
-          toast("Saved. It will send when you're back online.")
+          toast('Saved. It will send when the connection returns.')
         } else {
           toast('A saved message is already waiting to send.', 'danger')
         }
       }
-      if (offline || !navigator.onLine) {
-        if (researchOn || buildOn || agentOn) {
-          toast(`${agentOn ? 'Agent' : buildOn ? 'Build' : 'Research'} needs a connection. Reconnect and try again.`, 'danger')
-          return
-        }
-        if (outgoing.length) {
-          toast('Attachments and datasets need a connection. Keep this page online and try again.', 'danger')
-          return
-        }
-        saveForRetry()
-        return
-      }
+      // Always try the request. `navigator.onLine` is only a hint and can be
+      // false while the network is usable, so refusing here stranded Build,
+      // Research and Agent sends behind a stale browser flag.
       setDraft('')
       setAttachments([])
       let started = false
@@ -366,7 +496,15 @@ export function Chat() {
         await startTurn(client, request, { onConversation: openCreated, onStarted: () => { started = true } })
       } catch (error) {
         if (error instanceof ApiError && (error.code === 'offline' || error.status === 0)) {
-          setOffline(true)
+          void checkConnection()
+          if (outgoing.length) {
+            if (!started) {
+              setDraft(content)
+              setAttachments(outgoing)
+            }
+            toast('Could not send the attachment. Check your connection and try again.', 'danger')
+            return
+          }
           saveForRetry()
           return
         }
@@ -384,7 +522,7 @@ export function Chat() {
         toast(error instanceof Error ? error.message : 'Could not send this message', 'danger')
       }
     },
-    [agentOn, analyzeOn, attachments, buildOn, client, effort, id, model, navigate, offline, openCreated, pending, researchOn, selectedProjectId, strategy, toast],
+    [agentOn, analyzeOn, attachments, blend, buildOn, busy, canOfferMode, client, effort, id, limitReached, model, navigate, offline, openCreated, pending, proof, researchOn, selectedProjectId, strategy, taskMode, toast],
   )
 
   // A send saved while offline goes out once, when the browser is back online.
@@ -431,7 +569,7 @@ export function Chat() {
           }
           toast('That saved message was already sent.')
         } else if (error instanceof ApiError && (error.code === 'offline' || error.status === 0 || error.status === 503)) {
-          setOffline(true)
+          void checkConnection()
         } else {
           clearPendingMessage(item.clientMessageId)
           setDraft(item.content)
@@ -449,13 +587,8 @@ export function Chat() {
   useEffect(() => {
     if (!pending) return
     let stopped = false
-    const probe = async () => {
-      try {
-        const response = await fetch('/api/health', { cache: 'no-store' })
-        if (!stopped && response.ok && response.headers.get('x-quill-offline') !== '1') setOffline(false)
-      } catch {
-        /* still offline; the next interval tries again */
-      }
+    const probe = () => {
+      if (!stopped) void checkConnection()
     }
     void probe()
     const timer = window.setInterval(() => void probe(), 4_000)
@@ -465,10 +598,10 @@ export function Chat() {
     }
   }, [pending])
 
-  const regenerate = useCallback(async () => {
+  const regenerate = useCallback(async (retryModel?: string) => {
     if (!id) return
     try {
-      await startTurn(client, { conversationId: id, regenerate: true, model, strategy, effort })
+      await startTurn(client, { conversationId: id, regenerate: true, model: retryModel ?? model, strategy, effort })
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Could not regenerate', 'danger')
     }
@@ -517,6 +650,17 @@ export function Chat() {
     localStorage.setItem(MODEL_PRESET_KEY, next)
   }
 
+  /** One task mode at a time; choosing a task retires Proof and Deep. */
+  const selectTaskMode = (next: TaskId | null) => {
+    setTaskMode(next)
+    writeTaskMode(id, next)
+    if (!next) return
+    setProof(false)
+    setBlend(false)
+    localStorage.setItem('proof', 'off')
+    localStorage.setItem('blend', 'off')
+  }
+
   const toggleProof = () => {
     const next = !proof
     setProof(next)
@@ -524,12 +668,7 @@ export function Chat() {
     if (next) {
       setBlend(false)
       localStorage.setItem('blend', 'off')
-      setResearch(false)
-      localStorage.setItem('research', 'off')
-      setAnalyze(false)
-      localStorage.setItem('analyze', 'off')
-      setBuild(false)
-      localStorage.setItem('build', 'off')
+      selectTaskMode(null)
     }
   }
 
@@ -540,157 +679,56 @@ export function Chat() {
     if (next) {
       setProof(false)
       localStorage.setItem('proof', 'off')
-      setResearch(false)
-      localStorage.setItem('research', 'off')
-      setAnalyze(false)
-      localStorage.setItem('analyze', 'off')
-      setBuild(false)
-      localStorage.setItem('build', 'off')
+      selectTaskMode(null)
     }
   }
 
   const toggleResearch = () => {
     if (!canResearch || researchLeft === 0) return
-    const next = !research
-    setResearch(next)
-    localStorage.setItem('research', next ? 'on' : 'off')
-    if (next) {
-      setProof(false)
-      setBlend(false)
-      setAttachments([])
-      setAnalyze(false)
-      setBuild(false)
-      localStorage.setItem('proof', 'off')
-      localStorage.setItem('blend', 'off')
-      localStorage.setItem('analyze', 'off')
-      localStorage.setItem('build', 'off')
-    }
+    const next = research ? null : 'research'
+    selectTaskMode(next)
+    if (next) setAttachments([])
   }
 
   const toggleAnalyze = () => {
     if (!canAnalyze || analyzeLeft === 0) return
-    const next = !analyze
-    setAnalyze(next)
-    localStorage.setItem('analyze', next ? 'on' : 'off')
-    if (next) {
-      setProof(false)
-      setBlend(false)
-      setResearch(false)
-      setBuild(false)
-      setAttachments((current) => current.filter((attachment) => isDataFile(attachment.name)).slice(0, 1))
-      localStorage.setItem('proof', 'off')
-      localStorage.setItem('blend', 'off')
-      localStorage.setItem('research', 'off')
-      localStorage.setItem('build', 'off')
-    }
+    const next = analyze ? null : 'analyze'
+    selectTaskMode(next)
+    if (next) setAttachments((current) => current.filter((attachment) => isDataFile(attachment.name)).slice(0, 1))
   }
 
   const toggleBuild = () => {
     if (!canBuild || buildLeft === 0) return
-    const next = !build
-    setBuild(next)
-    localStorage.setItem('build', next ? 'on' : 'off')
-    if (next) {
-      setProof(false)
-      setBlend(false)
-      setResearch(false)
-      setAnalyze(false)
-      setAttachments([])
-      localStorage.setItem('proof', 'off')
-      localStorage.setItem('blend', 'off')
-      localStorage.setItem('research', 'off')
-      localStorage.setItem('analyze', 'off')
-    }
+    const next = taskMode === 'build' ? null : 'build'
+    selectTaskMode(next)
+    if (next) setAttachments([])
   }
 
   const toggleCanvas = () => {
     if (!canCanvas) return
-    const next = !canvas
-    setCanvas(next)
-    localStorage.setItem('canvas', next ? 'on' : 'off')
-    if (next) {
-      setProof(false)
-      setBlend(false)
-      setResearch(false)
-      setAnalyze(false)
-      setBuild(false)
-      setAttachments([])
-      localStorage.setItem('proof', 'off')
-      localStorage.setItem('blend', 'off')
-      localStorage.setItem('research', 'off')
-      localStorage.setItem('analyze', 'off')
-      localStorage.setItem('build', 'off')
-    }
+    const next = canvas ? null : 'canvas'
+    selectTaskMode(next)
+    if (next) setAttachments([])
   }
 
   const toggleAgent = () => {
     if (!canAgent) return
-    const next = !agentMode
-    setAgentMode(next)
-    localStorage.setItem('agent', next ? 'on' : 'off')
-    if (next) {
-      setProof(false)
-      setBlend(false)
-      setResearch(false)
-      setAnalyze(false)
-      setBuild(false)
-      setCanvas(false)
-      setAttachments([])
-      localStorage.setItem('proof', 'off')
-      localStorage.setItem('blend', 'off')
-      localStorage.setItem('research', 'off')
-      localStorage.setItem('analyze', 'off')
-      localStorage.setItem('build', 'off')
-      localStorage.setItem('canvas', 'off')
-    }
+    const next = agentMode ? null : 'agent'
+    selectTaskMode(next)
+    if (next) setAttachments([])
   }
 
-  // Only one advanced mode at a time: turning another one on retires Canvas.
-  useEffect(() => {
-    if (!canvas || (!proof && !blend && !researchOn && !analyzeOn && !buildOn)) return
-    setCanvas(false)
-    localStorage.setItem('canvas', 'off')
-  }, [analyzeOn, blend, buildOn, canvas, proof, researchOn])
-
-  // Agent is also exclusive: choosing another mode retires the run mode.
-  useEffect(() => {
-    if (!agentMode || (!proof && !blend && !researchOn && !analyzeOn && !buildOn && !canvasOn)) return
-    setAgentMode(false)
-    localStorage.setItem('agent', 'off')
-  }, [agentMode, analyzeOn, blend, buildOn, canvasOn, proof, researchOn])
-
-  // Returning to Home is an explicit "ask anything": clear the previous tool
-  // choice so a plain question is not routed through Build or another mode.
-  // Selecting a card or the Tools menu sets it again on purpose.
-  useEffect(() => {
-    if (id !== undefined) return
-    setResearch(false)
-    setAnalyze(false)
-    setBuild(false)
-    setCanvas(false)
-    setAgentMode(false)
-    localStorage.setItem('research', 'off')
-    localStorage.setItem('analyze', 'off')
-    localStorage.setItem('build', 'off')
-    localStorage.setItem('canvas', 'off')
-    localStorage.setItem('agent', 'off')
-  }, [id])
+  const toggleAdvisor = () => {
+    if (!canAdvisor) return
+    selectTaskMode(advisorOn ? null : 'advisor')
+  }
 
   const toggleChatOnly = () => {
+    selectTaskMode(null)
     setProof(false)
     setBlend(false)
-    setResearch(false)
-    setAnalyze(false)
-    setBuild(false)
-    setCanvas(false)
-    setAgentMode(false)
     localStorage.setItem('proof', 'off')
     localStorage.setItem('blend', 'off')
-    localStorage.setItem('research', 'off')
-    localStorage.setItem('analyze', 'off')
-    localStorage.setItem('build', 'off')
-    localStorage.setItem('canvas', 'off')
-    localStorage.setItem('agent', 'off')
   }
 
   const changeEffort = (next: ReasoningEffort) => {
@@ -710,7 +748,7 @@ export function Chat() {
             id: 'chat',
             label: 'Chat only',
             description: 'One direct answer, with no extra mode.',
-            pressed: !proof && !blend && !researchOn && !analyzeOn && !buildOn && !canvasOn && !agentOn,
+            pressed: !proof && !blend && !researchOn && !analyzeOn && !buildOn && !canvasOn && !agentOn && !advisorOn,
             onClick: toggleChatOnly,
             icon: MessageCircle,
             title: 'No extra mode',
@@ -733,15 +771,26 @@ export function Chat() {
             icon: Sparkles,
             title: 'Extra drafts and a review for hard questions.',
           },
+          ...(canAdvisor
+            ? [{
+                id: 'advisor',
+                label: 'Advisor',
+                description: 'Makes a hard decision with a recommendation.',
+                pressed: advisorOn,
+                onClick: toggleAdvisor,
+                icon: Compass,
+                title: 'A decision brief: options, trade-offs, a recommendation and the cheapest test.',
+              }]
+            : []),
           ...(canAgent
             ? [{
                 id: 'agent',
                 label: 'Agent',
-                description: 'Plans and runs several tools.',
+                description: 'Plans, uses every text tool and checks its work.',
                 pressed: agentOn,
                 onClick: toggleAgent,
                 icon: Bot,
-                title: 'Plan a goal, run Research, Build or Canvas, then report what actually happened.',
+                title: 'Plan a goal, run Research, Build, Study or Proof, review the answer, then report what actually happened.',
               }]
             : []),
           ...(canResearch
@@ -773,7 +822,7 @@ export function Chat() {
           ...(canCanvas
             ? [{
                 id: 'canvas',
-                label: 'Canvas',
+                label: 'Study',
                 description: 'Makes flashcards or a quiz.',
                 pressed: canvasOn,
                 onClick: toggleCanvas,
@@ -794,15 +843,25 @@ export function Chat() {
                 title: 'Create a page or tool, or preview a live site.',
               }]
             : []),
+          {
+            id: 'browser',
+            label: 'Browser',
+            description: 'Operates a real, signed-in tab.',
+            pressed: false,
+            onClick: () => navigate('/browser'),
+            icon: Globe2,
+            title: 'Open the Browser workspace and operate a real site tab.',
+          },
         ]
       : []
 
-  const activeTask: 'chat' | TaskId = agentOn ? 'agent' : buildOn ? 'build' : analyzeOn ? 'analyze' : researchOn ? 'research' : canvasOn ? 'canvas' : 'chat'
+  const activeTask: 'chat' | TaskId = agentOn ? 'agent' : advisorOn ? 'advisor' : buildOn ? 'build' : analyzeOn ? 'analyze' : researchOn ? 'research' : canvasOn ? 'canvas' : 'chat'
   const unavailableTasks: Partial<Record<TaskId, string>> = {
     ...(!canResearch ? { research: 'Not available' } : researchLeft === 0 ? { research: 'Used up today' } : {}),
     ...(!canAnalyze ? { analyze: 'Not available' } : analyzeLeft === 0 ? { analyze: 'Used up today' } : {}),
     ...(!canBuild ? { build: 'Not available' } : buildLeft === 0 ? { build: 'Used up today' } : {}),
     ...(!canCanvas ? { canvas: 'Not available' } : {}),
+    ...(!canAdvisor ? { advisor: 'Not available' } : {}),
     ...(!canAgent ? { agent: 'Not available' } : {}),
   }
 
@@ -850,15 +909,68 @@ export function Chat() {
     if (!conversationId || !hasSavedAssistant) return
     void refreshConversationTitle(client, conversationId)
   }, [client, conversationId, hasSavedAssistant])
-  const empty = !id && messages.length === 0 && !mine
-  const labelFor = (modelId: string | null | undefined) => (modelId && models?.items.find((model) => model.id === modelId)?.name) || modelId || ''
+  const empty = messages.length === 0 && !mine && (!id || page.isSuccess)
+  // The tool chooser runs before the request leaves Chat. It only offers modes
+  // that are available to this account, and the person can still send as chat.
+  const toolCopy = toolPrompt ? MODE_SUGGESTION_COPY[toolPrompt.mode] : null
+  const closeToolPrompt = () => setToolPrompt(null)
+  const acceptToolPrompt = () => {
+    if (!toolPrompt) return
+    const { content, mode } = toolPrompt
+    setToolPrompt(null)
+    if (mode === 'proof') {
+      setProof(true)
+      setBlend(false)
+      localStorage.setItem('proof', 'on')
+      localStorage.setItem('blend', 'off')
+      selectTaskMode(null)
+    } else {
+      selectTaskMode(mode)
+      if (mode === 'analyze') {
+        const data = attachments.filter((attachment) => isDataFile(attachment.name)).slice(0, 1)
+        setAttachments(data)
+        setDraft(content)
+        setComposerFocusRequest((request) => request + 1)
+        if (data.length) {
+          setQueuedToolSend({ content, mode })
+        } else {
+          setFilePickerRequest((request) => request + 1)
+          toast('Analyze mode is on. Attach a CSV, TSV or XLSX, then press Send.')
+        }
+        return
+      }
+      if (mode !== 'advisor') setAttachments([])
+    }
+    setDraft(content)
+    setComposerFocusRequest((request) => request + 1)
+    setQueuedToolSend({ content, mode })
+  }
+  const sendToolPromptAsChat = () => {
+    if (!toolPrompt) return
+    const content = toolPrompt.content
+    setToolPrompt(null)
+    skipToolSuggestion.current = true
+    void send(content)
+  }
+  useEffect(() => {
+    if (!queuedToolSend || queuedSendActive.current) return
+    const ready = queuedToolSend.mode === 'proof' ? proof : taskMode === queuedToolSend.mode
+    if (!ready) return
+    queuedSendActive.current = true
+    setQueuedToolSend(null)
+    skipToolSuggestion.current = true
+    void send(queuedToolSend.content).finally(() => {
+      queuedSendActive.current = false
+    })
+  }, [proof, queuedToolSend, send, taskMode])
+  const labelFor = (modelId: string | null | undefined) => modelDisplayName(modelId, models?.items)
 
   const exportChat = () => {
     if (!messages.length) return
-    const title = conversation?.title ?? 'Quill chat'
+    const title = conversation?.title ?? 'Ink chat'
     const parts = [`# ${title}`, '']
     for (const message of messages) {
-      parts.push(message.role === 'user' ? '## You' : '## Quill', '', message.content)
+      parts.push(message.role === 'user' ? '## You' : '## Ink', '', message.content)
       if (message.attachments?.length) {
         parts.push('', ...message.attachments.map((attachment) => `- ${attachment.kind === 'image' ? 'Image' : 'File'}: ${attachment.name}`))
       }
@@ -900,7 +1012,7 @@ export function Chat() {
     const blob = new Blob([parts.join('\n')], { type: 'text/markdown;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
-    const name = title.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 60) || 'quill-chat'
+    const name = title.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 60) || 'stet-chat'
     link.href = url
     link.download = `${name}.md`
     link.click()
@@ -953,15 +1065,15 @@ export function Chat() {
         <div className="grid flex-1 place-items-center p-6 text-center">
           <div>
             <p className="text-[15px] font-medium">{unavailableOffline ? 'Not available offline' : 'This chat is not here any more.'}</p>
-            <p className="mt-1 text-[13px] leading-relaxed text-muted">
+            <p className="mt-1 text-[14px] leading-relaxed text-muted">
               {unavailableOffline ? 'Open this conversation once while you are online and it will be kept for offline reading.' : 'It may have been deleted.'}
             </p>
             {unavailableOffline ? (
-              <button type="button" onClick={() => void page.refetch()} className="mt-2 text-[13.5px] text-muted underline underline-offset-2 hover:text-fg">
+              <button type="button" onClick={() => void page.refetch()} className="mt-2 text-[14px] text-muted underline underline-offset-2 hover:text-fg">
                 Try again
               </button>
             ) : (
-              <button type="button" onClick={() => navigate('/')} className="mt-2 text-[13.5px] text-muted underline underline-offset-2 hover:text-fg">
+              <button type="button" onClick={() => navigate('/')} className="mt-2 text-[14px] text-muted underline underline-offset-2 hover:text-fg">
                 Start a new one
               </button>
             )}
@@ -974,9 +1086,8 @@ export function Chat() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ChatHeader
-        title={conversation?.title ?? 'New chat'}
+        title={conversation?.title ?? ''}
         mode={mode !== 'api' ? modeLabel : undefined}
-        home={!conversation}
         actions={
           <>
             {conversation && projectItems.length > 0 && (
@@ -987,7 +1098,7 @@ export function Chat() {
                     type="button"
                     aria-label="Move chat to a project"
                     title={currentProject ? `Project: ${currentProject.name}` : 'Move chat to a project'}
-                    className="inline-flex h-8 max-w-[150px] shrink-0 items-center gap-1.5 rounded-tile px-2 text-[12.5px] text-faint transition-colors hover:bg-surface-2 hover:text-fg"
+                    className="inline-flex h-9 max-w-[170px] shrink-0 items-center gap-1.5 rounded-tile px-2.5 text-[13.5px] text-faint transition-colors hover:bg-surface-2 hover:text-fg"
                   >
                     <Folder className="size-3.5 shrink-0" />
                     <span className="hidden truncate sm:inline">{currentProject?.name ?? 'Project'}</span>
@@ -1018,13 +1129,13 @@ export function Chat() {
                 <Download className="size-3.5" />
               </button>
             )}
-            <ThemeToggle />
+            <ThemeToggle className="retro-hide" />
           </>
         }
       />
 
       <div ref={scroller} onScroll={onScroll} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
-        <div className={cx('mx-auto w-full max-w-[760px] px-4 pb-6 pt-2 md:px-6', empty && 'flex min-h-full flex-col')}>
+        <div className={cx('mx-auto w-full px-4 pb-6 pt-2 md:px-6', empty ? 'flex min-h-full max-w-[1040px] flex-col' : 'max-w-[760px]')}>
           {conversation && messages.length > 0 ? <MemoryPanel conversationId={conversation.id} /> : null}
           {empty ? (
             <EmptyState
@@ -1035,6 +1146,11 @@ export function Chat() {
               onChatOnly={toggleChatOnly}
               onSuggestion={chooseSuggestion}
               onTask={(task) => {
+                if (task === 'advisor') {
+                  if (!canAdvisor || advisorOn) return
+                  toggleAdvisor()
+                  return
+                }
                 if (task === 'agent') {
                   if (!canAgent || agentOn) return
                   toggleAgent()
@@ -1122,7 +1238,11 @@ export function Chat() {
                   error={turn.status === 'error' ? turn.error : null}
                     onRetry={() => {
                       dismissTurn()
-                      void regenerate()
+                      // A failed model should not be retried into the same wall.
+                      // Move to the next healthy model when one is available.
+                      const fallback = presetModels.find((candidate) => candidate.id !== model && candidate.available)?.id
+                      if (fallback) changeModel(fallback)
+                      void regenerate(fallback)
                     }}
                   />
                 </>
@@ -1134,8 +1254,8 @@ export function Chat() {
 
       <div className="mx-auto w-full max-w-[760px] px-4 pb-4 md:px-6 md:pb-6">
         {pendingHere && (
-          <p role="status" className="mb-2 rounded-control bg-surface-2 px-3 py-2 text-[12.5px] leading-relaxed text-muted">
-            Draft saved offline. It will send automatically when you&apos;re back online.
+          <p role="status" className="mb-2 rounded-control bg-surface-2 px-3.5 py-2.5 text-[13.5px] leading-relaxed text-muted">
+            Draft saved. It will send automatically when the connection returns.
           </p>
         )}
         {limitReached && me ? (
@@ -1144,30 +1264,59 @@ export function Chat() {
           </Notice>
         ) : (
           <Composer
-            value={draft}
-            onChange={setDraft}
-            attachments={attachments}
-            tools={composerTools}
-            replyUsage={me?.usage}
-            model={model}
-            onChangeModel={changeModel}
-            modelPreset={modelPreset}
-            onChangeModelPreset={changePreset}
-            effort={mode === 'public' && me?.capabilities.reasoning ? effort : undefined}
-            onChangeEffort={changeEffort}
-            onAttach={addFiles}
-            openFilePicker={filePickerRequest}
-            focusRequest={composerFocusRequest}
-            onRemoveAttachment={(attachmentId) => setAttachments((current) => current.filter((item) => item.id !== attachmentId))}
-            onSend={() => void send(draft)}
-            onStop={() => turn?.stop()}
-            busy={busy}
-            placeholder={agentOn ? 'Describe a goal; Agent plans and runs the tools…' : buildOn ? 'Describe a site, landing page or tool — or paste a public site to show live…' : canvasOn ? 'What should the flashcards or quiz cover?' : analyzeOn ? 'Upload a table, then ask a question…' : researchOn ? 'Ask a question to research…' : `Message ${BRAND}`}
-            autoFocus
+              value={draft}
+              onChange={setDraft}
+              attachments={attachments}
+              tools={composerTools}
+              replyUsage={me?.usage}
+              model={model}
+              onChangeModel={changeModel}
+              modelPreset={modelPreset}
+              onChangeModelPreset={changePreset}
+              effort={mode === 'public' && me?.capabilities.reasoning ? effort : undefined}
+              onChangeEffort={changeEffort}
+              onAttach={addFiles}
+              openFilePicker={filePickerRequest}
+              focusRequest={composerFocusRequest}
+              onRemoveAttachment={(attachmentId) => setAttachments((current) => current.filter((item) => item.id !== attachmentId))}
+              onSend={() => void send(draft)}
+              onStop={() => turn?.stop()}
+              busy={busy}
+              placeholder={agentOn ? 'Describe a goal; Agent plans and runs the tools…' : advisorOn ? 'Describe the decision, your constraints and the deadline…' : buildOn ? 'Describe a site, landing page or tool — or paste a public site to show live…' : canvasOn ? 'What should the flashcards or quiz cover?' : analyzeOn ? 'Upload a table, then ask a question…' : researchOn ? 'Ask a question to research…' : 'Message'}
+              placeholderPrompts={empty && !taskMode ? CHAT_PLACEHOLDER_PROMPTS : undefined}
+              autoFocus
           />
         )}
       </div>
       <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} conversationId={conversation?.id} />
+      <Dialog
+        open={toolPrompt !== null}
+        onClose={closeToolPrompt}
+        title={toolCopy ? `Use ${toolCopy.label}?` : 'Use a tool?'}
+        description={toolCopy?.description}
+        width={420}
+        footer={
+          <>
+            <Button onClick={sendToolPromptAsChat}>Send as chat</Button>
+            <Button variant="primary" onClick={acceptToolPrompt} data-autofocus>
+              Use {toolCopy?.label ?? 'tool'}
+            </Button>
+          </>
+        }
+      >
+        {toolPrompt ? (
+          <div className="space-y-2.5">
+            <p className="text-[13px] leading-relaxed text-muted">
+              {toolPrompt.mode === 'analyze'
+                ? 'Switch to Analyze and attach the table you want to inspect.'
+                : 'Switch modes and send this request there.'}
+            </p>
+            <p className="rounded-control bg-surface-2/70 px-3 py-2.5 text-[12.5px] leading-relaxed text-faint">
+              {toolPrompt.content.length > 180 ? `${toolPrompt.content.slice(0, 180).trimEnd()}…` : toolPrompt.content}
+            </p>
+          </div>
+        ) : null}
+      </Dialog>
     </div>
   )
 }
@@ -1187,25 +1336,22 @@ function modeNote(usage?: ModeUsage): string | undefined {
 }
 
 function Notice({ children }: { children: React.ReactNode }) {
-  return <p className="rounded-control bg-surface-2 px-4 py-3 text-center text-[13.5px] text-muted">{children}</p>
+  return <p className="rounded-control bg-surface-2 px-4 py-3 text-center text-[14.5px] text-muted">{children}</p>
 }
 
 function ChatHeader({
   title,
   mode,
-  home,
   actions,
 }: {
   title: string
   mode?: string
-  /** The empty home already has the page's h1; use a span there. */
-  home?: boolean
   actions?: ReactNode
 }) {
   const openMenu = useMobileNav()
   return (
-    <header className="flex h-12 shrink-0 items-center px-3 md:h-14 md:px-5">
-      <div className="mx-auto flex min-w-0 w-full max-w-[760px] items-center gap-2">
+    <header className="flex h-14 shrink-0 items-center px-3 md:h-16 md:px-5">
+      <div className="mx-auto flex min-w-0 w-full max-w-[712px] items-center gap-2">
         <button
           type="button"
           aria-label="Open menu"
@@ -1217,14 +1363,12 @@ function ChatHeader({
         <Mark size={22} className="md:hidden" />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            {home ? (
-              <span className="truncate text-[13.5px] font-semibold tracking-[-0.01em]">{title}</span>
-            ) : (
-              <h1 className="truncate text-[13.5px] font-semibold tracking-[-0.01em]">{title}</h1>
-            )}
+            {title ? (
+              <h1 className="truncate font-display text-[18px] font-semibold tracking-[-0.02em]">{title}</h1>
+            ) : null}
             {mode && mode !== 'Chat' ? (
               <span
-                className="inline-flex h-5 shrink-0 items-center rounded-full bg-surface-2 px-2 text-[10.5px] font-medium text-muted"
+                className="inline-flex h-6 shrink-0 items-center rounded-full bg-surface-2 px-2.5 text-[11.5px] font-medium text-muted"
                 title={`Current mode: ${mode}. Change it in Tools.`}
               >
                 {mode}
@@ -1232,7 +1376,17 @@ function ChatHeader({
             ) : null}
           </div>
         </div>
-        {actions ? <div className="ml-auto flex shrink-0 items-center gap-0.5">{actions}</div> : null}
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          {actions ? <div className="flex shrink-0 items-center gap-0.5">{actions}</div> : null}
+        </div>
+        <Link
+          to="/browser"
+          aria-label="Open browser"
+          title="Browser"
+          className="ml-1 grid size-9 shrink-0 place-items-center rounded-tile text-muted transition-colors hover:bg-surface-2 hover:text-fg md:hidden"
+        >
+          <Monitor className="size-5" />
+        </Link>
       </div>
     </header>
   )
@@ -1257,42 +1411,43 @@ function EmptyState({
 }) {
   const { data: review } = useReviewSummary()
   const tasks: { id: TaskId; title: string; description: string; icon: LucideIcon }[] = [
-    { id: 'agent', title: 'Agent', description: 'Plans and runs several tools.', icon: Bot },
-    { id: 'research', title: 'Research', description: 'A cited web report with claim checks.', icon: Search },
-    { id: 'analyze', title: 'Analyze', description: 'Run Python on a CSV, TSV or XLSX.', icon: FileSpreadsheet },
-    { id: 'build', title: 'Build', description: 'Make a page, tool or game.', icon: Hammer },
-    { id: 'canvas', title: 'Study', description: 'Turn a topic into flashcards or a quiz.', icon: Layers },
+    { id: 'advisor', title: 'Advisor', description: 'Make a decision.', icon: Compass },
+    { id: 'agent', title: 'Agent', description: 'Run a multi-step task.', icon: Bot },
+    { id: 'research', title: 'Research', description: 'Search the web with sources.', icon: Search },
+    { id: 'analyze', title: 'Analyze', description: 'Run Python on a spreadsheet.', icon: FileSpreadsheet },
+    { id: 'build', title: 'Build', description: 'Make a page or small app.', icon: Hammer },
+    { id: 'canvas', title: 'Study', description: 'Make flashcards or a quiz.', icon: Layers },
   ]
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      className="my-auto flex w-full flex-col items-center justify-start pb-4 pt-3 text-center"
-    >
-      <h1 className="text-balance text-[30px] font-semibold tracking-[-0.025em] md:text-[36px]">Everything you need in one place.</h1>
-      <p className="mt-2 max-w-[490px] text-balance text-[13.5px] leading-relaxed text-muted">
-        Ask anything. Quill shows its sources, checks the hard parts, and keeps what it makes in your Library.
-      </p>
-      <div className="mt-5 grid w-full gap-2 min-[520px]:grid-cols-2">
-        {SUGGESTIONS.map((prompt) => (
-          <button
-            key={prompt}
-            type="button"
-            disabled={disabled}
-            onClick={() => onSuggestion(prompt)}
-            className="group flex min-h-[52px] items-center gap-2.5 rounded-card border border-line bg-surface px-3.5 py-2.5 text-left text-[12.5px] leading-snug text-muted shadow-[0_1px_1px_rgb(27_26_23/0.03)] transition-[border-color,background-color,color] hover:border-line-strong hover:bg-surface-2/40 hover:text-fg disabled:pointer-events-none disabled:opacity-40"
-          >
-            <span className="grid size-6 shrink-0 place-items-center rounded-tile bg-surface-2 text-faint transition-colors group-hover:text-fg">
-              <ArrowUpRight className="size-3.5" />
-            </span>
-            <span className="min-w-0 flex-1">{prompt}</span>
-          </button>
-        ))}
+    <div className="mx-auto my-auto flex w-full max-w-[712px] flex-col items-center pb-4 pt-3">
+      <div className="w-full">
+        <div className="text-center">
+      <div className="relative mx-auto mb-5 w-[280px] max-w-full md:w-[360px]">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-8 bottom-0 h-14 rounded-full bg-[#a84914]/10 blur-2xl" />
+        <BrandArt variant="horizon" className="relative w-full saturate-[1.05] drop-shadow-[0_10px_20px_rgba(92,52,33,0.14)]" />
+      </div>
+      <h1 className="text-balance font-display text-[44px] font-medium leading-[1.02] tracking-[-0.035em] md:text-[52px]">What can I help with?</h1>
+      <div className="mt-6 grid w-full gap-2.5 min-[960px]:grid-cols-2">
+        {SUGGESTIONS.map((prompt, index) => {
+          const SuggestionIcon = [FileText, Search, FileSpreadsheet, Hammer][index] ?? Sparkles
+          return (
+            <button
+              key={prompt}
+              type="button"
+              disabled={disabled}
+              onClick={() => onSuggestion(prompt)}
+              className="group flex min-h-[60px] items-center gap-3 rounded-card border border-line/90 bg-surface/45 px-4 py-3 text-left text-[14px] leading-snug text-muted transition-[border-color,background-color,color] hover:border-line-strong hover:bg-surface hover:text-fg disabled:pointer-events-none disabled:opacity-40"
+            >
+              <span className="grid size-7 shrink-0 place-items-center rounded-tile bg-surface-2 text-faint transition-colors group-hover:text-accent">
+                <SuggestionIcon className="size-4" />
+              </span>
+              <span className="min-w-0 flex-1">{prompt}</span>
+            </button>
+          )
+        })}
       </div>
       {showTasks ? (
-        <div className="mt-4 flex w-full flex-col items-center gap-1.5">
-          <p className="text-[11px] font-medium text-faint">Or start a task</p>
+        <div className="mt-3 flex w-full flex-col items-center gap-1.5">
           <div className="flex flex-wrap items-center justify-center gap-1">
             {tasks.map((task) => {
               const reason = unavailable[task.id]
@@ -1309,12 +1464,12 @@ function EmptyState({
                   title={`${task.description}${reason ? ` · ${reason}` : ''}`}
                   onClick={() => onTask(task.id)}
                   className={cx(
-                    'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[11.5px] font-medium transition-colors',
-                    active ? 'border-fg bg-fg text-bg' : 'border-line bg-surface text-muted hover:border-line-strong hover:text-fg',
+                    'inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-[12.5px] font-medium transition-colors',
+                    active ? 'border-accent bg-accent text-bg shadow-[0_3px_10px_-4px_rgb(168_73_20/0.55)]' : 'border-line bg-surface text-muted hover:border-line-strong hover:text-fg',
                     blocked && 'cursor-not-allowed opacity-40',
                   )}
                 >
-                  <Icon className="size-3.5" />
+                  <Icon className="size-4" />
                   {task.title}
                 </button>
               )
@@ -1323,9 +1478,9 @@ function EmptyState({
           {review && review.due > 0 ? (
             <Link
               to="/review"
-              className="mt-1 inline-flex items-center gap-1.5 text-[11.5px] font-medium text-muted transition-colors hover:text-fg"
+              className="mt-1 inline-flex items-center gap-1.5 text-[12.5px] font-medium text-muted transition-colors hover:text-fg"
             >
-              <Brain className="size-3.5 text-accent" />
+              <Brain className="size-4 text-accent" />
               {review.due} card{review.due === 1 ? '' : 's'} due · Review
             </Link>
           ) : null}
@@ -1334,14 +1489,17 @@ function EmptyState({
               type="button"
               onClick={onChatOnly}
               disabled={disabled}
-              className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-faint underline-offset-2 transition-colors hover:text-fg hover:underline disabled:opacity-40"
+              className="mt-1 inline-flex items-center gap-1.5 text-[12px] text-faint underline-offset-2 transition-colors hover:text-fg hover:underline disabled:opacity-40"
             >
-              <MessageCircle className="size-3.5" />
-              Switch to just chat
+              <MessageCircle className="size-4" />
+              Use chat only
             </button>
           ) : null}
         </div>
       ) : null}
-    </motion.div>
+        </div>
+      </div>
+    </div>
   )
 }
+

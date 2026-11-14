@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ink — product tour</title>
+<link rel="stylesheet" href="./assets/base.css" />
+<style>
+  @font-face { font-family: 'Inter'; src: url('./assets/fonts/inter.woff2') format('woff2'); font-weight: 100 900; font-display: block; }
+  @font-face { font-family: 'Newsreader'; src: url('./assets/fonts/newsreader.woff2') format('woff2'); font-weight: 200 800; font-display: block; }
+  :root {
+    --paper: #f4efe4; --surface: #fdfaf3; --surface-2: #ece5d7; --line: #e4dccd; --line-strong: #beaf9a;
+    --ink: #211d18; --muted: #5b544a; --faint: #6d6457; --accent: #a84914; --accent-soft: #f6e4d4;
+    --success: #16744a; --sans: 'Inter', sans-serif; --serif: 'Newsreader', serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #17130f; font-family: var(--sans); }
+  body { -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; }
+  .reel { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: var(--paper); color: var(--ink); }
+  .reel:after {
+    content: ''; position: absolute; inset: 0; z-index: 90; pointer-events: none; opacity: .035; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .hud {
+    position: absolute; z-index: 80; top: 45px; left: 64px; right: 64px; display: flex; align-items: center;
+    transition: opacity .45s ease, color .45s ease; color: var(--ink);
+  }
+  .hud .brand { display: inline-flex; align-items: center; gap: 12px; }
+  .hud .h-mark { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--ink); color: var(--paper); transition: background .45s, color .45s; }
+  .hud .h-mark svg { width: 26px; height: 26px; }
+  .hud .h-word { font-family: var(--serif); font-size: 37px; font-weight: 600; letter-spacing: -.04em; line-height: 1; color: inherit; }
+  .hud .hud-right { margin-left: auto; display: flex; align-items: center; gap: 26px; font-size: 11px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: currentColor; opacity: .62; }
+  .hud .chapter { color: var(--accent); opacity: 1; }
+  .reel[data-tone="dark"] .hud { color: #f1e5d2; }
+  .reel[data-tone="dark"] .hud .h-mark { background: #f4efe4; color: #17130f; }
+  .reel[data-tone="dark"] .hud .chapter { color: #df8a55; }
+  .reel[data-scene="0"] .hud, .reel[data-scene="5"] .hud { opacity: 0; }
+  .progress { position: absolute; z-index: 85; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(70,55,39,.1); }
+  .reel[data-tone="dark"] .progress { background: rgba(244,239,228,.1); }
+  .progress i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .scene { position: absolute; inset: 0; opacity: 0; transform: translateY(26px); transition: opacity .62s cubic-bezier(.22,1,.36,1), transform .7s cubic-bezier(.22,1,.36,1); pointer-events: none; }
+  .scene.on { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .scene-bg { position: absolute; inset: 0; }
+  .scene-cream .scene-bg { background: var(--paper); }
+  .scene-dark .scene-bg { background: #17130f; color: #f4efe4; }
+  .scene-dark .scene-bg:before {
+    content: ''; position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 1100px 850px at 84% 34%, rgba(168,73,20,.22), transparent 68%),
+      radial-gradient(ellipse 780px 500px at 3% 100%, rgba(104,68,38,.19), transparent 72%);
+  }
+  .ring { position: absolute; border: 1px solid rgba(168,73,20,.15); border-radius: 50%; }
+  .scene-dark .ring { border-color: rgba(222,153,102,.14); }
+
+  /* Logo scene */
+  .scene-logo { display: grid; place-items: center; background: var(--paper); }
+  .logo-lockup { text-align: center; margin-top: -28px; }
+  .logo-mark { width: 96px; height: 96px; border-radius: 26px; background: var(--ink); color: var(--paper); display: grid; place-items: center; margin: 0 auto; box-shadow: 0 24px 50px -28px rgba(55,37,20,.45); }
+  .logo-mark svg { width: 57px; height: 57px; }
+  .logo-word { margin: 26px 0 0; font-family: var(--serif); font-size: 152px; line-height: .8; font-weight: 500; letter-spacing: -.07em; }
+  .logo-line { width: 54px; height: 2px; background: var(--accent); margin: 36px auto 0; }
+  .logo-tag { margin: 28px 0 0; font-family: var(--serif); font-size: 40px; line-height: 1.15; font-weight: 430; color: var(--ink); letter-spacing: -.025em; }
+  .logo-tag em { color: var(--accent); }
+  .logo-sub { margin: 16px 0 0; font-size: 14px; letter-spacing: .18em; text-transform: uppercase; font-weight: 700; color: #8b7b65; }
+  .scene-logo .logo-lockup { transform: translateY(16px) scale(.985); opacity: 0; transition: transform 1s cubic-bezier(.22,1,.36,1), opacity .8s; }
+  .scene-logo.on .logo-lockup { transform: translateY(0) scale(1); opacity: 1; }
+
+  /* Shared chapter copy */
+  .copy { position: absolute; z-index: 5; left: 80px; width: 540px; }
+  .copy .eyebrow { margin: 0; color: var(--accent); font-size: 13px; font-weight: 750; letter-spacing: .21em; text-transform: uppercase; line-height: 1.4; }
+  .scene-dark .copy .eyebrow { color: #df8a55; }
+  .copy h2 { margin: 23px 0 0; font-family: var(--serif); font-size: 88px; line-height: .93; letter-spacing: -.055em; font-weight: 500; color: var(--ink); }
+  .scene-dark .copy h2 { color: #f6ecdc; }
+  .copy h2 em { color: var(--accent); font-style: italic; font-weight: 430; }
+  .scene-dark .copy h2 em { color: #e08b56; }
+  .copy p { margin: 27px 0 0; width: 470px; font-size: 22px; line-height: 1.55; letter-spacing: -.02em; color: var(--muted); }
+  .scene-dark .copy p { color: #baa78e; }
+  .copy p b { color: var(--ink); font-weight: 650; }
+  .scene-dark .copy p b { color: #f1e4d1; }
+  .copy .step { margin-top: 42px; display: flex; align-items: center; gap: 12px; color: #8c7b65; font-size: 12px; letter-spacing: .18em; text-transform: uppercase; font-weight: 700; }
+  .scene-dark .copy .step { color: #a08b72; }
+  .copy .step:after { content: ''; width: 54px; height: 1px; background: var(--accent); opacity: .55; }
+
+  /* Shared app window */
+  .v-window {
+    position: absolute; z-index: 4; overflow: hidden; border-radius: 22px; background: var(--surface);
+    border: 1px solid rgba(70,55,39,.14);
+    box-shadow: 0 48px 100px -42px rgba(55,37,20,.46), 0 14px 32px -24px rgba(55,37,20,.26);
+    opacity: 0; transform: translateY(34px) scale(.985);
+    transition: opacity .8s cubic-bezier(.22,1,.36,1), transform 1s cubic-bezier(.22,1,.36,1);
+  }
+  .scene.on .v-window { opacity: 1; transform: translateY(0) scale(1); }
+  .v-window.dark { background: #211c16; border-color: rgba(240,226,202,.14); box-shadow: 0 50px 100px -36px rgba(0,0,0,.65); }
+  .v-top { height: 62px; display: flex; align-items: center; gap: 11px; padding: 0 22px; border-bottom: 1px solid var(--line); background: rgba(253,250,243,.9); }
+  .v-window.dark .v-top { border-color: #352d23; background: #262018; }
+  .v-mark { width: 30px; height: 30px; border-radius: 8px; background: var(--ink); color: var(--paper); display: grid; place-items: center; }
+  .v-mark svg { width: 18px; height: 18px; }
+  .v-word { font-family: var(--serif); font-size: 24px; font-weight: 600; letter-spacing: -.04em; }
+  .v-title { margin-left: 12px; padding-left: 14px; border-left: 1px solid var(--line); color: var(--faint); font-size: 12px; font-weight: 600; }
+  .v-window.dark .v-word { color: #f4efe4; }
+  .v-window.dark .v-title { color: #b6a38a; border-color: #3a3025; }
+  .v-top-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .v-pill { height: 32px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 0 11px; color: var(--muted); font-size: 11px; font-weight: 650; }
+  .v-window.dark .v-pill { background: #30271d; color: #c3b39d; border-color: #42362a; }
+  .v-pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .v-dot { width: 19px; height: 19px; border: 1px solid var(--line-strong); border-radius: 50%; }
+  .v-main { height: calc(100% - 62px); display: flex; }
+  .v-side { width: 205px; flex: none; border-right: 1px solid var(--line); background: #f2ecdf; padding: 16px 13px; }
+  .v-window.dark .v-side { background: #1b1712; border-color: #352d23; }
+  .v-new { height: 42px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); padding: 0 12px; color: var(--ink); font-size: 12.5px; font-weight: 650; box-shadow: 0 1px 1px rgba(55,37,20,.04); }
+  .v-window.dark .v-new { background: #2b231a; color: #f1e6d3; border-color: #43372a; box-shadow: none; }
+  .v-new svg { width: 15px; height: 15px; color: var(--accent); }
+  .v-side-label { margin: 22px 7px 8px; display: flex; align-items: center; gap: 8px; font-size: 9px; font-weight: 750; letter-spacing: .15em; text-transform: uppercase; color: #8b7b65; }
+  .v-window.dark .v-side-label { color: #8e7d68; }
+  .v-side-label:after { content: ''; height: 1px; flex: 1; background: var(--line); }
+  .v-window.dark .v-side-label:after { background: #372e24; }
+  .v-row { height: 34px; display: flex; align-items: center; gap: 9px; padding: 0 8px; border-radius: 7px; color: var(--muted); font-size: 11.5px; }
+  .v-row svg { width: 15px; height: 15px; color: #998975; }
+  .v-window.dark .v-row { color: #ad9c85; }
+  .v-window.dark .v-row svg { color: #8e7d68; }
+  .v-row.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 1px rgba(55,37,20,.04); }
+  .v-row.active:before { content: ''; width: 3px; height: 17px; border-radius: 2px; background: var(--accent); margin-left: -8px; margin-right: 5px; }
+  .v-window.dark .v-row.active { background: #2b231a; color: #f1e6d3; box-shadow: none; }
+  .v-chat-line { margin-top: 5px; padding: 7px 8px; border-radius: 6px; color: var(--faint); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .v-window.dark .v-chat-line { color: #98866f; }
+  .v-chat-line.active { background: rgba(253,250,243,.7); color: var(--ink); }
+  .v-window.dark .v-chat-line.active { background: #2b231a; color: #ecdfcb; }
+
+  /* 01 — Ask */
+  .ask-window { top: 174px; right: 64px; width: 1190px; height: 790px; }
+  .ask-pane { flex: 1; min-width: 0; position: relative; display: grid; place-items: center; padding: 30px 60px 54px; }
+  .ask-panel { width: 100%; max-width: 780px; text-align: center; margin-top: -12px; }
+  .ask-eyebrow { font-size: 10px; letter-spacing: .2em; text-transform: uppercase; font-weight: 750; color: var(--accent); }
+  .ask-panel h3 { margin: 14px 0 0; font-family: var(--serif); font-size: 57px; line-height: 1; font-weight: 500; letter-spacing: -.045em; transition: opacity .3s ease, transform .35s ease; }
+  .ask-panel .ask-sub { margin: 14px 0 0; color: var(--faint); font-size: 15px; line-height: 1.5; transition: opacity .3s ease; }
+  .ask-chips { display: flex; justify-content: center; gap: 7px; margin-top: 22px; flex-wrap: wrap; transition: opacity .3s ease; }
+  .ask-panel.typing h3, .ask-panel.typing .ask-sub, .ask-panel.typing .ask-chips, .ask-panel.typing .ask-eyebrow { opacity: 0; }
+  .ask-panel.typing h3 { transform: translateY(-8px); }
+  .ask-chip { height: 32px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 8px; background: rgba(253,250,243,.76); padding: 0 11px; color: var(--muted); font-size: 10.5px; font-weight: 550; }
+  .ask-chip svg { width: 13px; height: 13px; color: var(--accent); }
+  .ask-composer { position: relative; margin-top: 28px; border: 1.5px solid var(--line-strong); border-radius: 15px; background: #fffdf8; padding: 18px 18px 14px; text-align: left; box-shadow: 0 16px 30px -22px rgba(55,37,20,.3); }
+  .ask-foot { position: absolute; left: 0; right: 0; bottom: 0; height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 34px; border-top: 1px solid var(--line); color: #9b8a74; font-size: 10.5px; background: rgba(250,246,237,.6); }
+  .ask-foot i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: .65; }
+  .ask-foot .keys { margin-left: auto; border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; font-size: 9px; color: #8e7c66; }
+  .ask-composer .typed { height: 49px; font-size: 20px; line-height: 1.35; color: var(--ink); letter-spacing: -.02em; }
+  .ask-composer .typed:after { content: ''; display: inline-block; width: 1.5px; height: 1.05em; margin-left: 2px; vertical-align: -.17em; background: var(--accent); animation: caret 1s steps(2) infinite; }
+  @keyframes caret { 50% { opacity: 0; } }
+  .ask-bar { display: flex; align-items: center; gap: 14px; margin-top: 10px; color: #9a8a75; font-size: 10.5px; }
+  .ask-bar .grow { flex: 1; }
+  .ask-bar .mode { color: var(--muted); font-weight: 600; }
+  .ask-send { width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: #fff8ed; display: grid; place-items: center; font-size: 18px; }
+  .v-suggest {
+    position: absolute; left: 50%; bottom: calc(100% + 12px); width: 548px; transform: translate(-50%, 10px) scale(.97);
+    border: 1px solid var(--line); border-radius: 14px; background: #fffdf8; padding: 14px 18px 13px;
+    box-shadow: 0 26px 50px -24px rgba(55,37,20,.38); opacity: 0; transition: opacity .22s ease, transform .4s cubic-bezier(.22,1,.36,1);
+  }
+  .v-suggest.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  .v-suggest .detected { display: flex; align-items: center; gap: 7px; color: var(--accent); font-size: 9px; font-weight: 750; letter-spacing: .16em; text-transform: uppercase; }
+  .v-suggest .detected i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .v-suggest h4 { margin: 6px 0 0; font-family: var(--serif); font-size: 25px; line-height: 1; font-weight: 600; letter-spacing: -.035em; }
+  .v-suggest p { margin: 5px 0 0; font-size: 11px; line-height: 1.4; color: var(--faint); }
+  .v-suggest-actions { display: flex; align-items: center; gap: 8px; margin-top: 11px; }
+  .v-suggest-actions .secondary { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 600; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line); }
+  .v-suggest-actions .primary { border-radius: 7px; background: var(--accent); color: #fff8ed; padding: 8px 12px; font-size: 11px; font-weight: 700; transition: transform .2s, background .2s; }
+  .v-suggest-actions .primary.picked { transform: scale(.96); background: var(--accent-strong); }
+  .cursor { display: none; position: absolute; z-index: 92; width: 22px; height: 26px; pointer-events: none; opacity: 0; transition: left .55s cubic-bezier(.22,1,.36,1), top .55s cubic-bezier(.22,1,.36,1), opacity .2s; filter: drop-shadow(0 2px 2px rgba(0,0,0,.18)); }
+  .cursor svg { width: 22px; height: 26px; fill: #fffdf8; stroke: #211d18; stroke-width: 1.4; }
+
+  /* 02 — Research */
+  .research-window { top: 124px; right: 58px; width: 1220px; height: 838px; }
+  .research-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #211c16; }
+  .research-head { height: 48px; flex: none; display: flex; align-items: center; padding: 0 26px; border-bottom: 1px solid #352d23; color: #a3917a; font-size: 11px; }
+  .research-head .live { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: #73c398; font-size: 10.5px; font-weight: 650; }
+  .research-head .live:before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .research-thread { flex: 1; min-height: 0; padding: 24px 30px 18px; display: flex; flex-direction: column; gap: 17px; }
+  .research-user { align-self: flex-end; max-width: 82%; border-radius: 13px 4px 13px 13px; background: #f1e5d2; color: #241e17; padding: 14px 17px; font-size: 13px; line-height: 1.45; }
+  .research-answer { min-width: 0; }
+  .research-kicker { display: flex; align-items: center; gap: 8px; color: #df8a55; font-size: 10px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+  .research-kicker .count { margin-left: auto; color: #9d8b73; font-size: 9.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+  .research-answer h3 { margin: 12px 0 0; font-family: var(--serif); font-size: 43px; line-height: 1.03; font-weight: 500; letter-spacing: -.04em; color: #f6ecdc; }
+  .research-answer p { margin: 13px 0 0; color: #c3b39d; font-size: 14px; line-height: 1.6; width: 94%; }
+  .research-answer p b { color: #f4e8d6; font-weight: 650; }
+  .claim-row { display: flex; align-items: center; gap: 7px; margin-top: 12px; color: #a3917a; font-size: 11px; }
+  .claim-row strong { color: #79c79c; display: inline-flex; align-items: center; gap: 4px; font-weight: 650; }
+  .claim-row .tick { width: 14px; height: 14px; border: 1px solid rgba(121,199,156,.35); border-radius: 50%; display: grid; place-items: center; font-size: 9px; }
+  .research-sources { display: flex; gap: 9px; margin-top: 20px; }
+  .research-source { flex: 1; min-width: 0; border: 1px solid #3c3126; border-radius: 10px; background: #2a2219; padding: 12px; opacity: 0; transform: translateY(9px); transition: opacity .45s ease, transform .55s cubic-bezier(.22,1,.36,1); }
+  .research-sources.show .research-source { opacity: 1; transform: none; }
+  .research-sources.show .research-source:nth-child(2) { transition-delay: .12s; }
+  .research-sources.show .research-source:nth-child(3) { transition-delay: .24s; }
+  .research-source .domain { display: flex; align-items: center; gap: 7px; color: #ac9980; font-size: 9.5px; font-weight: 650; }
+  .research-source .fav { width: 17px; height: 17px; border-radius: 4px; background: #392e22; color: #d4c3ab; display: grid; place-items: center; font-size: 8px; font-weight: 750; }
+  .research-source .headline { margin-top: 9px; color: #d4c3ab; font-size: 12px; line-height: 1.4; }
+  .research-source .quote { margin-top: 8px; color: #9d8b73; font-size: 10px; line-height: 1.4; }
+  .research-source .check { margin-top: 11px; color: #79c79c; font-size: 9px; font-weight: 650; display: inline-flex; align-items: center; gap: 4px; }
+  .research-compare { margin-top: 14px; border: 1px solid #3c3126; border-radius: 9px; overflow: hidden; background: #2a2219; }
+  .rc-head, .rc-row { display: flex; align-items: center; gap: 8px; padding: 0 12px; }
+  .rc-head { height: 31px; background: #32281d; color: #a3917a; font-size: 8.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+  .rc-head span:first-child { flex: 1; }
+  .rc-head span:not(:first-child) { width: 52px; text-align: center; letter-spacing: 0; text-transform: none; font-size: 9px; }
+  .rc-row { height: 27px; border-top: 1px solid #3c3126; color: #b8a68e; font-size: 10px; }
+  .rc-row span:first-child { flex: 1; }
+  .rc-row b { width: 52px; text-align: center; color: #c9b89f; font-weight: 500; font-size: 9.5px; }
+  .rc-row b.best { color: #79c79c; font-weight: 700; }
+  .research-copy .statline { display: flex; gap: 32px; margin-top: 43px; }
+  .statline .n { display: block; font-family: var(--serif); font-size: 46px; line-height: .9; font-weight: 500; letter-spacing: -.04em; color: #f1e4d1; }
+  .statline .l { display: block; margin-top: 6px; color: #99866f; font-size: 10px; letter-spacing: .13em; text-transform: uppercase; font-weight: 700; }
+  .statline .divider { width: 1px; background: #3a3025; }
+
+  /* 03 — Build */
+  .build-window { top: 132px; right: 58px; width: 1220px; height: 824px; }
+  .build-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .build-head { height: 48px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 24px; border-bottom: 1px solid #352d23; color: #a3917a; font-size: 11px; }
+  .build-head .pill { margin-left: auto; border-radius: 6px; background: rgba(121,199,156,.12); color: #79c79c; padding: 6px 9px; font-size: 10px; font-weight: 650; }
+  .build-stage { flex: 1; min-height: 0; padding: 20px 24px 24px; display: flex; gap: 18px; }
+  .build-chat { width: 330px; flex: none; display: flex; flex-direction: column; gap: 14px; }
+  .build-user { border-radius: 11px 4px 11px 11px; background: #f1e5d2; color: #241e17; padding: 13px 15px; font-size: 12.5px; line-height: 1.45; }
+  .build-note { border-top: 1px solid #3a3025; padding-top: 13px; color: #9c8a72; font-size: 11px; line-height: 1.55; }
+  .build-note strong { display: block; color: #d6c5ad; font-weight: 650; margin-bottom: 5px; }
+  .build-note .mini-source { display: flex; align-items: center; gap: 6px; margin-top: 9px; color: #79c79c; font-size: 9.5px; font-weight: 650; }
+  .preview-wrap { flex: 1; min-width: 0; border: 1px solid #3b3025; border-radius: 12px; background: #191510; padding: 8px; box-shadow: 0 20px 34px -26px rgba(0,0,0,.7); }
+  .v-page { height: 100%; border-radius: 7px; overflow: hidden; background: #fbf6ea; color: #211d18; display: flex; flex-direction: column; }
+  .v-page-nav { height: 52px; flex: none; display: flex; align-items: center; gap: 9px; padding: 0 20px; border-bottom: 1px solid #ebe2d2; background: #fdfaf3; }
+  .v-page-nav .p-mark { width: 22px; height: 22px; border-radius: 5px; background: #211d18; display: grid; place-items: center; }
+  .v-page-nav .p-mark:after { content: ''; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid #f4efe4; }
+  .v-page-nav b { font-family: var(--serif); font-size: 18px; letter-spacing: -.03em; }
+  .v-page-nav .links { margin-left: auto; display: flex; align-items: center; gap: 17px; color: #8b7a64; font-size: 10px; }
+  .v-page-nav .cta { background: #211d18; color: #fbf6ea; border-radius: 6px; padding: 8px 12px; font-size: 10px; font-weight: 650; }
+  .v-page-body { flex: 1; position: relative; padding: 50px 46px 30px; background: radial-gradient(circle at 84% 0%, #f1dfc6 0, transparent 48%), #fbf6ea; }
+  .v-page-body .p-eyebrow { color: #a84914; font-size: 10px; font-weight: 750; letter-spacing: .2em; text-transform: uppercase; }
+  .v-page-body h3 { margin: 15px 0 0; font-family: var(--serif); font-size: 64px; line-height: .92; font-weight: 500; letter-spacing: -.055em; width: 74%; }
+  .v-page-body p { margin: 18px 0 0; width: 58%; color: #6b5f50; font-size: 14px; line-height: 1.55; }
+  .p-actions { display: flex; gap: 9px; margin-top: 25px; }
+  .p-primary { background: #a84914; color: #fff8ed; border-radius: 7px; padding: 12px 17px; font-size: 11px; font-weight: 700; }
+  .p-secondary { border: 1px solid #d9cdbb; border-radius: 7px; padding: 12px 15px; color: #5b544a; font-size: 11px; }
+  .p-stats { display: flex; gap: 24px; margin-top: 40px; width: 69%; }
+  .p-stat { flex: 1; border-top: 1px solid #ddd0bd; padding-top: 10px; }
+  .p-stat strong { display: block; font-size: 17px; letter-spacing: -.03em; }
+  .p-stat span { display: block; margin-top: 3px; color: #998771; font-size: 9px; }
+  .p-features { display: flex; gap: 9px; margin-top: 18px; padding-top: 12px; border-top: 1px solid #ddd0bd; width: 69%; }
+  .p-feature { flex: 1; min-width: 0; }
+  .p-feature .f-ic { width: 21px; height: 21px; border-radius: 5px; display: grid; place-items: center; background: #f2e7d8; color: var(--accent); font-size: 8px; font-weight: 750; }
+  .p-feature strong { display: block; margin-top: 6px; font-size: 9px; letter-spacing: -.01em; }
+  .p-feature span { display: block; margin-top: 2px; color: #998771; font-size: 7.5px; line-height: 1.35; }
+  .p-ghost { position: absolute; right: 34px; top: 88px; width: 186px; border: 1px solid #e4d7c4; border-radius: 10px; padding: 13px; background: rgba(255,253,247,.7); box-shadow: 0 12px 24px -18px rgba(55,37,20,.25); }
+  .p-ghost .ghost-label { font-size: 8px; letter-spacing: .15em; text-transform: uppercase; color: #a84914; font-weight: 750; }
+  .p-ghost .ghost-line { height: 5px; border-radius: 3px; background: #ded2c0; margin-top: 9px; }
+  .p-ghost .ghost-line.short { width: 62%; background: #e9dfd0; }
+
+  /* 04 — Modes */
+  .scene-modes .copy { left: 76px; top: 294px; width: 620px; transform: none; text-align: left; }
+  .scene-modes .copy h2 { font-size: 84px; }
+  .scene-modes .copy p { width: 490px; margin-left: 0; margin-right: 0; }
+  .mode-grid { position: absolute; z-index: 5; left: auto; right: 58px; top: 220px; bottom: auto; transform: none; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; width: 1060px; }
+  .mode-card { position: relative; overflow: hidden; min-height: 300px; border: 1px solid #3b3025; border-radius: 15px; background: rgba(42,34,25,.72); padding: 23px 22px; box-shadow: 0 20px 30px -26px rgba(0,0,0,.7); opacity: 0; transform: translateY(18px); transition: opacity .5s ease, transform .65s cubic-bezier(.22,1,.36,1); }
+  .mode-card:after { position: absolute; right: 14px; bottom: -16px; font-family: var(--serif); font-size: 116px; line-height: 1; font-weight: 500; letter-spacing: -.08em; color: #df8a55; opacity: .075; pointer-events: none; }
+  .mode-card:nth-child(1):after { content: '01'; }
+  .mode-card:nth-child(2):after { content: '02'; }
+  .mode-card:nth-child(3):after { content: '03'; }
+  .mode-card:nth-child(4):after { content: '04'; }
+  .mode-card > * { position: relative; z-index: 1; }
+  .scene.on .mode-card { opacity: 1; transform: none; }
+  .scene.on .mode-card:nth-child(2) { transition-delay: .08s; }
+  .scene.on .mode-card:nth-child(3) { transition-delay: .16s; }
+  .scene.on .mode-card:nth-child(4) { transition-delay: .24s; }
+  .mode-card .no { display: flex; align-items: center; justify-content: space-between; color: #776653; font-size: 9px; letter-spacing: .18em; font-weight: 700; text-transform: uppercase; }
+  .mode-card .no svg { width: 22px; height: 22px; color: #df8a55; }
+  .mode-card h4 { margin: 30px 0 0; font-family: var(--serif); font-size: 35px; line-height: 1; font-weight: 500; letter-spacing: -.04em; color: #f6ecdc; }
+  .mode-card p { margin: 9px 0 0; color: #a3917a; font-size: 12px; line-height: 1.5; }
+  .mode-card .arrow { display: inline-flex; margin-top: 21px; color: #df8a55; font-size: 11px; font-weight: 650; gap: 5px; }
+
+  /* End */
+  .scene-end { display: grid; place-items: center; background: var(--paper); }
+  .end-lockup { text-align: center; margin-top: -18px; }
+  .end-mark { width: 70px; height: 70px; border-radius: 19px; background: var(--ink); color: var(--paper); display: grid; place-items: center; margin: 0 auto; }
+  .end-mark svg { width: 40px; height: 40px; }
+  .end-word { margin: 20px 0 0; font-family: var(--serif); font-size: 58px; line-height: 1; font-weight: 600; letter-spacing: -.05em; }
+  .end-lockup h2 { margin: 22px 0 0; font-family: var(--serif); font-size: 86px; line-height: .95; letter-spacing: -.055em; font-weight: 500; }
+  .end-lockup h2 em { color: var(--accent); font-style: italic; font-weight: 430; }
+  .end-sub { margin: 21px 0 0; color: #7c6e5b; font-size: 13px; letter-spacing: .18em; text-transform: uppercase; font-weight: 700; }
+
+  .v-window .app-enter { animation: none; }
+  .scene.on .v-window .app-enter { animation: rise 1s cubic-bezier(.22,1,.36,1) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body>
+<div class="reel" id="reel" data-scene="0" data-tone="light">
+  <div class="hud">
+    <div class="brand">
+      <span class="h-mark"><svg viewBox="0 0 64 64" fill="currentColor"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></span>
+      <span class="h-word">Ink</span>
+    </div>
+    <div class="hud-right"><span>Product tour</span><span class="chapter" id="chapter">01 / 04</span></div>
+  </div>
+  <div class="progress"><i id="progress"></i></div>
+
+  <section class="scene scene-logo on" data-scene="0">
+    <div class="logo-lockup">
+      <div class="logo-mark"><svg viewBox="0 0 64 64" fill="currentColor"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></div>
+      <div class="logo-word">Ink</div>
+      <div class="logo-line"></div>
+      <div class="logo-tag">Think it through. <em>Then ship it.</em></div>
+      <div class="logo-sub">The AI workspace for the whole task</div>
+    </div>
+  </section>
+
+  <section class="scene scene-ask scene-cream" data-scene="1">
+    <div class="scene-bg"><div class="ring" style="width:900px;height:900px;right:-280px;top:-390px"></div><div class="ring" style="width:420px;height:420px;left:-250px;bottom:-270px"></div></div>
+    <div class="copy" style="top:270px">
+      <p class="eyebrow">01 / Ask</p>
+      <h2>A question,<br /><em>not a workflow.</em></h2>
+      <p>Ask in plain language. Ink works out what kind of help the task needs — and offers the right tool.</p>
+      <div class="step">Start in chat</div>
+    </div>
+    <div class="v-window ask-window">
+      <div class="v-top">
+        <span class="v-mark"><svg viewBox="0 0 64 64" fill="currentColor"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></span>
+        <span class="v-word">Ink</span>
+        <span class="v-title">New chat</span>
+        <span class="v-top-right"><span class="v-pill"><i></i> Chat only</span><span class="v-dot"></span></span>
+      </div>
+      <div class="v-main">
+        <aside class="v-side">
+          <div class="v-new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> New chat</div>
+          <div class="v-side-label">Workspace</div>
+          <div class="v-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5V6a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V6"/></svg> Library</div>
+          <div class="v-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.2 2.2 3.2 5 3.2 8s-1 5.8-3.2 8c-2.2-2.2-3.2-5-3.2-8S9.8 6.2 12 4Z"/></svg> Browser</div>
+          <div class="v-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v11H8l-4 4V5Z"/></svg> Live room</div>
+          <div class="v-side-label">Today</div>
+          <div class="v-chat-line active">CRM shortlist for the studio</div>
+          <div class="v-chat-line">Attio launch page</div>
+          <div class="v-chat-line">Q4 planning notes</div>
+          <div class="v-chat-line">Invoice logic, checked</div>
+        </aside>
+        <div class="ask-pane">
+          <div class="ask-panel" id="askPanel">
+            <div class="ask-eyebrow">New chat</div>
+            <h3>What can I help with?</h3>
+            <p class="ask-sub">A question. A file. A draft. Start anywhere.</p>
+            <div class="ask-chips">
+              <span class="ask-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg> Research</span>
+              <span class="ask-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m14 4 6 6"/><path d="M4 20l3.8-.8L19.2 7.8a2.1 2.1 0 0 0-3-3L4.8 16.2 4 20Z"/></svg> Build</span>
+              <span class="ask-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 19V9m7 10V5m7 14v-6"/></svg> Analyze</span>
+              <span class="ask-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></svg> Study</span>
+            </div>
+            <div class="ask-composer">
+              <div class="typed" id="typed"></div>
+              <div class="ask-bar"><span>+</span><span class="mode">Tools</span><span>Default</span><span class="grow"></span><span class="ask-send">↑</span></div>
+              <div class="v-suggest" id="suggest">
+                <div class="detected"><i></i> Research request detected</div>
+                <h4>Use Research?</h4>
+                <p>Search the web, check the claims, and keep the sources in the thread.</p>
+                <div class="v-suggest-actions"><span class="secondary">Send as chat</span><span class="primary" id="useResearch">Use Research</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="ask-foot"><i></i> Ink picks the right tool. You stay in control. <span class="keys">⌘ K</span></div>
+      </div>
+    </div>
+    <div class="cursor" id="cursor" style="left:1500px;top:690px"><svg viewBox="0 0 24 28"><path d="M2 2 20 14l-7.2 1.7L9 24 2 2Z"/></svg></div>
+  </section>
+
+  <section class="scene scene-research scene-dark" data-scene="2">
+    <div class="scene-bg"><div class="ring" style="width:740px;height:740px;right:-160px;top:-280px"></div><div class="ring" style="width:340px;height:340px;right:240px;bottom:-220px"></div></div>
+    <div class="copy research-copy" style="top:255px">
+      <p class="eyebrow">02 / Research</p>
+      <h2>Answers with<br /><em>receipts.</em></h2>
+      <p>Real web sources, claim checks and citations — <b>not just a confident paragraph.</b></p>
+      <div class="statline"><div><span class="n">3</span><span class="l">sources</span></div><div class="divider"></div><div><span class="n">12</span><span class="l">claims checked</span></div></div>
+    </div>
+    <div class="v-window research-window dark">
+      <div class="v-top">
+        <span class="v-mark"><svg viewBox="0 0 64 64" fill="currentColor"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></span>
+        <span class="v-word">Ink</span>
+        <span class="v-title">CRM shortlist</span>
+        <span class="v-top-right"><span class="v-pill"><i></i> Research</span><span class="v-dot"></span></span>
+      </div>
+      <div class="v-main">
+        <aside class="v-side">
+          <div class="v-new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> New chat</div>
+          <div class="v-side-label">Workspace</div>
+          <div class="v-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5V6a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V6"/></svg> Library</div>
+          <div class="v-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.2 2.2 3.2 5 3.2 8s-1 5.8-3.2 8c-2.2-2.2-3.2-5-3.2-8S9.8 6.2 12 4Z"/></svg> Browser</div>
+          <div class="v-side-label">Today</div>
+          <div class="v-chat-line active">CRM shortlist for the studio</div>
+          <div class="v-chat-line">Attio launch page</div>
+          <div class="v-chat-line">Q4 planning notes</div>
+        </aside>
+        <div class="research-pane">
+          <div class="research-head">CRM shortlist <span class="live">Research complete</span></div>
+          <div class="research-thread">
+            <div class="research-user">Compare three CRM options for a 12-person studio. We care about pipeline clarity, email, and price. Cite sources.</div>
+            <div class="research-answer">
+              <div class="research-kicker"><span>●</span> The short answer <span class="count">3 sources · 12 claims checked</span></div>
+              <h3>Attio is the best fit for a small studio.</h3>
+              <p>It keeps the pipeline flexible without the setup tax of a full sales suite. <b>Pipedrive</b> is the simpler runner-up; <b>HubSpot</b> only makes sense if you need the marketing stack too.</p>
+              <div class="claim-row"><span class="tick">✓</span><strong>Every claim backed by a source</strong><span>· updated today</span></div>
+              <div class="research-sources" id="sources">
+                <div class="research-source"><div class="domain"><span class="fav">A</span>attio.com</div><div class="headline">Attio pricing and CRM setup for small teams</div><div class="quote">“Built for teams that want structure without a heavy admin layer.”</div><div class="check">✓ claim supported</div></div>
+                <div class="research-source"><div class="domain"><span class="fav">P</span>pipedrive.com</div><div class="headline">Pipeline management, without the busywork</div><div class="quote">“A visual pipeline that stays useful as the team grows.”</div><div class="check">✓ claim supported</div></div>
+                <div class="research-source"><div class="domain"><span class="fav">H</span>hubspot.com</div><div class="headline">CRM comparison: what changes at scale</div><div class="quote">“The strongest fit when marketing and sales share one system.”</div><div class="check">✓ claim supported</div></div>
+              </div>
+              <div class="research-compare">
+                <div class="rc-head"><span>Fit for a 12-person studio</span><span>Attio</span><span>Pipedrive</span><span>HubSpot</span></div>
+                <div class="rc-row"><span>Pipeline clarity</span><b class="best">9.4</b><b>8.1</b><b>7.6</b></div>
+                <div class="rc-row"><span>Native email</span><b class="best">✓</b><b class="best">✓</b><b class="best">✓</b></div>
+                <div class="rc-row"><span>Price at 12 seats</span><b class="best">$</b><b class="best">$</b><b>$$$</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="scene scene-build scene-dark" data-scene="3">
+    <div class="scene-bg"><div class="ring" style="width:880px;height:880px;right:-220px;top:-340px"></div></div>
+    <div class="copy" style="top:255px">
+      <p class="eyebrow">03 / Build</p>
+      <h2>Then build<br /><em>the thing.</em></h2>
+      <p>Turn the decision into a working page — <b>inside the same thread.</b></p>
+      <div class="step">No handoff</div>
+    </div>
+    <div class="v-window build-window dark">
+      <div class="v-top">
+        <span class="v-mark"><svg viewBox="0 0 64 64" fill="currentColor"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></span>
+        <span class="v-word">Ink</span>
+        <span class="v-title">Attio launch</span>
+        <span class="v-top-right"><span class="v-pill"><i></i> Build · 1 page</span><span class="v-dot"></span></span>
+      </div>
+      <div class="v-main">
+        <aside class="v-side">
+          <div class="v-new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> New chat</div>
+          <div class="v-side-label">Today</div>
+          <div class="v-chat-line">CRM shortlist for the studio</div>
+          <div class="v-chat-line active">Attio launch page</div>
+          <div class="v-chat-line">Q4 planning notes</div>
+          <div class="v-chat-line">Invoice logic, checked</div>
+        </aside>
+        <div class="build-main">
+          <div class="build-head">Attio launch <span class="pill">Build ready · preview</span></div>
+          <div class="build-stage">
+            <div class="build-chat">
+              <div class="build-user">Now build a quiet, editorial launch page for Attio. One page, mobile-first.</div>
+              <div class="build-note"><strong>Brief carried over</strong>The decision, sources and tone are already in context. No re-explaining.</div>
+              <div class="build-note"><strong>What changed</strong>One page, three sections, responsive by default.<span class="mini-source">✓ Live preview attached</span></div>
+            </div>
+            <div class="preview-wrap">
+              <div class="v-page">
+                <div class="v-page-nav"><span class="p-mark"></span><b>Attio</b><span class="links"><span>Product</span><span>Pricing</span><span>Customers</span></span><span class="cta">Start free</span></div>
+                <div class="v-page-body">
+                  <div class="p-eyebrow">A calmer CRM</div>
+                  <h3>Your pipeline,<br />finally clear.</h3>
+                  <p>One place for every conversation, every deal, and the next step that actually matters.</p>
+                  <div class="p-actions"><span class="p-primary">Start free</span><span class="p-secondary">See how it works</span></div>
+                  <div class="p-stats"><div class="p-stat"><strong>12 people</strong><span>one shared view</span></div><div class="p-stat"><strong>0 setup</strong><span>start in minutes</span></div><div class="p-stat"><strong>1 thread</strong><span>from brief to launch</span></div></div>
+                  <div class="p-features"><div class="p-feature"><span class="f-ic">Aa</span><strong>Pipeline</strong><span>Every deal in one view.</span></div><div class="p-feature"><span class="f-ic">@</span><strong>Email</strong><span>Your inbox, in context.</span></div><div class="p-feature"><span class="f-ic">↗</span><strong>Reporting</strong><span>Answers, not exports.</span></div></div>
+                  <div class="p-ghost"><div class="ghost-label">One thread</div><div class="ghost-line"></div><div class="ghost-line"></div><div class="ghost-line short"></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="scene scene-modes scene-dark" data-scene="4">
+    <div class="scene-bg"><div class="ring" style="width:1100px;height:1100px;left:50%;transform:translateX(-50%);top:-520px"></div><div class="ring" style="width:420px;height:420px;left:-210px;bottom:-230px"></div></div>
+    <div class="copy">
+      <p class="eyebrow">04 / One thread</p>
+      <h2>One thread.<br /><em>Every tool.</em></h2>
+      <p>Context stays put. The work keeps moving.</p>
+    </div>
+    <div class="mode-grid">
+      <div class="mode-card"><div class="no">01 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></div><h4>Research</h4><p>Search the web. Check the claims. Keep the receipts.</p><span class="arrow">Cited answers →</span></div>
+      <div class="mode-card"><div class="no">02 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m14 4 6 6"/><path d="M4 20l3.8-.8L19.2 7.8a2.1 2.1 0 0 0-3-3L4.8 16.2 4 20Z"/></svg></div><h4>Build</h4><p>Brief in. A working page, tool or game out.</p><span class="arrow">Preview ready →</span></div>
+      <div class="mode-card"><div class="no">03 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 19V9m7 10V5m7 14v-6"/></svg></div><h4>Analyze</h4><p>Run Python on a CSV without leaving the conversation.</p><span class="arrow">Tables → answers</span></div>
+      <div class="mode-card"><div class="no">04 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></svg></div><h4>Study</h4><p>Turn the thread into flashcards or a practice quiz.</p><span class="arrow">Learn it →</span></div>
+    </div>
+  </section>
+
+  <section class="scene scene-end" data-scene="5">
+    <div class="end-lockup">
+      <div class="end-mark"><svg viewBox="0 0 64 64" fill="currentColor"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></div>
+      <div class="end-word">Ink</div>
+      <h2>Ask once. <em>Finish it here.</em></h2>
+      <div class="end-sub">Research · Build · Analyze · Study</div>
+    </div>
+  </section>
+</div>
+<script>
+  const reel = document.getElementById('reel')
+  const scenes = [...document.querySelectorAll('.scene')]
+  const typed = document.getElementById('typed')
+  const askPanel = document.getElementById('askPanel')
+  const suggest = document.getElementById('suggest')
+  const useResearch = document.getElementById('useResearch')
+  const sources = document.getElementById('sources')
+  const cursor = document.getElementById('cursor')
+  const progress = document.getElementById('progress')
+  const chapter = document.getElementById('chapter')
+  const prompt = 'Compare three CRM options for a 12-person studio — cite sources.'
+  const marks = [0, 3.4, 7.6, 12.2, 16.4, 19.4, 22.4]
+  const chapters = ['00 / 04', '01 / 04', '02 / 04', '03 / 04', '04 / 04', '00 / 04']
+  let started = 0
+  let running = false
+
+  function at(t) {
+    let index = 0
+    for (let i = 0; i < marks.length - 1; i += 1) if (t >= marks[i]) index = i
+    scenes.forEach((scene, i) => scene.classList.toggle('on', i === index))
+    reel.dataset.scene = String(index)
+    reel.dataset.tone = index === 2 || index === 3 || index === 4 ? 'dark' : 'light'
+    chapter.textContent = chapters[index]
+    const local = t - marks[index]
+    if (index === 1) {
+      const count = Math.max(0, Math.min(prompt.length, Math.floor((local - 0.45) / 1.55 * prompt.length)))
+      typed.textContent = prompt.slice(0, count)
+      askPanel.classList.toggle('typing', local > 0.3)
+      suggest.classList.toggle('show', local > 1.55)
+      suggest.classList.toggle('picked', local > 2.8)
+      useResearch.classList.toggle('picked', local > 2.8 && local < 3.15)
+      cursor.style.opacity = local > 2.25 ? '1' : '0'
+      cursor.style.left = local > 2.45 ? '1454px' : '1500px'
+      cursor.style.top = local > 2.45 ? '610px' : '690px'
+    } else {
+      typed.textContent = index > 1 ? prompt : ''
+      askPanel.classList.remove('typing')
+      suggest.classList.remove('show', 'picked')
+      useResearch.classList.remove('picked')
+    }
+    sources.classList.toggle('show', index === 2 && local > 0.8)
+    progress.style.width = `${Math.min(100, (t / 22.4) * 100)}%`
+  }
+
+  function loop(now) {
+    if (!running) return
+    const t = Math.min(22.4, (now - started) / 1000)
+    at(t)
+    if (t < 22.4) requestAnimationFrame(loop)
+    else running = false
+  }
+
+  window.startReel = () => {
+    started = performance.now()
+    running = true
+    scenes.forEach((scene, i) => scene.classList.toggle('on', i === 0))
+    reel.dataset.scene = '0'
+    reel.dataset.tone = 'light'
+    typed.textContent = ''
+    askPanel.classList.remove('typing')
+    suggest.classList.remove('show', 'picked')
+    sources.classList.remove('show')
+    cursor.style.opacity = '0'
+    progress.style.width = '0%'
+    requestAnimationFrame(loop)
+  }
+  window.reelDuration = 22.4
+  at(0)
+</script>
+</body>
+</html>

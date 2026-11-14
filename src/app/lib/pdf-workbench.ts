@@ -10,6 +10,7 @@ import {
 } from 'pdf-lib'
 
 import { outputName } from '../../shared/pdf'
+import { readXlsxRows } from './xlsx-reader'
 
 export type PdfTextPage = { page: number; text: string; rows: string[][] }
 export type PdfFormFieldKind = 'text' | 'checkbox' | 'radio' | 'dropdown' | 'option'
@@ -297,13 +298,8 @@ async function tablePdf(rows: string[][], title: string): Promise<{ bytes: Uint8
 }
 
 export async function sheetToPdf(file: File): Promise<{ bytes: Uint8Array; note: string }> {
-  const XLSX = await import('xlsx')
-  const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true })
-  const sheetName = workbook.SheetNames[0]
-  if (!sheetName) throw new Error('That spreadsheet has no sheets.')
-  const sheet = workbook.Sheets[sheetName]
-  if (!sheet) throw new Error('That spreadsheet sheet could not be read.')
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: '' }).map((row) =>
+  const { sheetName, rows: rawRows } = await readXlsxRows(await file.arrayBuffer())
+  const rows = rawRows.map((row) =>
     row.map((cell) => (cell instanceof Date ? cell.toLocaleDateString() : String(cell ?? ''))),
   )
   if (!rows.length) throw new Error('That spreadsheet is empty.')

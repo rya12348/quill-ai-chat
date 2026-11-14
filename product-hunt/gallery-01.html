@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ink — Product Hunt gallery 01</title>
+<link rel="stylesheet" href="./assets/base.css" />
+<style>
+  .g1 { background: #f4efe4; }
+  .g1 .topbar { position: absolute; top: 40px; left: 64px; right: 62px; display: flex; align-items: center; }
+  .g1 .topbar .top-right { margin-left: auto; display: flex; align-items: center; gap: 24px; }
+  .g1 .availability { display: inline-flex; align-items: center; gap: 7px; font-size: 9px; font-weight: 650; letter-spacing: .11em; text-transform: uppercase; color: #6e6252; }
+  .g1 .availability i { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px rgba(22,116,74,.09); }
+  .g1 .hero { position: absolute; left: 64px; top: 125px; width: 466px; z-index: 4; }
+  .g1 h1 {
+    margin: 17px 0 0;
+    font-family: var(--serif);
+    font-size: 72px;
+    line-height: .94;
+    font-weight: 500;
+    letter-spacing: -.052em;
+    color: var(--ink);
+  }
+  .g1 h1 span { display: block; color: var(--accent); font-style: italic; font-weight: 450; letter-spacing: -.045em; }
+  .g1 .lede {
+    margin: 23px 0 0;
+    width: 430px;
+    font-size: 16.5px;
+    line-height: 1.55;
+    letter-spacing: -.018em;
+    color: var(--muted);
+  }
+  .g1 .lede b { color: var(--ink); font-weight: 600; }
+  .g1 .tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 456px; margin-top: 26px; }
+  .g1 .tool {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 52px;
+    padding: 8px 10px;
+    border: 1px solid rgba(70,55,39,.1);
+    border-radius: 10px;
+    background: rgba(253,250,243,.64);
+  }
+  .g1 .tool-icon { width: 27px; height: 27px; flex: none; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+  .g1 .tool-icon svg { width: 13px; height: 13px; }
+  .g1 .tool strong { display: block; font-size: 10.5px; font-weight: 650; letter-spacing: -.01em; }
+  .g1 .tool span { display: block; margin-top: 2px; font-size: 8.5px; color: var(--faint); letter-spacing: -.005em; }
+  .g1 .foot {
+    position: absolute;
+    left: 64px;
+    bottom: 38px;
+    width: 470px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #7c6e5b;
+    font-size: 9.5px;
+    letter-spacing: .02em;
+  }
+  .g1 .foot:after { content: ''; height: 1px; flex: 1; background: rgba(70,55,39,.15); }
+  .g1 .app-one { top: 104px; right: 43px; width: 700px; height: 590px; transform: rotate(-1.15deg); z-index: 3; }
+  .g1 .app-one .app-side { width: 136px; }
+  .g1 .app-one .thread { padding-top: 17px; gap: 12px; }
+  .g1 .app-one .sources { gap: 6px; }
+  .g1 .app-one .source { padding: 7px; }
+  .claim-panel { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(244,239,228,.55); padding: 7px 8px 6px; }
+  .claim-head { display: flex; align-items: center; gap: 6px; color: #8d7b65; font-size: 6.8px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+  .claim-head span { margin-left: auto; color: var(--success); letter-spacing: 0; text-transform: none; font-weight: 600; }
+  .claim { display: flex; align-items: center; gap: 6px; padding-top: 4px; margin-top: 4px; border-top: 1px solid rgba(228,220,205,.8); color: var(--muted); font-size: 7.4px; line-height: 1.3; }
+  .claim b { margin-left: auto; color: var(--success); font-weight: 600; font-size: 6.8px; white-space: nowrap; }
+  .g1 .ring.one { width: 680px; height: 680px; right: -250px; top: -300px; border-color: rgba(168,73,20,.13); }
+  .g1 .ring.two { width: 390px; height: 390px; left: -240px; bottom: -245px; border-color: rgba(168,73,20,.12); }
+  .g1 .rule {
+    position: absolute;
+    left: -1px;
+    top: -19px;
+    width: 1px;
+    height: 30px;
+    background: var(--accent);
+    opacity: .55;
+  }
+  .g1 .app-top .top-pill .spark { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+</style>
+</head>
+<body>
+<div class="stage g1">
+  <div class="ring one"></div>
+  <div class="ring two"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark"><svg viewBox="0 0 64 64" fill="currentColor" aria-hidden="true"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></span>
+      <span class="wordmark">Ink</span>
+    </div>
+    <div class="top-right">
+      <span class="availability"><i></i> Available now</span>
+      <span class="corner-index"><span>01</span> / 02</span>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="rule"></div>
+    <p class="eyebrow">The AI workspace for the whole task</p>
+    <h1>Ask once.<span>Finish it here.</span></h1>
+    <p class="lede">One quiet thread for research, building, analysis and study — with <b>the sources to back it up.</b></p>
+
+    <div class="tool-grid">
+      <div class="tool">
+        <span class="tool-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></span>
+        <span><strong>Research</strong><span>Web reports with citations</span></span>
+      </div>
+      <div class="tool">
+        <span class="tool-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m14 4 6 6"/><path d="M4 20l3.8-.8L19.2 7.8a2.1 2.1 0 0 0-3-3L4.8 16.2 4 20Z"/></svg></span>
+        <span><strong>Build</strong><span>Working pages &amp; tools</span></span>
+      </div>
+      <div class="tool">
+        <span class="tool-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 19V9m7 10V5m7 14v-6"/></svg></span>
+        <span><strong>Analyze</strong><span>Python on your tables</span></span>
+      </div>
+      <div class="tool">
+        <span class="tool-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></svg></span>
+        <span><strong>Study</strong><span>Flashcards &amp; quizzes</span></span>
+      </div>
+    </div>
+  </section>
+
+  <div class="app app-one">
+    <div class="app-top">
+      <span class="mini-mark"><svg viewBox="0 0 64 64" fill="currentColor"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></span>
+      <span class="mini-word">Ink</span>
+      <span class="mini-title">New chat</span>
+      <span class="top-right">
+        <span class="top-pill"><span class="spark"></span> Research</span>
+        <span class="top-dot"></span>
+      </span>
+    </div>
+    <div class="app-main">
+      <aside class="app-side">
+        <div class="side-new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> New chat</div>
+        <div class="side-label">Workspace</div>
+        <div class="side-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 19.5V6a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V6"/></svg> Library</div>
+        <div class="side-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.2 2.2 3.2 5 3.2 8s-1 5.8-3.2 8c-2.2-2.2-3.2-5-3.2-8S9.8 6.2 12 4Z"/></svg> Browser</div>
+        <div class="side-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 5h16v11H8l-4 4V5Z"/></svg> Live room</div>
+        <div class="side-label">Today</div>
+        <div class="side-chat active">CRM shortlist for the studio</div>
+        <div class="side-chat">Launch page for Relate</div>
+        <div class="side-chat">Q4 planning notes</div>
+        <div class="side-chat">Photosynthesis, explained</div>
+        <div class="side-chat">Invoice logic, checked</div>
+      </aside>
+      <section class="chatpane">
+        <div class="thread-head">CRM shortlist <span class="live">Research complete</span></div>
+        <div class="thread">
+          <div class="msg-user">Compare three CRM options for a 12-person studio. We care about pipeline clarity, email, and price. Cite sources.</div>
+          <div class="answer">
+            <div class="answer-kicker"><span class="halo"></span> The short answer <span class="count">3 sources · 12 claims checked</span></div>
+            <h3>Attio is the best fit for a small studio.</h3>
+            <p>It keeps the pipeline flexible without the setup tax of a full sales suite. <b>Pipedrive</b> is the simpler runner-up; <b>HubSpot</b> only makes sense if you need the marketing stack too.</p>
+            <div class="verdict"><span class="tick">✓</span><strong>Every claim backed by a source</strong><span>· updated today</span></div>
+            <div class="sources">
+              <div class="source">
+                <div class="source-top"><span class="source-fav">A</span><span class="source-domain">attio.com</span></div>
+                <div class="source-title">Attio pricing and CRM setup for small teams</div>
+              </div>
+              <div class="source">
+                <div class="source-top"><span class="source-fav">P</span><span class="source-domain">pipedrive.com</span></div>
+                <div class="source-title">Pipeline management, without the busywork</div>
+              </div>
+              <div class="source">
+                <div class="source-top"><span class="source-fav">H</span><span class="source-domain">hubspot.com</span></div>
+                <div class="source-title">CRM comparison: what changes at scale</div>
+              </div>
+            </div>
+            <div class="claim-panel">
+              <div class="claim-head">What we checked <span>3 / 3 supported</span></div>
+              <div class="claim">Pricing fits a 12-person team <b>✓ attio.com</b></div>
+              <div class="claim">Email sync is native, not an add-on <b>✓ pipedrive.com</b></div>
+              <div class="claim">HubSpot is only worth it with marketing <b>✓ hubspot.com</b></div>
+            </div>
+          </div>
+        </div>
+        <div class="composer">
+          <div class="composer-label">Follow-up</div>
+          <div class="composer-row">
+            <span class="grow">Now build the launch page for Attio…</span>
+            <span class="tools">✦ Tools</span>
+            <span class="arrow">↑</span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <footer class="foot">Built for the work after the question.</footer>
+  <div class="grain"></div>
+</div>
+</body>
+</html>

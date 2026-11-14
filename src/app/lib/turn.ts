@@ -6,6 +6,7 @@
 import { useSyncExternalStore } from 'react'
 import type { QueryClient } from '@tanstack/react-query'
 
+import { STOPPED_REPLY } from '../../shared/config'
 import type { AgentInfo, AnalysisInfo, AnalysisJob, BuildInfo, CanvasInfo, ChatEvent, Conversation, Me, Message, ProofInfo, ProofJob, ResearchInfo, Source, TeamInfo } from '../../shared/types'
 import { ApiError, type ConversationPage } from './api'
 import { runAnalysisJob } from './analysis-runner'
@@ -75,6 +76,12 @@ export function useTurn(): Turn | null {
 }
 
 const localId = () => `local-${Math.random().toString(36).slice(2)}`
+const SLOW_AFTER_MS = 15_000
+// These are only backstops for a dead connection. The server already has an
+// inactivity deadline, so an artificially short client cutoff was turning
+// slow-but-working models into “No reply after 90 seconds” errors.
+const NO_REPLY_AFTER_MS = 180_000
+const STALL_AFTER_MS = 120_000
 
 // A chat only needs one title request per browser session. The server also
 // checks the placeholder, so a second tab or a later turn is harmless.
@@ -92,6 +99,10 @@ export async function startTurn(
 ): Promise<void> {
   if (turn) turn.stop()
   const controller = new AbortController()
+  let timedOut = false
+  let slowNotified = false
+  let lastActivityAt = Date.now()
+  let watchdog: number | undefined
   const optimisticUser: Message | null = request.regenerate
     ? null
     : {
@@ -140,6 +151,28 @@ export async function startTurn(
     stop: () => controller.abort(),
   })
 
+  const stoppedMessage = (current: Turn): Message | null => {
+    if (!current.assistantMessageId || !current.conversationId) return null
+    return {
+      id: current.assistantMessageId,
+      conversationId: current.conversationId,
+      role: 'assistant',
+      content: current.text.trim() ? current.text : STOPPED_REPLY,
+      model: current.model || null,
+      interrupted: true,
+      createdAt: Date.now(),
+      reasoning: current.reasoning || undefined,
+      sources: current.sources.length ? current.sources : undefined,
+      team: current.team,
+      proof: current.proof,
+      research: current.research,
+      analysis: current.analysis,
+      build: current.build,
+      canvas: current.canvas,
+      agent: current.agent,
+    }
+  }
+
   const finish = (message: Message | null, usage?: Me['usage']) => {
     const current = turn
     if (!current?.conversationId) return set(null)
@@ -163,6 +196,8 @@ export async function startTurn(
 
   const onEvent = (event: ChatEvent) => {
     if (!turn) return
+    lastActivityAt = Date.now()
+    slowNotified = false
     switch (event.type) {
       case 'start': {
         const isNew = !request.conversationId
@@ -238,32 +273,48 @@ export async function startTurn(
     }
   }
 
+  watchdog = window.setInterval(() => {
+    if (!turn || turn.status === 'error') return
+    const idle = Date.now() - lastActivityAt
+    if (!slowNotified && !turn.text && idle >= SLOW_AFTER_MS) {
+      slowNotified = true
+      const note = 'Still working — this model is taking longer than usual.'
+      update({ statusText: note, statusLog: [...turn.statusLog.filter((item) => item !== note), note].slice(-8) })
+    }
+    if (!turn.text && idle >= NO_REPLY_AFTER_MS) {
+      timedOut = true
+      update({ status: 'error', error: 'No reply after three minutes. Your message is saved — press Try again or switch models.' })
+      controller.abort()
+      return
+    }
+    if (turn.text && idle >= STALL_AFTER_MS) {
+      timedOut = true
+      update({ status: 'error', error: 'The reply stalled with no new output. The partial answer is saved — press Try again to continue.' })
+      controller.abort()
+    }
+  }, 5_000)
+
   try {
     await streamChat(request, { signal: controller.signal, onEvent })
-    // The stream closed without `done` or `error`: treat whatever arrived as the reply.
+    // The stream closed without `done` or `error`: keep whatever arrived as a
+    // stopped reply, even when no token made it through.
     if (turn && turn.status !== 'error') {
       const current = turn
       const job = current.proofJob
       const analysisJob = current.analysisJob
-      finish(
-        current.text && current.assistantMessageId && current.conversationId
-          ? { id: current.assistantMessageId, conversationId: current.conversationId, role: 'assistant', content: current.text, model: current.model || null, interrupted: true, createdAt: Date.now(), reasoning: current.reasoning || undefined, sources: current.sources.length ? current.sources : undefined, team: current.team, proof: current.proof, research: current.research, analysis: current.analysis, build: current.build, canvas: current.canvas, agent: current.agent }
-          : null,
-      )
+      finish(stoppedMessage(current))
       if (job && current.conversationId) void settleProof(client, current.conversationId, job)
       if (analysisJob && current.conversationId) void settleAnalysis(client, current.conversationId, analysisJob)
     }
   } catch (error) {
     if (controller.signal.aborted) {
-      // Stopped by the user: keep the partial reply, marked as such.
+      // A user stop keeps the partial reply visible; a watchdog stop already
+      // put a clear error on the turn, so it stays until Try again.
+      if (timedOut) return
       const current = turn
       const job = current?.proofJob
       const analysisJob = current?.analysisJob
-      finish(
-        current?.text && current.assistantMessageId && current.conversationId
-          ? { id: current.assistantMessageId, conversationId: current.conversationId, role: 'assistant', content: current.text, model: current.model || null, interrupted: true, createdAt: Date.now(), reasoning: current.reasoning || undefined, sources: current.sources.length ? current.sources : undefined, team: current.team, proof: current.proof, research: current.research, analysis: current.analysis, build: current.build, canvas: current.canvas, agent: current.agent }
-          : null,
-      )
+      finish(current ? stoppedMessage(current) : null)
       if (job && current?.conversationId) void settleProof(client, current.conversationId, job)
       if (analysisJob && current?.conversationId) void settleAnalysis(client, current.conversationId, analysisJob)
       return
@@ -271,6 +322,8 @@ export async function startTurn(
     set(null)
     if (error instanceof ApiError) throw error
     throw new ApiError(0, 'Could not reach the server.')
+  } finally {
+    window.clearInterval(watchdog)
   }
 }
 

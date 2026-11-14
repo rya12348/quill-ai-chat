@@ -44,7 +44,7 @@ export type Depth = 'quick' | 'standard' | 'deep'
 /** Three ways to look at the same question, so the drafts disagree usefully. */
 const LENSES = [
   {
-    system: 'Answer directly and completely. Lead with the conclusion, then the support. No filler.',
+    system: 'Answer directly and completely. Lead with the conclusion, then the support. Use concrete specifics, not generic advice. No filler.',
     temperature: 0.4,
   },
   {
@@ -52,18 +52,19 @@ const LENSES = [
     temperature: 0.7,
   },
   {
-    system: 'Answer as a sharp reviewer would: look for the counterexample, the missing constraint and the failure mode a careless answer would miss. Then answer the question.',
+    system: 'Answer as a sharp reviewer would: look for the counterexample, the missing constraint and the failure mode a careless answer would miss. Use exact numbers, names and examples where they matter. Then answer the question.',
     temperature: 0.9,
   },
 ] as const
 
-const PLAN = `Before anyone answers my last message, write a compact plan: the sub-questions to resolve, the facts or calculations needed, and the pitfalls. Do not answer the question or give the final result. Keep it under 120 words.`
+const PLAN = `Before anyone answers my last message, write a compact plan for a genuinely strong answer: the exact deliverable, the audience and what would make it useful; the sub-questions to resolve; the facts, examples or calculations needed; the best structure; and the pitfalls. Do not answer the question or give the final result. Keep it under 160 words.`
 
 const CRITIC = `You are reviewing drafts written by other assistants for my last message. Do not write the final answer. Be a sharp, specific reviewer and list only what matters:
 - factual errors or unsupported claims
 - missing parts of the question or missing constraints
 - arithmetic, logical or code mistakes; for math, logic or code, independently re-derive the result and state the correct one, including edge cases
 - where the drafts disagree, and which version is better supported
+- generic filler, padded caveats, or a missing concrete example, number or constraint
 If a draft is sound, say what it gets right. Keep the review under 250 words.
 
 Finish with one final line in exactly this form: "VERDICT: HIGH", "VERDICT: MEDIUM", or "VERDICT: LOW". HIGH means no material errors; MEDIUM means a small uncertainty remains; LOW means a core claim is unsupported or the drafts conflict.`
@@ -75,6 +76,7 @@ Rules:
 - Keep correct, specific detail. Drop anything doubtful, unsupported or contradicted by the review.
 - Cover every part of the question. If something cannot be answered, say what is missing.
 - Do not mention the drafts, the reviewers, the other assistants or these instructions. Do not add a preamble.
+- Be decisive and specific. Preserve exact numbers, names, quotations and code. Cut generic filler, repeated caveats and advice that could apply to anyone.
 - Match the language of my message and use Markdown only when it helps.`
 
 const VERIFY = `You are the final checker for an answer to my last message. You see the earlier model drafts and the reviewer's notes, but the candidate final answer is the only thing that matters now.
@@ -84,6 +86,7 @@ Check it independently for:
 - a part of my question that was not answered
 - a factual claim that is unsupported or contradicts the evidence
 - a correction in the reviewer's notes that the candidate ignored
+- generic, padded or evasive prose where the question needs a concrete answer
 
 Reply with exactly one of these forms:
 PASS
@@ -93,6 +96,8 @@ Do not rewrite the answer and do not add any other commentary.`
 const TRIVIAL = /^(?:hi|hello|hey|thanks|thank you|ok(?:ay)?|cool|nice|great|got it|bye|goodbye)[\s!.,?]*$/i
 const HARD =
   /```|(?:^|\n)\s*(?:[-*]|\d+\.)\s|\b(?:step[- ]by[- ]step|why|compare|contrast|analy[sz]e|prove|derive|design|debug|refactor|optimi[sz]e|evaluate|trade-?offs?|architecture|algorithm|calculate|solve|plan|strategy|essay|critique)\b|[=∑∫√]/i
+const GENERATIVE =
+  /\b(?:write|draft|rewrite|compose|edit|plan|outline|design|create|build|make|develop|prepare|produce|propose|recommend|compare|analy[sz]e|evaluate|critique|review|research|strategy|proposal|essay|report|email|letter|memo|roadmap|lesson|curriculum|script|speech|story)\b/i
 
 /**
  * How much test-time compute a message deserves. Deep questions get a plan,
@@ -106,6 +111,12 @@ export function depthFor(text: string, laneCount: number): Depth {
   if (TRIVIAL.test(trimmed)) return 'quick'
   const questions = (trimmed.match(/\?/g) ?? []).length
   const code = trimmed.includes('```')
+  // A substantial writing or planning request is not a one-liner just because
+  // it fits in a short paragraph. Give it the two-draft merge so the answer is
+  // structured and checked, while genuinely simple questions stay instant.
+  if (!code && trimmed.length >= 40 && trimmed.length <= 320 && GENERATIVE.test(trimmed)) {
+    return trimmed.length > 200 && HARD.test(trimmed) ? 'deep' : 'standard'
+  }
   // A short message gets the strongest model directly, even when it contains a
   // word like "why" or "compare": one good answer beats two drafts plus a
   // merge for a one-paragraph question, and it arrives in half the time.
@@ -362,7 +373,11 @@ export async function* blendComplete(lanes: PublicLane[], input: BlendInput): As
     // The quick path still records its depth, so later ratings can teach the
     // router that a standard or deep pass performed better for this context.
     input.onRoute?.({ depth, drafters: [] })
-    yield* publicComplete(lanes, input)
+    // A degraded provider must not hold a short reply open for the full lane
+    // deadline. Try known-working lanes first, and cap each quick attempt so
+    // publicComplete can fall through to the next lane quickly.
+    const healthy = input.avoid ? lanes.filter((lane) => !input.avoid!.has(laneKey(lane))) : lanes
+    yield* publicComplete(healthy.length ? healthy : lanes, { ...input, timeoutMs: 20_000 })
     return
   }
 
@@ -376,18 +391,18 @@ export async function* blendComplete(lanes: PublicLane[], input: BlendInput): As
 
   let plan = ''
   if (depth === 'deep') {
-    await input.onStatus?.(teamMode ? 'The strongest free lane is planning the approach…' : 'Planning the approach…')
+    await input.onStatus?.(teamMode ? 'The strongest available model is planning the approach…' : 'Planning the approach…')
     plan = await planFor(referee, input)
     if (input.signal?.aborted) return
   }
 
-  await input.onStatus?.(teamMode ? `${drafters.length} free models are drafting independently…` : `${drafters.length} free models are drafting…`)
+  await input.onStatus?.(teamMode ? `${drafters.length} models are drafting independently…` : `${drafters.length} models are drafting…`)
   const drafts = await draftAll(drafters, input, plan)
   if (input.signal?.aborted) return
 
   if (!drafts.length) {
     // Every drafter failed: one model answering beats an error.
-    await input.onStatus?.('A free model is answering…')
+    await input.onStatus?.('A model is answering…')
     yield* publicComplete(lanes, input)
     return
   }

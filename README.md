@@ -1,4 +1,4 @@
-# AI chat
+# Ink
 
 A chat app on the Freebuff API: conversations in a sidebar, streamed replies
 rendered as Markdown, a model picker in the composer, stop and regenerate, and a
@@ -6,7 +6,7 @@ daily limit per user. It runs on Freebuff Sites with Sign in with Freebuff and D
 everything is scoped to the signed-in user. The API key stays on the server.
 
 Most customisation is one file: `src/shared/config.ts` holds the name, the
-assistant's instructions, the models people may pick, the limits and the
+app's instructions, the models people may pick, the limits and the
 suggestions on an empty chat.
 
 ## Attachments
@@ -71,14 +71,15 @@ Build fetches the real HTML and serves it through a token-scoped, read-only
 preview proxy. This is a live page, not a screenshot or emulator: the page's own
 scripts and assets load in a sandboxed iframe without app cookies. On loopback
 development the frame uses a second `.localhost` hostname, so games that need
-same-origin frames and storage still work without access to Quill's origin;
+same-origin frames and storage still work without access to Stet's origin;
 deployed hosts keep the opaque sandbox. Links, GET forms and embedded frames stay inside the preview: every
 iframe a page creates is moved behind the same capability proxy, and Poki's
 current UUID and slug game wrappers both work. Any public domain can be opened
 this way, not only a fixed list. Google's full results page needs its
 own cookies and JavaScript, so a Google query resolves to Google's top result and
 shows it as a sandboxed result card; opening that result stays inside the
-preview. The proxy blocks private hosts, non-public redirects, non-HTML responses and form
+preview. Google also rate-limits server fetches of its home page, so google.com
+opens as a local search landing page instead of returning a 429. The proxy blocks private hosts, non-public redirects, non-HTML responses and form
 submission. Scripts, stylesheets and lazy module chunks are loaded through the
 same proxy with CORS headers, so Vite and React sites can boot in the sandbox.
 Same-site fetch/XHR calls go through a network route too, so sites that load
@@ -88,6 +89,15 @@ used for those. A live preview is reachable by anyone with its capability URL
 and is included in a shared chat. The full-screen **Expand** button opens either
 kind of preview at page size. Build is text-only and capped at three builds per
 UTC day.
+
+## Advisor
+
+Advisor is a decision mode. Give it a hard choice and it returns a decision
+brief: the decision, the constraints that matter, two or three realistic options
+with rough costs and risks, a recommendation, the cheapest test to run before
+committing, and the next action. It uses the same free lanes and daily reply
+limit as normal chat; it is a different prompt, not a separate model. Choose it
+from the task buttons on an empty chat or from Tools in the composer.
 
 ## Canvas
 
@@ -110,8 +120,8 @@ days and grows faster. Intervals are capped at one year. The review page shows
 the due queue one card at a time, reveals the answer, and accepts ratings from
 buttons or the 1–4 keys. Home and Library show the current due count.
 
-Scheduling is deterministic and makes no model calls, so it spends no AI
-credits. Rows are owner-scoped and are removed with their chat. Enrolling an
+Scheduling is deterministic and makes no model calls, so it spends no model
+budget. Rows are owner-scoped and are removed with their chat. Enrolling an
 already-scheduled deck is idempotent and never resets existing due dates.
 
 ## Verified Research
@@ -152,7 +162,7 @@ forwarded port private if you add API keys.
 
 Local development uses **http://127.0.0.1:5180**. In a Codespace, the forwarded
 HTTPS URL replaces it; Vite binds to all interfaces and sends HMR over HTTPS
-port 443 automatically. Another local project owns `127.0.0.1:5173`, so Quill
+port 443 automatically. Another local project owns `127.0.0.1:5173`, so Stet
 uses its own fixed port on the machine and `strictPort` refuses to start
 somewhere else silently.
 
@@ -207,6 +217,10 @@ that answers:
   Glimmer. The 120B Super lane is a strong, reliable default; it is not a
   frontier model, but it handles the edge-case coding and reasoning that the old
   fallback referee missed.
+- **DeepSeek** — `DEEPSEEK_API_KEY` adds the official OpenAI-compatible
+  endpoint. The current `deepseek-flash` id is served by **DeepSeek V4.1
+  Flash**; `DEEPSEEK_MODEL` can pin another checkpoint. It is pinned into the
+  model shortlist whenever the lane exists.
 - **Pollinations** — keyless GPT-OSS 20B; `POLLINATIONS_API_KEY` adds Kimi K3
   (or `PUBLIC_AI_MODEL`) through the keyed endpoint.
 - **AIHubMix** — `AIHUBMIX_API_KEY` adds its zero-cost `coding-kimi-k3-free`
@@ -371,10 +385,10 @@ the account also removes its share.
 
 ## Install and offline
 
-The built app is a PWA. `public/manifest.webmanifest` names it Quill (standalone,
+The built app is a PWA. `public/manifest.webmanifest` names it Stet (standalone,
 `/` start, cream theme, 192/512 PNG icons plus a maskable 512), and
 `src/main.tsx` registers `/sw.js` in production builds. `scripts/postbuild.mjs`
-replaces `__QUILL_VERSION__` with a digest of the build, so every deploy gets
+replaces `__STET_VERSION__` with a digest of the build, so every deploy gets
 fresh cache names and the previous ones are deleted on activate: nobody is left
 on a dead shell.
 
@@ -383,7 +397,7 @@ Caching strategy in `public/sw.js`:
 - **Navigations** are network-first. A live visit always gets the current HTML;
   only a failed fetch falls back to the cached page or the cached shell.
 - **API GETs** are network-first and cached best-effort for offline reading.
-  Online reads are never stale. Cached responses carry `x-quill-offline: 1`,
+  Online reads are never stale. Cached responses carry `x-stet-offline: 1`,
   which is what makes the offline banner appear.
 - **API writes and the chat stream** pass through untouched online. If the
   network is down the Worker returns a JSON 503. The app stores the draft per
@@ -464,7 +478,7 @@ asks for high effort. OpenRouter lanes receive the matching reasoning effort,
 and Z.ai lanes turn thinking on for Default and Max. In advanced modes, reasoning
 streams into a collapsible **Thinking** panel above the answer, labelled with how
 long it reasoned. It is stored with the reply and shown again in history. With
-every mode switch off, Quill is in plain Fast chat: the model may still reason
+every mode switch off, Stet is in plain Fast chat: the model may still reason
 internally, but raw reasoning is neither streamed nor stored, and old Thinking
 panels are hidden until an advanced mode is selected. **Deep** controls the extra
 drafts and review separately, so Effort does not force every question through
@@ -522,8 +536,16 @@ dashboard shows per model; a reply the API refuses costs nothing.
 4. The owner sets `OPENAI_API_KEY` in Sites → Secrets. Until then the deployed
    app shows the setup card.
 
-Sign in with Freebuff is required on a deployed site: without it nobody can
-chat, because every reply spends the owner's credits.
+A deployed site supports Sign in with Freebuff or **Continue as guest**. A
+guest gets an opaque, one-year HttpOnly cookie scoped to that browser; chats
+are stored in D1 under that guest owner. Clearing cookies starts a fresh guest
+and loses access to the old chats. Guest daily allowances are keyed to a hash
+of the client address rather than the cookie, so clearing cookies does not
+restore free replies, Research, Analyze or Builds; guests on the same network
+share that allowance. Guests use the free chain, never receive owner-only
+perks, and use the same daily limits. With no `OPENAI_API_KEY`, guests
+use the free chain; if you add a key later, guest replies will spend the
+owner's credits, so remove or gate guest access first.
 
 ## Where things are
 

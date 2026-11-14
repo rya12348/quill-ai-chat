@@ -14,15 +14,15 @@ type ButtonSize = 'md' | 'sm' | 'icon' | 'icon-sm'
 const buttonBase =
   'inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-control font-medium transition-[background-color,color,box-shadow,transform,opacity] duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0'
 const buttonVariants: Record<ButtonVariant, string> = {
-  primary: 'bg-fg text-bg shadow-[inset_0_1px_0_rgb(255_255_255/0.12)] hover:bg-fg/90',
+  primary: 'bg-accent text-bg shadow-[inset_0_1px_0_rgb(255_255_255/0.16)] hover:bg-accent-strong',
   secondary: 'border border-line-strong bg-surface text-fg shadow-[0_1px_1px_rgb(27_26_23/0.04)] hover:bg-surface-2',
   ghost: 'text-muted hover:bg-surface-2 hover:text-fg',
   danger: 'bg-danger text-bg hover:opacity-90',
 }
 const buttonSizes: Record<ButtonSize, string> = {
-  md: 'h-9 px-3.5 text-[13.5px]',
-  sm: 'h-8 px-3 text-[13px] rounded-tile',
-  icon: 'size-9',
+  md: 'h-10 px-4 text-[14px]',
+  sm: 'h-9 px-3 text-[13.5px] rounded-tile',
+  icon: 'size-10',
   'icon-sm': 'size-8 rounded-tile',
 }
 
@@ -42,7 +42,7 @@ export function Button({
 }
 
 export const inputClass =
-  'h-9 w-full min-w-0 rounded-control border border-line-strong bg-surface px-3 text-[13.5px] text-fg placeholder:text-faint transition-[border-color,box-shadow] focus:border-fg/40 focus:outline-none focus:ring-[3px] focus:ring-fg/8 disabled:opacity-60'
+  'h-10 w-full min-w-0 rounded-control border border-line-strong bg-surface px-3 text-[14.5px] text-fg placeholder:text-faint transition-[border-color,box-shadow] focus:border-accent/60 focus:outline-none focus:ring-[3px] focus:ring-accent/15 disabled:opacity-60'
 
 export function Input({ className, ...rest }: ComponentPropsWithoutRef<'input'>) {
   return <input className={cx(inputClass, className)} {...rest} />
@@ -74,7 +74,7 @@ const toneClasses: Record<Tone, string> = {
   danger: 'bg-danger-soft text-danger',
 }
 export function Badge({ tone = 'neutral', className, children }: { tone?: Tone; className?: string; children: ReactNode }) {
-  return <span className={cx('inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-[8px] px-2 text-[12px] font-medium', toneClasses[tone], className)}>{children}</span>
+  return <span className={cx('inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-[8px] px-2 text-[12.5px] font-medium', toneClasses[tone], className)}>{children}</span>
 }
 
 // Dialog: Escape or backdrop closes, focus moves to the first field.
@@ -85,7 +85,13 @@ function useOverlay(open: boolean, onClose: () => void) {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     document.addEventListener('keydown', onKey)
     const previous = document.activeElement as HTMLElement | null
-    const timer = window.setTimeout(() => ref.current?.querySelector<HTMLElement>('input, textarea, button:not([data-close])')?.focus(), 30)
+    const timer = window.setTimeout(() => {
+      const dialog = ref.current
+      const target =
+        dialog?.querySelector<HTMLElement>('[data-autofocus]') ??
+        dialog?.querySelector<HTMLElement>('input, textarea, button:not([data-close])')
+      target?.focus()
+    }, 30)
     return () => {
       document.removeEventListener('keydown', onKey)
       window.clearTimeout(timer)
@@ -114,18 +120,16 @@ export function Dialog({
 }) {
   const ref = useOverlay(open, onClose)
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
+    open ? (
+      <motion.div
           key="overlay"
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 backdrop-blur-[2px] sm:items-center"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
           onMouseDown={(e) => e.target === e.currentTarget && onClose()}
-        >
-          <motion.div
+      >
+        <motion.div
             ref={ref}
             role="dialog"
             aria-modal
@@ -134,13 +138,12 @@ export function Dialog({
             style={{ maxWidth: width }}
             initial={{ opacity: 0, y: 16, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-          >
+        >
             <header className="flex items-start justify-between gap-4 px-6 pt-5">
               <div>
-                <h2 className="text-[16px] font-semibold">{title}</h2>
-                {description && <p className="mt-1 text-[13px] text-muted">{description}</p>}
+                <h2 className="text-[17px] font-semibold">{title}</h2>
+                {description && <p className="mt-1 text-[14px] text-muted">{description}</p>}
               </div>
               <Button data-close variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose} className="-mr-2 -mt-1">
                 <X />
@@ -148,10 +151,9 @@ export function Dialog({
             </header>
             {children && <div className="scrollbar-thin overflow-y-auto px-6 py-5">{children}</div>}
             {footer && <footer className={cx('flex items-center justify-end gap-2 px-6 py-4', children ? 'border-t border-line' : 'pt-5')}>{footer}</footer>}
-          </motion.div>
         </motion.div>
-      )}
-    </AnimatePresence>
+      </motion.div>
+    ) : null
   )
 }
 
@@ -248,7 +250,7 @@ export function Menu({
                     item.onSelect()
                   }}
                   className={cx(
-                    'flex h-9 w-full items-center gap-2 rounded-tile px-2.5 text-left text-[13.5px] transition-colors [&_svg]:size-4',
+                    'flex h-10 w-full items-center gap-2 rounded-tile px-2.5 text-left text-[14px] transition-colors [&_svg]:size-4',
                     item.danger ? 'text-danger hover:bg-danger-soft' : 'text-fg hover:bg-surface-2',
                   )}
                 >
@@ -279,7 +281,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={push}>
       {children}
-      <div className="pointer-events-none fixed inset-x-0 bottom-5 z-[60] flex flex-col items-center gap-2">
+      <div role="status" aria-live="polite" aria-atomic="true" className="pointer-events-none fixed inset-x-0 bottom-5 z-[60] flex flex-col items-center gap-2">
         <AnimatePresence>
           {toasts.map((t) => (
             <motion.div
@@ -287,7 +289,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               initial={{ opacity: 0, y: 12, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 8, scale: 0.96 }}
-              className={cx('pointer-events-auto rounded-control px-4 py-2.5 text-[13.5px] font-medium shadow-pop', t.tone === 'danger' ? 'bg-danger text-bg' : 'bg-fg text-bg')}
+              className={cx('pointer-events-auto rounded-control border px-4 py-2.5 text-[14px] font-medium shadow-pop', t.tone === 'danger' ? 'border-danger bg-danger text-bg' : 'border-line bg-surface text-fg')}
             >
               {t.message}
             </motion.div>

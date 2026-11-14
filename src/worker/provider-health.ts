@@ -8,7 +8,7 @@
 // request, and a success on the next probe clears the failure state.
 
 import { FREEBUFF_API_URL } from '../shared/config'
-import type { ProviderHealth, ProviderStatus } from '../shared/types'
+import type { LaneBilling, ProviderHealth, ProviderStatus } from '../shared/types'
 import { AiError, aiConfigured } from './ai'
 import type { Env } from './env'
 import { familyForLane, laneKey, laneText, publicLanes, type PublicLane } from './public-ai'
@@ -37,6 +37,8 @@ export type ProviderDescriptor = {
   model?: string
   /** The model family this provider belongs to, when it is one free lane. */
   family?: string
+  /** Whether this route can spend paid credits. */
+  billing?: LaneBilling
   lane?: PublicLane
 }
 
@@ -66,7 +68,7 @@ export function providerDescriptors(env: Env): ProviderDescriptor[] {
     const id = laneKey(lane)
     if (seen.has(id)) continue
     seen.add(id)
-    items.push({ id, name: lane.label, description: lane.description, model: lane.model, family: familyForLane(lane), lane })
+    items.push({ id, name: lane.label, description: lane.description, model: lane.model, family: familyForLane(lane), ...(lane.billing ? { billing: lane.billing } : {}), lane })
   }
   return items
 }
@@ -81,10 +83,11 @@ export function mergeHealth(descriptors: ProviderDescriptor[], rows: HealthRow[]
       description: descriptor.description,
       ...(descriptor.model ? { model: descriptor.model } : {}),
       ...(descriptor.family ? { family: descriptor.family } : {}),
+      ...(descriptor.billing ? { billing: descriptor.billing } : {}),
       status: normaliseStatus(row?.status),
       lastSuccessAt: row?.last_success_at ?? null,
       lastFailureAt: row?.last_failure_at ?? null,
-      lastError: row?.last_error ?? null,
+      lastError: cleanModelCopy(row?.last_error ?? null),
       lastErrorCode: row?.last_error_code ?? null,
       latencyMs: row?.latency_ms ?? null,
       consecutiveFailures: Number(row?.consecutive_failures ?? 0),
@@ -96,6 +99,13 @@ export function mergeHealth(descriptors: ProviderDescriptor[], rows: HealthRow[]
 
 function normaliseStatus(value: string | undefined): ProviderStatus {
   return value === 'healthy' || value === 'degraded' || value === 'down' ? value : 'unknown'
+}
+
+/** Older rows may still contain the retired "free model" copy. */
+function cleanModelCopy(message: string | null): string | null {
+  return message
+    ? message.replace(/\bfree[- ]models\b/gi, 'models').replace(/\bfree[- ]model\b/gi, 'model')
+    : null
 }
 
 export async function healthRows(db: D1Database, owner: string): Promise<HealthRow[]> {
@@ -131,7 +141,7 @@ export async function recordProviderResult(db: D1Database, owner: string, provid
     failures = Number(existing?.consecutive_failures ?? 0) + 1
     status = failures >= DOWN_AFTER && !TRANSIENT_FAILURES.has(result.code) ? 'down' : 'degraded'
     lastFailureAt = at
-    lastError = result.message.slice(0, 200)
+    lastError = cleanModelCopy(result.message.slice(0, 200))
     lastErrorCode = result.code
     nextProbeAt = at + Math.min(BACKOFF_BASE * 2 ** (failures - 1), BACKOFF_MAX)
   }

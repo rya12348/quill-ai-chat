@@ -7,11 +7,11 @@ const TITLE_MAX_CHARS = 64
 const NOT_A_TITLE =
   /^(?:sorry\b|apologies\b|i'?m\s+sorry\b|i\s+am\s+sorry\b|unable\s+to\b|i\s+can(?:'?t|not)\b)|\b(?:prevent abuse|rate limit|too many requests|quota|free resources|try again later|temporarily unavailable)\b/i
 
-export const TITLE_INSTRUCTIONS = `You name conversations for a personal AI assistant. Write a short, specific title for the exchange below.
+export const TITLE_INSTRUCTIONS = `You name conversations for a personal writing and research app. Write a short, specific title for the exchange below.
 
 - Use the same language as the user.
 - Use 2 to 6 words, at most 64 characters.
-- Describe the subject or task, not the assistant.
+- Describe the subject or task, not the app.
 - Never write "Chat", "Conversation" or "New chat".
 - Return only the title. No quotes, label, markdown or ending period.`
 

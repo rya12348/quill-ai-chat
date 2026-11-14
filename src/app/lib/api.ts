@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { ArtifactSummary, Conversation, ConversationMemory, FeedbackRating, Me, Message, ModelInfo, Project, ProviderHealth, ReviewQueue, ReviewRating, ReviewRatingResult, ReviewSummary, SharedConversation, UserSettings } from '../../shared/types'
+import type { ArtifactSummary, Conversation, ConversationMemory, FeedbackRating, HumanizerLength, HumanizerPurpose, HumanizerResult, HumanizerStrength, HumanizerTone, Me, Message, ModelInfo, Project, ProviderHealth, ProxySession, ReviewQueue, ReviewRating, ReviewRatingResult, ReviewSummary, RoomMessage, RoomSnapshot, SharedConversation, TrafficSummary, UserSettings } from '../../shared/types'
+import { localBrowser } from './local-browser'
 import { noteOffline } from './offline'
 
 export class ApiError extends Error {
@@ -10,6 +11,7 @@ export class ApiError extends Error {
     public code?: string,
     public resetsAt?: number,
     public conversationId?: string,
+    public provider?: string,
   ) {
     super(message)
   }
@@ -20,26 +22,49 @@ export async function readError(response: Response): Promise<ApiError> {
   let code: string | undefined
   let resetsAt: number | undefined
   let conversationId: string | undefined
+  let provider: string | undefined
   try {
-    const body = (await response.json()) as { error?: string; message?: string; resetsAt?: number; conversationId?: string }
+    const body = (await response.json()) as { error?: string; message?: string; resetsAt?: number; conversationId?: string; provider?: string }
     message = body.message ?? body.error ?? message
     code = body.error
     resetsAt = body.resetsAt
     conversationId = body.conversationId
+    provider = body.provider
   } catch {
     /* no body */
   }
-  return new ApiError(response.status, message, code, resetsAt, conversationId)
+  return new ApiError(response.status, message, code, resetsAt, conversationId, provider)
 }
 
 export async function api<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const { json, ...rest } = init ?? {}
-  const response = await fetch(`/api${path}`, {
-    credentials: 'same-origin',
-    ...rest,
-    headers: { accept: 'application/json', ...(json !== undefined ? { 'content-type': 'application/json' } : {}), ...(rest.headers ?? {}) },
-    body: json !== undefined ? JSON.stringify(json) : rest.body,
-  })
+  // Opt-in local Chrome owns browser actions once its loopback bridge is
+  // connected. Planning, drafting and every non-browser API stay on the
+  // hosted Worker. This keeps the Steel fallback intact.
+  // Include a local session whose socket is currently reconnecting. Routing
+  // those calls to the Worker used to return no_session and erase the UI.
+  if (path.startsWith('/browser/') && localBrowser.ownsSession()) {
+    const local = await localBrowser.handle(path, init)
+    if (local) {
+      if (!local.ok) throw await readError(local)
+      return (await local.json()) as T
+    }
+  }
+  let response: Response
+  try {
+    response = await fetch(`/api${path}`, {
+      credentials: 'same-origin',
+      ...rest,
+      headers: { accept: 'application/json', ...(json !== undefined ? { 'content-type': 'application/json' } : {}), ...(rest.headers ?? {}) },
+      body: json !== undefined ? JSON.stringify(json) : rest.body,
+    })
+  } catch (error) {
+    // A dropped Wi-Fi handoff or a sleeping laptop used to surface the raw
+    // “Failed to fetch” string. Keep a manual stop as-is; make a transport
+    // failure something the person can act on.
+    if (rest.signal?.aborted) throw error
+    throw new ApiError(0, 'Ink could not be reached. Check your connection and try again.')
+  }
   noteOffline(response)
   if (!response.ok) throw await readError(response)
   return (await response.json()) as T
@@ -55,6 +80,31 @@ export const useMe = () =>
     staleTime: 30_000,
     refetchOnWindowFocus: true,
   })
+
+/** The public room's durable snapshot. Realtime broadcasts are merged on top. */
+export const useRoom = () =>
+  useQuery({
+    queryKey: ['room'],
+    queryFn: () => api<RoomSnapshot>('/room'),
+    staleTime: 0,
+    // A cold Worker or a dropped provider request should not leave the room on
+    // an error screen. Retry before surfacing the failure.
+    retry: 3,
+    retryDelay: (attempt) => Math.min(4_000, 500 * 2 ** attempt),
+    // A periodic snapshot keeps an open room in sync and lets the Worker purge
+    // messages whose retention window has closed.
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+  })
+
+export function useSendRoomMessage() {
+  return useMutation({
+    mutationFn: (body: string) =>
+      api<{ message: RoomMessage; live: boolean }>('/room/messages', { method: 'POST', json: { body } }),
+  })
+}
+
 export const useModels = () => useQuery({ queryKey: ['models'], queryFn: () => api<{ items: ModelInfo[] }>('/models'), staleTime: 60_000 })
 
 export type ProvidersState = { mode: 'api' | 'public'; items: ProviderHealth[]; probed?: string[]; backedOff?: boolean }
@@ -128,7 +178,29 @@ export function useDuplicateArtifact() {
   })
 }
 
-/** Fetch the file the Worker composed and hand it to the browser's downloader. */
+/**
+ * A proxy session is a read-only capability, so a transient failed request can
+ * safely be retried. This matters on flaky Wi-Fi and on Chromebooks that briefly
+ * report themselves offline: the service worker can otherwise turn the first
+ * attempt into an offline error before the network is actually usable.
+ */
+export async function createProxySession(url: string) {
+  const open = () => api<{ session: ProxySession }>('/proxy/session', { method: 'POST', json: { url } })
+  try {
+    return await open()
+  } catch (cause) {
+    const transient = !(cause instanceof ApiError) || cause.code === 'offline' || cause.status === 0 || cause.status === 503
+    if (!transient) throw cause
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    try {
+      return await open()
+    } catch (retryError) {
+      if (retryError instanceof ApiError) throw retryError
+      throw new ApiError(0, 'Could not reach Ink. Check your connection and try again.')
+    }
+  }
+}
+
 export async function downloadArtifact(messageId: string): Promise<string> {
   const response = await fetch(`/api/artifacts/${messageId}/download`, { credentials: 'same-origin' })
   if (!response.ok) {
@@ -187,6 +259,9 @@ export function useDeleteProject() {
     mutationFn: (id: string) => api(`/projects/${id}`, { method: 'DELETE' }),
     onSuccess: (_, id) => {
       client.setQueryData<{ items: Conversation[] }>(['conversations'], (old) => old && { items: old.items.map((c) => (c.projectId === id ? { ...c, projectId: null } : c)) })
+      // The open chat and any artifact card can still carry the deleted project.
+      void client.invalidateQueries({ queryKey: ['conversation'] })
+      void client.invalidateQueries({ queryKey: ['artifacts'] })
       void client.invalidateQueries({ queryKey: ['projects'] })
     },
   })
@@ -200,6 +275,7 @@ export function useSetConversationProject() {
     onSuccess: ({ conversation }) => {
       client.setQueryData<{ items: Conversation[] }>(['conversations'], (old) => old && { items: old.items.map((c) => (c.id === conversation.id ? conversation : c)) })
       client.setQueryData<ConversationPage>(['conversation', conversation.id], (old) => old && { ...old, conversation })
+      void client.invalidateQueries({ queryKey: ['artifacts'] })
       void client.invalidateQueries({ queryKey: ['projects'] })
     },
   })
@@ -272,6 +348,11 @@ export function useDeleteConversation() {
     onSuccess: (_, id) => {
       client.setQueryData<{ items: Conversation[] }>(['conversations'], (old) => old && { items: old.items.filter((c) => c.id !== id) })
       client.removeQueries({ queryKey: ['conversation', id] })
+      client.removeQueries({ queryKey: ['memory', id] })
+      client.removeQueries({ queryKey: ['share', id] })
+      void client.invalidateQueries({ queryKey: ['artifacts'] })
+      void client.invalidateQueries({ queryKey: ['review-summary'] })
+      void client.invalidateQueries({ queryKey: ['review-queue'] })
       void client.invalidateQueries({ queryKey: ['projects'] })
     },
   })
@@ -320,6 +401,19 @@ export function useRevokeConversationShare() {
   })
 }
 
+export function useHumanize() {
+  return useMutation({
+    mutationFn: (input: {
+      text: string
+      tone: HumanizerTone
+      strength: HumanizerStrength
+      voice?: string
+      purpose?: HumanizerPurpose
+      length?: HumanizerLength
+    }) => api<HumanizerResult>('/humanize', { method: 'POST', json: input, signal: AbortSignal.timeout(180_000) }),
+  })
+}
+
 export const useSharedConversation = (token: string | undefined) =>
   useQuery({
     queryKey: ['shared', token],
@@ -329,6 +423,14 @@ export const useSharedConversation = (token: string | undefined) =>
     staleTime: 0,
   })
 
+export const useTraffic = () =>
+  useQuery({
+    queryKey: ['traffic'],
+    queryFn: () => api<TrafficSummary>('/analytics/summary'),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  })
+
 export function useDeleteAllConversations() {
   const client = useQueryClient()
   return useMutation({
@@ -336,6 +438,12 @@ export function useDeleteAllConversations() {
     onSuccess: () => {
       client.setQueryData(['conversations'], { items: [] })
       client.removeQueries({ queryKey: ['conversation'] })
+      client.removeQueries({ queryKey: ['memory'] })
+      client.removeQueries({ queryKey: ['share'] })
+      client.removeQueries({ queryKey: ['shared'] })
+      client.setQueryData(['artifacts'], { items: [] })
+      client.setQueryData<ReviewSummary>(['review-summary'], { due: 0, total: 0, reviewedToday: 0, nextDueAt: null })
+      void client.invalidateQueries({ queryKey: ['review-queue'] })
       void client.invalidateQueries({ queryKey: ['projects'] })
     },
   })

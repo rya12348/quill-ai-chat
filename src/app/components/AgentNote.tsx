@@ -1,6 +1,7 @@
 import { Bot, CheckCircle2, ChevronDown, Circle, Loader2, MinusCircle, XCircle } from 'lucide-react'
 import { useState } from 'react'
 
+import { modelDisplayName } from '../../shared/model-display'
 import type { AgentInfo, AgentTool } from '../../shared/types'
 import { cx } from '../lib/cx'
 
@@ -8,6 +9,7 @@ const TOOL_LABELS: Record<AgentTool, string> = {
   research: 'Research',
   build: 'Build',
   canvas: 'Study',
+  proof: 'Proof',
   answer: 'Answer',
 }
 
@@ -50,7 +52,7 @@ export function AgentNote({ agent, live }: { agent: AgentInfo; live?: boolean })
                 <p className="mt-0.5 text-[11px] leading-relaxed text-faint">
                   {TOOL_LABELS[step.tool]}
                   {step.detail ? ` · ${step.detail}` : ''}
-                  {step.model ? ` · ${step.model}` : ''}
+                  {step.model ? ` · ${modelDisplayName(step.model)}` : ''}
                 </p>
               </div>
             </li>

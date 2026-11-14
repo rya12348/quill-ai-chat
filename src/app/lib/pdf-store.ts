@@ -10,7 +10,7 @@ export type SavedPdfFile = {
   blob: Blob
 }
 
-const DATABASE = 'quill-pdf-studio'
+const DATABASE = 'stet-pdf-studio'
 const STORE = 'files'
 const MAX_FILES = 12
 const MAX_BYTES = 40 * 1024 * 1024

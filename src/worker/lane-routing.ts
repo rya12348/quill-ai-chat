@@ -13,9 +13,12 @@ import { laneKey, type PublicLane } from './public-ai'
 
 export type LaneRecord = { wins: number; losses: number }
 export type LaneDepth = 'quick' | 'standard' | 'deep'
+export type LaneTask = 'chat' | 'agent' | 'build'
 
 /** The internal keys behind one blended reply, for later rating attribution. */
 export type LaneRoute = {
+  /** The mode that used these lanes. Older chat rows have no task. */
+  task?: LaneTask
   depth: LaneDepth
   drafters: string[]
   referee?: string
@@ -217,6 +220,53 @@ export async function loadLaneQuality(
     // Ratings are optional and older replies have no route row.
   }
 
+  return records
+}
+
+/**
+ * Ratings for one mode only. Build and Agent routes carry their task; older
+ * chat rows have no task field and are treated as chat. Proof rows are not
+ * used here because they do not record which page or Agent mode produced them.
+ */
+export async function loadTaskQuality(
+  db: D1Database,
+  owner: string,
+  task: LaneTask,
+): Promise<Map<string, LaneRecord>> {
+  const records = new Map<string, LaneRecord>()
+  try {
+    const rows = await db
+      .prepare(
+        `SELECT f.rating, r.content AS route
+         FROM message_feedback f
+         JOIN message_lane_routes r ON r.message_id = f.message_id AND r.owner_sub = f.owner_sub
+         WHERE f.owner_sub = ? AND f.created_at >= ?
+         ORDER BY f.created_at DESC LIMIT ?`,
+      )
+      .bind(owner, Date.now() - LOOKBACK, MAX_ROWS)
+      .all<{ rating: string; route: string }>()
+    for (const row of rows.results) {
+      if (row.rating !== 'up' && row.rating !== 'down') continue
+      let route: { task?: unknown; drafters?: unknown; referee?: unknown; verifier?: unknown }
+      try {
+        const parsed = JSON.parse(row.route) as unknown
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
+        route = parsed as typeof route
+      } catch {
+        continue
+      }
+      const routeTask = route.task === 'agent' || route.task === 'build' || route.task === 'chat' ? route.task : undefined
+      if (task === 'chat' ? routeTask && routeTask !== 'chat' : routeTask !== task) continue
+      const keys = [
+        ...stringArray(route.drafters),
+        ...(typeof route.referee === 'string' ? [route.referee] : []),
+        ...(typeof route.verifier === 'string' ? [route.verifier] : []),
+      ]
+      add(records, keys, row.rating === 'up', 1)
+    }
+  } catch {
+    // Routing is an enhancement; a missing table keeps the static prior.
+  }
   return records
 }
 

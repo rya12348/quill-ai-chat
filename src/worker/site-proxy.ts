@@ -1,16 +1,19 @@
-// Live-site builds are fetched on the server and shown from Quill's origin.
+// Live-site builds are fetched on the server and shown from Ink's origin.
 // This is a real proxy, not a screenshot or replay: the page's own HTML and
 // scripts run, isolated in a sandboxed iframe with no cookies or same-origin
 // access. Only the HTML document is proxied; relative and root-relative assets
 // are pointed back at the original site so they load from the real CDN.
 
 const MAX_PAGE_BYTES = 3_000_000
-const MAX_ASSET_BYTES = 8_000_000
+const MAX_ASSET_BYTES = 40_000_000
 const MAX_REDIRECTS = 5
 const FETCH_TIMEOUT = 20_000
 const PROXY_TOKEN = /^[a-f0-9]{48}$/
 const HTML_TYPE = /text\/html|application\/xhtml\+xml/i
-const PRIVATE_HOST = /^(?:localhost|.*\.localhost|.*\.local|.*\.internal)$/i
+const PRIVATE_HOST = /^(?:localhost|.*\.localhost|.*\.local|.*\.internal|.*\.home\.arpa|.*\.lan|.*\.intranet)$/i
+// Wildcard DNS services can resolve a public-looking name to loopback/private
+// space. The Worker cannot inspect the DNS answer, so refuse the known helpers.
+const PRIVATE_DNS_SUFFIX = /(?:^|\.)(?:nip\.io|sslip\.io|xip\.io|localtest\.me|lvh\.me|vcap\.me)$/i
 const TRANSIENT_REDIRECTS = new Set([301, 302, 303, 307, 308])
 
 export class SiteError extends Error {
@@ -21,6 +24,76 @@ export class SiteError extends Error {
     super(message)
     this.name = 'SiteError'
   }
+}
+
+const HTTP_REASON: Record<number, string> = {
+  400: 'Bad Request',
+  401: 'Unauthorized',
+  403: 'Forbidden',
+  404: 'Not Found',
+  407: 'Proxy Authentication Required',
+  408: 'Request Timeout',
+  410: 'Gone',
+  429: 'Too Many Requests',
+  451: 'Unavailable For Legal Reasons',
+  500: 'Internal Server Error',
+  502: 'Bad Gateway',
+  503: 'Service Unavailable',
+  504: 'Gateway Timeout',
+}
+
+function httpReason(status: number): string {
+  return HTTP_REASON[status] ?? ''
+}
+
+function isSecurlyHost(hostname: string): boolean {
+  const host = hostname.replace(/^www\./i, '').toLowerCase()
+  return host === 'securly.com' || host.endsWith('.securly.com')
+}
+
+function isSecurlyBlockPage(html: string): boolean {
+  const head = html.slice(0, 20_000)
+  return /\bsecurly\b/i.test(titleFrom(html)) || /(?:blocked\.)?securly\.com/i.test(head)
+}
+
+function siteFailureStatus(status: number): number {
+  return status === 403 || status === 407 || status === 429 || status === 451 ? status : 502
+}
+
+function describeSiteFailure(status: number, target: string): string {
+  let host = 'The target site'
+  try {
+    host = new URL(target).hostname.replace(/^www\./i, '')
+  } catch {
+    /* keep the generic label */
+  }
+  const code = `HTTP ${status}${httpReason(status) ? ` ${httpReason(status)}` : ''}`
+  if (status === 451) return `${host} returned ${code}. A network filter or policy blocked this page.`
+  if (status === 407) return `${host} returned ${code}. A filtering proxy refused the request.`
+  if (status === 403) return `${host} returned ${code}. The site refused the proxy; this can be bot protection or a network filter.`
+  if (status === 429) return `${host} returned ${code}. The proxy is being rate-limited; retry later.`
+  if (status >= 500) return `${host} returned ${code}. The target server failed.`
+  return `${host} returned ${code}.`
+}
+
+/** A readable diagnostic shown inside the live frame when the server sees a failure. */
+export function renderProxyErrorPage(error: SiteError, target: string): string {
+  let display = target
+  try {
+    const url = new URL(target)
+    display = `${url.hostname}${url.pathname}`.slice(0, 180)
+  } catch {
+    /* use the raw target in the diagnostic */
+  }
+  const blocked =
+    error.status === 403 || error.status === 407 || error.status === 451 || /securly/i.test(error.message)
+  const title = blocked ? 'Preview blocked' : 'Preview unavailable'
+  const meaning = blocked
+    ? 'A network filter or filtering proxy refused this request. A 451 response, a 407 proxy error or a redirect to a Securly page is a direct filter signal; a 403 can also be the site’s bot protection.'
+    : 'The target site or network could not return a readable page. This is not proof of a filter block.'
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>
+body{margin:0;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;background:#f6f4ef;color:#24221d}main{max-width:680px;margin:12vh auto;padding:0 28px}.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#817b70;margin:0 0 10px}h1{font-size:clamp(2rem,6vw,3.2rem);line-height:1.05;letter-spacing:-.04em;margin:0 0 16px}.reason{font-size:17px;color:#4f4a42;margin:0 0 22px}.grid{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px 18px;border:1px solid #e4ded2;border-radius:14px;background:#fffdf8;padding:16px 18px}.grid dt{color:#817b70;font-size:12px;text-transform:uppercase;letter-spacing:.06em}.grid dd{margin:0;min-width:0;overflow-wrap:anywhere}code{font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.note{margin-top:22px;border-left:3px solid #c9a227;padding:2px 0 2px 14px;color:#676157}.note h2{font-size:14px;margin:0 0 6px;color:#24221d}.note p{margin:0 0 8px}.note p:last-child{margin-bottom:0}.limit{color:#817b70;font-size:13px}
+</style></head><body><main><p class="eyebrow">Live proxy diagnostic</p><h1>${title}</h1><p class="reason">${escapeHtml(error.message)}</p><dl class="grid"><dt>HTTP status</dt><dd><code>${error.status}${httpReason(error.status) ? ` ${httpReason(error.status)}` : ''}</code></dd><dt>Target</dt><dd><code>${escapeHtml(display)}</code></dd></dl><section class="note"><h2>What this means</h2><p>${meaning}</p><p>If your browser shows Securly’s own block page or a blank frame instead of this diagnostic, the filter blocked the proxy origin before Ink received a response. Ink cannot report a status for a request it never received.</p><p class="limit">Ink reports blocking; it does not bypass network filters.</p></section></main></body></html>`
 }
 
 export type SitePage = {
@@ -82,11 +155,9 @@ export function searchQueryFor(raw: string): string | undefined {
 
 /** A readable results page for a search engine that will not render in a sandbox. */
 export function renderSearchResults(query: string, searchUrl: string, results: SearchResultLink[]): string {
-  let engine = 'the search engine'
   let action = 'https://www.google.com/search'
   try {
     const url = new URL(searchUrl)
-    engine = url.hostname.replace(/^www\./i, '')
     action = `${url.origin}${url.pathname}`
   } catch {
     /* keep the defaults */
@@ -104,21 +175,21 @@ export function renderSearchResults(query: string, searchUrl: string, results: S
           return `<li><p class="meta">${index + 1} · ${escapeHtml(host)}</p><h2><a href="${escapeHtml(result.url)}">${escapeHtml(result.title)}</a></h2><p>${escapeHtml(snippet.length > 300 ? `${snippet.slice(0, 297).trimEnd()}…` : snippet)}</p></li>`
         })
         .join('')
-    : '<li><p>No top result was returned. Try another search.</p></li>'
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(query)} · Google top result</title><style>
+    : '<li><p>No live results were returned. Try another search.</p></li>'
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(query)} · Web results</title><style>
 body{margin:0;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;background:#f6f4ef;color:#24221d}
 main{max-width:760px;margin:0 auto;padding:38px 24px 64px}.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#817b70;margin:0 0 10px}
 h1{font-size:clamp(2rem,6vw,3.4rem);line-height:1.02;letter-spacing:-.04em;margin:0 0 12px}.lede{max-width:620px;color:#6f695f;margin:0 0 18px}
 form{display:flex;gap:8px;max-width:580px;margin:0 0 28px}input{flex:1;min-width:0;border:1px solid #d8d1c4;border-radius:10px;padding:10px 12px;font:inherit;background:#fffdf8;color:inherit}button{border:0;border-radius:10px;padding:10px 16px;font:inherit;font-weight:600;background:#24221d;color:#fffdf8;cursor:pointer}
 ol{list-style:none;margin:0;padding:0;display:grid;gap:12px}li{border:1px solid #e4ded2;border-radius:14px;background:#fffdf8;padding:16px 18px}li p{margin:0 0 6px;color:#6f695f;font-size:14px}li p.meta{color:#9a9386;font-size:11px;letter-spacing:.04em;text-transform:uppercase}
 li h2{font-size:18px;line-height:1.25;margin:0 0 6px;letter-spacing:-.01em}a{color:#157a55;text-decoration-thickness:1px;text-underline-offset:2px}.escape{margin:26px 0 0;font-size:13px;color:#817b70}
-</style></head><body><main><header><p class="eyebrow">Google top result</p><h1>${escapeHtml(query)}</h1><p class="lede">${results.length ? `${escapeHtml(engine)} selected this top result. Google's full results page needs its own cookies and JavaScript, so this result opens inside the preview instead.` : `${escapeHtml(engine)} did not return a top result. Try another search.`}</p></header><form action="${escapeHtml(action)}" method="get"><input name="q" value="${escapeHtml(query)}" aria-label="Search again"><button type="submit">Search</button></form><ol>${items}</ol></main></body></html>`
+</style></head><body><main><header><p class="eyebrow">Web results</p><h1>${escapeHtml(query)}</h1><p class="lede">${results.length ? `Live results fetched through the proxy. Google's own result page requires JavaScript and is not available to a server-side fetch, so these are live web results.` : `The live search returned no results. Try another search.`}</p></header><form action="${escapeHtml(action)}" method="get"><input name="q" value="${escapeHtml(query)}" aria-label="Search again"><button type="submit">Search</button></form><ol>${items}</ol></main></body></html>`
 }
 
 function privateHost(hostname: string): boolean {
-  let host = hostname.toLowerCase()
+  let host = hostname.toLowerCase().replace(/\.$/, '')
   if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1)
-  if (!host || PRIVATE_HOST.test(host)) return true
+  if (!host || PRIVATE_HOST.test(host) || PRIVATE_DNS_SUFFIX.test(host)) return true
   if (host.includes(':')) {
     return (
       host === '::' ||
@@ -161,6 +232,7 @@ export function normalizeSiteUrl(raw: string): string | undefined {
     return undefined
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined
+  if (!url.hostname) return undefined
   if (url.username || url.password) return undefined
   if (url.port && url.port !== '80' && url.port !== '443') return undefined
   if (privateHost(url.hostname)) return undefined
@@ -285,6 +357,10 @@ const BLOCKED_REQUEST_HEADERS = new Set([
 export async function fetchSiteRequest(target: string, request: Request): Promise<SiteResponse> {
   const next = normalizeSiteUrl(target)
   if (!next) throw new SiteError(400, 'That address is not on a public website.')
+  let method = request.method.toUpperCase()
+  if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(method)) {
+    throw new SiteError(405, 'That request method is not allowed.')
+  }
   const headers = new Headers()
   request.headers.forEach((value, name) => {
     const key = name.toLowerCase()
@@ -297,28 +373,52 @@ export async function fetchSiteRequest(target: string, request: Request): Promis
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
     )
   }
-  const method = request.method.toUpperCase()
-  const body = method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer()
+  let body = method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer()
   if (body && body.byteLength > MAX_ASSET_BYTES) throw new SiteError(413, 'That request is too large to preview.')
   const signal = AbortSignal.any([request.signal, AbortSignal.timeout(FETCH_TIMEOUT)])
-  let response: Response
+  let current = next
   try {
-    response = await fetch(next, { method, headers, body, redirect: 'follow', signal })
+    // Redirects are followed manually so a public URL cannot bounce the Worker
+    // into loopback, metadata or private address space.
+    for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
+      const response = await fetch(current, { method, headers, body, redirect: 'manual', signal })
+      if (TRANSIENT_REDIRECTS.has(response.status)) {
+        const location = response.headers.get('location')
+        await response.body?.cancel()
+        if (!location) throw new SiteError(502, 'The site sent an incomplete redirect.')
+        let redirectUrl: URL
+        try {
+          redirectUrl = new URL(location, current)
+        } catch {
+          throw new SiteError(502, 'The site sent an invalid redirect.')
+        }
+        const target = normalizeSiteUrl(redirectUrl.href)
+        if (!target) throw new SiteError(400, 'The site redirected to a non-public address.')
+        if (response.status === 303) {
+          method = 'GET'
+          body = undefined
+        }
+        current = target
+        continue
+      }
+      const length = Number(response.headers.get('content-length') ?? '0')
+      if (length > MAX_ASSET_BYTES) {
+        await response.body?.cancel()
+        throw new SiteError(413, 'That response is too large to preview.')
+      }
+      const buffer = await response.arrayBuffer()
+      if (buffer.byteLength > MAX_ASSET_BYTES) throw new SiteError(413, 'That response is too large to preview.')
+      return {
+        body: buffer,
+        status: response.status,
+        contentType: response.headers.get('content-type') ?? 'application/octet-stream',
+      }
+    }
+    throw new SiteError(502, 'The site redirected too many times.')
   } catch (error) {
-    if (error instanceof Error && error.name === 'TimeoutError') throw new SiteError(504, 'That request took too long.')
+    if (error instanceof SiteError) throw error
+    if (signal.aborted) throw new SiteError(504, 'That request took too long.')
     throw new SiteError(502, 'That request could not be completed.')
-  }
-  const length = Number(response.headers.get('content-length') ?? '0')
-  if (length > MAX_ASSET_BYTES) {
-    await response.body?.cancel()
-    throw new SiteError(413, 'That response is too large to preview.')
-  }
-  const buffer = await response.arrayBuffer()
-  if (buffer.byteLength > MAX_ASSET_BYTES) throw new SiteError(413, 'That response is too large to preview.')
-  return {
-    body: buffer,
-    status: response.status,
-    contentType: response.headers.get('content-type') ?? 'application/octet-stream',
   }
 }
 
@@ -328,7 +428,7 @@ function encodeText(text: string): ArrayBuffer {
 }
 
 /**
- * CSS root-relative url() references would otherwise resolve against Quill's
+ * CSS root-relative url() references would otherwise resolve against Ink's
  * origin. Vite's preload map stores asset paths as "assets/...", and its
  * helper prepends a slash, so those entries are made proxy-relative too.
  */
@@ -361,11 +461,20 @@ export function rewriteAssetContent(
     return encodeText(rewritten)
   }
   if (type.includes('javascript') || type.includes('ecmascript')) {
+    // Game pages embed a promo overlay for framed sessions. It is not part of
+    // the game, so serve an empty script instead of letting it cover Unity.
+    if (/\/assets\/promo\//i.test(target.pathname)) return encodeText('')
     const assetBase = `${proxyUrl.replace(/\/$/, '')}/p/${target.protocol.slice(0, -1)}/${target.host}/`
     // Vite's preload helper turns its map entries ("assets/...") into URLs
     // with `"/" + dep`. That resolves against the page's original <base>, so
     // patch the helper to make the URL absolute on the proxy origin instead.
-    const js = decoder.decode(body).replace(
+    let js = decoder.decode(body)
+    // FreezeNova's game.js sends an embedded frame to its ad wrapper. Keep the
+    // leaderboard helpers, but drop the redirect so the game itself stays up.
+    if (/\/assets\/scripts\/game\.js$/i.test(target.pathname)) {
+      js = js.replace(/window\.location\.href\s*=\s*(['"])\.\/pre(?:-gg)?\.html\1/g, 'void 0')
+    }
+    js = js.replace(
       /(function\([A-Za-z_$][\w$]*\)\s*\{\s*return|\([A-Za-z_$][\w$]*\)\s*=>)\s*(["'])\/\2\s*\+\s*([A-Za-z_$][\w$]*)/g,
       (_match, prefix: string, _quote: string, depArg: string) => `${prefix}${JSON.stringify(assetBase)} + ${depArg}`,
     )
@@ -488,6 +597,177 @@ export async function googleTopResult(query: string, abort?: AbortSignal): Promi
   }
 }
 
+/**
+ * Google's result HTML is a JavaScript challenge for a server-side fetch. Use
+ * DuckDuckGo's lightweight HTML endpoint as a live result source instead of
+ * returning an empty "top result" page. Result links are decoded back to the
+ * destination before they are handed to the proxy.
+ */
+async function fetchDuckDuckGoSearchResults(query: string, abort?: AbortSignal): Promise<SearchResultLink[]> {
+  const url = new URL('https://html.duckduckgo.com/html/')
+  url.searchParams.set('q', query)
+  const timeout = AbortSignal.timeout(8_000)
+  const signal = abort ? AbortSignal.any([abort, timeout]) : timeout
+  try {
+    const response = await fetch(url, {
+      signal,
+      headers: {
+        accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1',
+        'accept-language': 'en-US,en;q=0.9',
+        'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      },
+    })
+    if (!response.ok) {
+      await response.body?.cancel()
+      return []
+    }
+    const html = await response.text()
+    const results: SearchResultLink[] = []
+    const seen = new Set<string>()
+    const anchors = [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)]
+    for (const anchor of anchors) {
+      const attributes = anchor[1] ?? ''
+      if (!/class="[^"]*result__a[^"]*"/i.test(attributes)) continue
+      const rawHref = /\bhref="([^"]+)"/i.exec(attributes)?.[1]
+      if (!rawHref) continue
+      let destination: URL
+      try {
+        destination = new URL(rawHref.replace(/&amp;/g, '&'), 'https://duckduckgo.com')
+        if (/(^|\.)duckduckgo\.com$/i.test(destination.hostname)) {
+          const encoded = destination.searchParams.get('uddg')
+          if (!encoded) continue
+          destination = new URL(encoded)
+        }
+      } catch {
+        continue
+      }
+      const normalized = normalizeSiteUrl(destination.href)
+      if (!normalized) continue
+      const resultUrl = new URL(normalized)
+      if (/(^|\.)duckduckgo\.com$/i.test(resultUrl.hostname) || seen.has(normalized)) continue
+      const title = decodeSearchText(anchor[2] ?? '') || resultUrl.hostname
+      const after = html.slice((anchor.index ?? 0) + anchor[0].length)
+      const rawSnippet = /<a\b[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/i.exec(after)?.[1] ?? ''
+      results.push({ title, url: normalized, snippet: decodeSearchText(rawSnippet) })
+      seen.add(normalized)
+      if (results.length >= 8) break
+    }
+    return results
+  } catch {
+    return []
+  }
+}
+
+/** The exported search used by the Google proxy: try Bing first, then DuckDuckGo. */
+export async function fetchWebSearchResults(query: string, abort?: AbortSignal): Promise<SearchResultLink[]> {
+  const bing = await fetchBingSearchResults(query, abort)
+  if (bing.length) return bing
+  return fetchDuckDuckGoSearchResults(query, abort)
+}
+
+/** Bing's lightweight RSS result feed avoids its HTML redirect URLs. */
+async function fetchBingSearchResults(query: string, abort?: AbortSignal): Promise<SearchResultLink[]> {
+  const url = new URL('https://www.bing.com/search')
+  url.searchParams.set('format', 'rss')
+  url.searchParams.set('q', query)
+  url.searchParams.set('setlang', 'en')
+  url.searchParams.set('cc', 'us')
+  const timeout = AbortSignal.timeout(8_000)
+  const signal = abort ? AbortSignal.any([abort, timeout]) : timeout
+  try {
+    const response = await fetch(url, {
+      signal,
+      headers: {
+        accept: 'application/rss+xml,application/xml,text/xml,text/html;q=0.9,*/*;q=0.1',
+        'accept-language': 'en-US,en;q=0.9',
+        'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      },
+    })
+    if (!response.ok) {
+      await response.body?.cancel()
+      return []
+    }
+    const xml = await response.text()
+    const results: SearchResultLink[] = []
+    const seen = new Set<string>()
+    for (const match of xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)) {
+      const block = match[1] ?? ''
+      const normalized = normalizeSiteUrl(decodeSearchText(rssField(block, 'link')))
+      if (!normalized) continue
+      const host = new URL(normalized).hostname.replace(/^www\./i, '').toLowerCase()
+      if (/(^|\.)bing\.com$/i.test(host) || seen.has(normalized)) continue
+      const title = cleanRssText(rssField(block, 'title')) || host
+      const snippet = cleanRssText(rssField(block, 'description'))
+      results.push({ title, url: normalized, snippet })
+      seen.add(normalized)
+      if (results.length >= 8) break
+    }
+    return results
+  } catch {
+    return []
+  }
+}
+
+function rssField(block: string, tag: string): string {
+  return new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i').exec(block)?.[1] ?? ''
+}
+
+function cleanRssText(value: string): string {
+  return decodeSearchText(value.replace(/^<!\[CDATA\[/i, '').replace(/\]\]>$/, ''))
+}
+
+function decodeSearchText(value: string): string {
+  return value
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&#x([0-9a-f]+);/gi, (_match, hex: string) => {
+      try {
+        return String.fromCodePoint(Number.parseInt(hex, 16))
+      } catch {
+        return ''
+      }
+    })
+    .replace(/&#(\d+);/g, (_match, decimal: string) => {
+      try {
+        return String.fromCodePoint(Number.parseInt(decimal, 10))
+      } catch {
+        return ''
+      }
+    })
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Google rejects Worker fetches of its landing page with 429. The home page is
+ * almost entirely a search box, so render a local landing page without making
+ * the whole Build fail. The form and any links still navigate through the
+ * capability proxy; only the initial document is local.
+ */
+function googleLandingFallback(raw: string): string | undefined {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return undefined
+  }
+  const host = url.hostname.replace(/^www\./i, '').toLowerCase()
+  if (!/^google\.[a-z.]+$/i.test(host)) return undefined
+  if (url.pathname !== '/' && url.pathname !== '/webhp') return undefined
+  if (url.searchParams.has('q')) return undefined
+  const search = new URL('/search', url).href
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Google</title><style>
+html,body{height:100%}body{margin:0;background:#fff;color:#202124;font:16px/1.5 Arial,Helvetica,sans-serif}main{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;padding:48px 20px;text-align:center}.logo{font-size:clamp(4rem,14vw,6.5rem);font-weight:500;letter-spacing:-.09em;line-height:1;user-select:none}.logo span:nth-child(1){color:#4285f4}.logo span:nth-child(2){color:#ea4335}.logo span:nth-child(3){color:#fbbc05}.logo span:nth-child(4){color:#4285f4}.logo span:nth-child(5){color:#34a853}.logo span:nth-child(6){color:#ea4335}form{width:min(100%,584px);margin-top:34px}.search{display:flex;align-items:center;gap:12px;border:1px solid #dfe1e5;border-radius:999px;padding:8px 18px;background:#fff;box-shadow:0 1px 6px rgba(32,33,36,.15)}.search:focus-within{box-shadow:0 1px 8px rgba(32,33,36,.22)}.search svg{flex:none;color:#9aa0a6}input{flex:1;min-width:0;border:0;outline:0;padding:10px 0;background:transparent;color:inherit;font:16px Arial,Helvetica,sans-serif}.buttons{display:flex;justify-content:center;gap:11px;margin-top:30px}button{border:1px solid #f8f9fa;border-radius:4px;background:#f8f9fa;color:#3c4043;padding:10px 16px;font:14px Arial,Helvetica,sans-serif;cursor:pointer}button:hover{border-color:#dadce0;box-shadow:0 1px 1px rgba(0,0,0,.1)}.note{max-width:540px;margin:34px 0 0;color:#5f6368;font:12.5px/1.6 Arial,Helvetica,sans-serif}.note strong{color:#3c4043}
+</style></head><body><main><div class="logo" aria-label="Google"><span>G</span><span>o</span><span>o</span><span>g</span><span>l</span><span>e</span></div><form action="${escapeHtml(search)}" method="get" role="search"><label class="search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><input name="q" type="search" placeholder="Search Google" aria-label="Search Google" autocomplete="off" autofocus></label><div class="buttons"><button type="submit">Google Search</button></div></form><p class="note"><strong>Live preview note:</strong> Google blocks automated page fetches, so this landing page is served locally. A search still opens inside the preview.</p></main></body></html>`
+}
+
 export async function fetchSitePage(target: string, abort?: AbortSignal): Promise<SitePage> {
   let current = normalizeSiteUrl(target)
   if (!current) throw new SiteError(400, 'That address is not a public website.')
@@ -508,14 +788,39 @@ export async function fetchSitePage(target: string, abort?: AbortSignal): Promis
         const location = response.headers.get('location')
         await response.body?.cancel()
         if (!location) throw new SiteError(502, 'The site sent an incomplete redirect.')
-        const next = normalizeSiteUrl(new URL(location, current).href)
+        let redirect: URL
+        try {
+          redirect = new URL(location, current)
+        } catch {
+          throw new SiteError(502, 'The site sent an invalid redirect.')
+        }
+        if (isSecurlyHost(redirect.hostname)) {
+          throw new SiteError(
+            451,
+            `Securly redirected the proxy to its block page (${redirect.hostname}). The network filter is blocking this site.`,
+          )
+        }
+        const next = normalizeSiteUrl(redirect.href)
         if (!next) throw new SiteError(400, 'The site redirected to a non-public address.')
         current = next
         continue
       }
       if (!response.ok) {
         await response.body?.cancel()
-        throw new SiteError(502, `The site returned ${response.status}.`)
+        // Google returns 429 to some worker egress ranges. Only fall back to
+        // the local landing page when the real page is unavailable; otherwise
+        // the proxy would be showing a mock even when Google is reachable.
+        if (response.status === 429) {
+          // Google can redirect the home page to /sorry/index before returning
+          // 429. Use the original target so the local landing page still opens
+          // in production, where Google rate-limits Worker egress.
+          const googleLanding = googleLandingFallback(target) ?? googleLandingFallback(current)
+          if (googleLanding) return { html: googleLanding, finalUrl: 'https://www.google.com/', title: 'Google' }
+        }
+        throw new SiteError(
+          siteFailureStatus(response.status),
+          describeSiteFailure(response.status, current),
+        )
       }
       const type = response.headers.get('content-type') ?? ''
       if (type && !HTML_TYPE.test(type)) {
@@ -528,6 +833,12 @@ export async function fetchSitePage(target: string, abort?: AbortSignal): Promis
       if (buffer.byteLength > MAX_PAGE_BYTES) throw new SiteError(413, 'That page is too large to preview.')
       const html = new TextDecoder().decode(buffer)
       if (!html.trim()) throw new SiteError(502, 'The site returned an empty page.')
+      if (isSecurlyBlockPage(html)) {
+        throw new SiteError(
+          451,
+          `Securly returned a block page for ${new URL(current).hostname}. The network filter is blocking this site.`,
+        )
+      }
       return {
         html,
         finalUrl: current,
@@ -558,28 +869,47 @@ function rootRelative(markup: string, origin: string): string {
   return out
 }
 
+// These are buffered by the asset proxy. Media files are deliberately left
+// direct until the proxy can forward Range requests without loading the whole
+// file into memory.
+const RESOURCE_ATTRIBUTES: Record<string, string[]> = {
+  script: ['src'],
+  link: ['href'],
+  img: ['src'],
+}
+
+/**
+ * Static resources are fetched by the preview's browser, so they must use the
+ * proxy origin too. Otherwise a network filter sees the original CDN host even
+ * though the document itself was proxied, and a sandboxed document may be
+ * blocked by CORS for fonts, images and media as well as scripts and CSS.
+ */
 function proxyAssetTags(html: string, finalUrl: string, proxyUrl: string): string {
-  return html.replace(/<(script|link)\b[^>]*>/gi, (tag: string, tagName: string) => {
+  return html.replace(/<(script|link|img)\b[^>]*>/gi, (tag: string, tagName: string) => {
     const name = tagName.toLowerCase()
     if (name === 'link') {
       const relMatch = /\brel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag)
       const rel = (relMatch?.[1] ?? relMatch?.[2] ?? relMatch?.[3] ?? '').toLowerCase()
       if (!/(?:^|\s)(?:stylesheet|modulepreload|preload)(?:\s|$)/.test(rel)) return tag
     }
-    const attribute = name === 'script' ? 'src' : 'href'
-    const pattern = new RegExp(`(\\b${attribute}\\s*=\\s*)(["'])([^"']*)\\2`, 'i')
-    return tag.replace(pattern, (match: string, prefix: string, quote: string, raw: string) => {
-      if (!raw || /^(?:data:|blob:|javascript:|#)/i.test(raw)) return match
-      let target: URL
-      try {
-        target = new URL(raw, finalUrl)
-      } catch {
-        return match
-      }
-      if (target.protocol !== 'http:' && target.protocol !== 'https:') return match
-      const proxied = assetProxyPath(proxyUrl, target.href)
-      return proxied ? `${prefix}${quote}${escapeHtml(proxied)}${quote}` : match
-    })
+    return (RESOURCE_ATTRIBUTES[name] ?? []).reduce((out, attribute) => {
+      const pattern = new RegExp(`(\\b${attribute}\\s*=\\s*)(["'])([^"']*)\\2`, 'i')
+      return out.replace(pattern, (match: string, prefix: string, quote: string, raw: string) => {
+        if (!raw || /^(?:data:|blob:|javascript:|#)/i.test(raw)) return match
+        let target: URL
+        try {
+          target = new URL(raw, finalUrl)
+        } catch {
+          return match
+        }
+        if (target.protocol !== 'http:' && target.protocol !== 'https:') return match
+        // Unity's build files are large, public CDN assets and allow CORS. Load
+        // them directly so a game does not depend on the page/asset fetch path.
+        if (/\/(?:Build|StreamingAssets)\//i.test(target.pathname)) return tag
+        const proxied = assetProxyPath(proxyUrl, target.href)
+        return proxied ? `${prefix}${quote}${escapeHtml(proxied)}${quote}` : match
+      })
+    }, tag)
   })
 }
 
@@ -594,7 +924,7 @@ function addBase(html: string, base: string): string {
  * Sandboxed documents cannot touch cookies or Web Storage, and many sites
  * (Poki included) crash or wait forever when that access throws. Give those
  * APIs a document-local memory implementation before the site's own scripts
- * run. Nothing is shared with Quill or with another proxied page.
+ * run. Nothing is shared with Ink or with another proxied page.
  */
 function addSandboxShims(html: string, historyUrl: string): string {
   const shim = `<script>(function(){
@@ -604,6 +934,30 @@ function writeCookie(value){var text=String(value);var pair=text.split(';')[0];v
 try{Object.defineProperty(Document.prototype,'cookie',{configurable:true,enumerable:true,get:readCookies,set:writeCookie})}catch(error){}
 function memoryStorage(){var values=new Map();return{getItem:function(key){key=String(key);return values.has(key)?values.get(key):null},setItem:function(key,value){values.set(String(key),String(value))},removeItem:function(key){values.delete(String(key))},clear:function(){values.clear()},key:function(index){var keys=Array.from(values.keys());return index>=0&&index<keys.length?keys[index]:null},get length(){return values.size}}}
 try{Object.defineProperty(window,'localStorage',{configurable:true,value:memoryStorage()});Object.defineProperty(window,'sessionStorage',{configurable:true,value:memoryStorage()})}catch(error){}
+function memoryCacheStorage(){
+var cache={match:function(){return Promise.resolve(undefined)},matchAll:function(){return Promise.resolve([])},put:function(){return Promise.resolve()},add:function(){return Promise.resolve()},addAll:function(){return Promise.resolve()},delete:function(){return Promise.resolve(false)},keys:function(){return Promise.resolve([])}};
+return{open:function(){return Promise.resolve(cache)},has:function(){return Promise.resolve(false)},delete:function(){return Promise.resolve(false)},keys:function(){return Promise.resolve([])},match:function(){return Promise.resolve(undefined)}}
+}
+try{Object.defineProperty(window,'caches',{configurable:true,value:memoryCacheStorage()})}catch(error){}
+function memoryIndexedDB(){
+var databases=new Map();
+function request(value){var req={result:value,error:null};setTimeout(function(){if(req.onsuccess)req.onsuccess({target:req})},0);return req}
+function createStore(data,keyPath){
+return{createIndex:function(){},put:function(value){var key=keyPath&&value?value[keyPath]:value;data.set(String(key),value);return request(key)},get:function(key){return request(data.get(String(key)))},delete:function(key){data.delete(String(key));return request(undefined)},clear:function(){data.clear();return request(undefined)},openCursor:function(){return request(null)},openKeyCursor:function(){return request(null)}}
+}
+function open(name,version){
+var stores=new Map();
+var db={objectStoreNames:{contains:function(storeName){return stores.has(storeName)}},createObjectStore:function(storeName,options){var data=new Map();var keyPath=options&&options.keyPath;var store=createStore(data,keyPath);stores.set(storeName,{data:data,keyPath:keyPath,store:store});return store},deleteObjectStore:function(storeName){stores.delete(storeName)},close:function(){},transaction:function(names,mode){var tx={objectStore:function(storeName){var record=stores.get(storeName);if(!record){var data=new Map();record={data:data,keyPath:null,store:createStore(data,null)};stores.set(storeName,record)}return record.store},oncomplete:null,onerror:null};setTimeout(function(){if(tx.oncomplete)tx.oncomplete({target:tx})},0);return tx}};
+var req={result:db,error:null};
+req.target=req;
+req.transaction=db.transaction([]);
+var event={target:req,currentTarget:req};
+setTimeout(function(){try{if(req.onupgradeneeded)req.onupgradeneeded.call(req,event)}catch(error){}if(req.onsuccess)req.onsuccess(event)},0);
+return req
+}
+return{open:open}
+}
+try{Object.defineProperty(window,'indexedDB',{configurable:true,value:memoryIndexedDB()})}catch(error){}
 try{history.replaceState(history.state,'',${JSON.stringify(historyUrl)})}catch(error){}
 })()</script>`
   if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${shim}`)
@@ -618,7 +972,7 @@ export type FrameBridgeOptions = {
   gameStartUrl?: string
   /** Hosts that need the wrapper resolver instead of the ordinary page proxy. */
   gameHosts?: string[]
-  /** Codespaces needs the parent page to start a game navigation. */
+  /** Let the parent page start game navigations for an embedded preview. */
   parentNavigation?: boolean
 }
 
@@ -641,7 +995,7 @@ function isGame(url){for(var i=0;i<gameHosts.length;i++)if(url.hostname===gameHo
 function play(url){
   if(!parentNav||moved)return false;
   moved=true;
-  try{if(window.parent!==window){window.parent.postMessage({type:'quill:preview-navigate',url:url},'*');return true}}catch(error){moved=false;return false}
+  try{if(window.parent!==window){window.parent.postMessage({type:'stet:preview-navigate',url:url},'*');return true}}catch(error){moved=false;return false}
   window.location.href=url;return true;
 }
 function allowFrame(frame){
@@ -650,6 +1004,7 @@ function allowFrame(frame){
   var allowParts=existingAllow.split(';').map(function(part){return part.trim()}).filter(Boolean);
   var allowText=allowParts.join(';').toLowerCase();
   if(allowText.indexOf('fullscreen')<0)allowParts.push('fullscreen');
+  if(allowText.indexOf('pointer-lock')<0)allowParts.push('pointer-lock');
   if(allowParts.join('; ')!==existingAllow)frame.setAttribute('allow',allowParts.join('; '));
   if(!frame.hasAttribute('sandbox'))return;
   var needed=['allow-scripts','allow-forms','allow-pointer-lock','allow-popups','allow-modals','allow-downloads'];
@@ -666,6 +1021,9 @@ function fix(frame){
   var url;try{url=new URL(raw,document.baseURI)}catch(error){return}
   if(url.protocol!=='http:'&&url.protocol!=='https:')return;
   if(isProxy(url))return;
+  // FreezeNova's pre.html is an ad wrapper; its sibling index.html is the
+  // actual game. Start the game without waiting for the ad callback.
+  if(url.pathname.slice(-9)==='/pre.html')url.pathname=url.pathname.slice(0,-9)+'/index.html';
   var game=isGame(url);
   var target=(game&&gameStart?gameStart:proxy)+'?url='+encodeURIComponent(url.href);
   if(frame.getAttribute('src')===target)return;
@@ -687,6 +1045,24 @@ try{new MutationObserver(function(records){
 }).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src','sandbox']})}catch(error){}
 document.addEventListener('DOMContentLoaded',function(){scan(document.documentElement)},{once:true});
 scan(document.documentElement);
+// Some game wrappers keep a deferred iframe empty while an ad callback is
+// outstanding. Start the real frame if the site has not done so in time.
+setTimeout(function(){
+  var frames=document.querySelectorAll('iframe[data-src]');
+  for(var i=0;i<frames.length;i++){
+    var frame=frames[i];
+    if(frame.getAttribute('src'))continue;
+    var raw=frame.getAttribute('data-src')||'';
+    if(!raw||/^(?:about:|data:|blob:|javascript:)/i.test(raw))continue;
+    var deferred;try{deferred=new URL(raw,document.baseURI)}catch(error){continue}
+    if(deferred.protocol!=='http:'&&deferred.protocol!=='https:')continue;
+    if(deferred.pathname.slice(-9)==='/pre.html')deferred.pathname=deferred.pathname.slice(0,-9)+'/index.html';
+    var target=(isGame(deferred)&&gameStart?gameStart:proxy)+'?url='+encodeURIComponent(deferred.href);
+    frame.setAttribute('src',target);
+    frame.style.pointerEvents='auto';
+    allowFrame(frame);
+  }
+},4500);
 })()</script>`
   if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${script}`)
   if (/<html(?:\s[^>]*)?>/i.test(html)) return html.replace(/<html(?:\s[^>]*)?>/i, (root) => `${root}<head>${script}</head>`)
@@ -701,17 +1077,26 @@ scan(document.documentElement);
 function addNavigation(html: string, origin: string, proxyUrl: string, parentNavigation = false): string {
   // Use the absolute proxy URL: the document path is made to look like the
   // original site so client-side routers do not treat the preview as their 404.
-  // A Codespaces-forwarded port will not authorise a navigation started inside
-  // the preview's sandbox, so let the parent page change the frame's src with
-  // the page's own credentials. Direct previews keep navigating themselves.
+  // Embedded previews let the parent page change the frame's src, which keeps
+  // sandboxed frame navigation and Codespaces-forwarded ports from swallowing
+  // link and game clicks. Direct previews keep navigating themselves.
   const navigate = parentNavigation
-    ? `function go(url){try{if(window.parent!==window){window.parent.postMessage({type:'quill:preview-navigate',url:url},'*');return}}catch(error){}window.location.href=url}`
+    ? `function go(url){try{if(window.parent!==window){window.parent.postMessage({type:'stet:preview-navigate',url:url},'*');return}}catch(error){}window.location.href=url}`
     : `function go(url){window.location.href=url}`
   const script = `<script>(function(){
 var proxy=${JSON.stringify(proxyUrl)};
 var origin=${JSON.stringify(origin)};
 var appOrigin=new URL(proxy).origin;
 var nativeOpen=window.open;
+// The parent focuses this frame after load, but a cross-origin frame's inner
+// document does not automatically focus its own search box. Let the parent ask
+// the page to focus the obvious search field so typing works immediately.
+window.addEventListener('message',function(event){
+  if(!event.data||event.data.type!=='stet:focus-search')return;
+  var field=document.querySelector('input[name="q"],textarea[name="q"],input[type="search"],input[role="combobox"],textarea[role="combobox"]');
+  if(!field)return;
+  try{field.focus();if(typeof field.select==='function')field.select()}catch(error){}
+});
 ${navigate}
 function isHttp(url){return url.protocol==='http:'||url.protocol==='https:'}
 function isProxy(url){return url.href===proxy||url.href.indexOf(proxy+'?')===0}
@@ -740,7 +1125,7 @@ window.addEventListener('click',function(event){
   var link=node&&node.closest?node.closest('a[href]'):null;
   if(!link)return;
   var href=link.getAttribute('href');
-  if(!href||href.charAt(0)==='#'||link.hasAttribute('download')||link.hasAttribute('data-quill-external'))return;
+  if(!href||href.charAt(0)==='#'||link.hasAttribute('download')||link.hasAttribute('data-stet-external'))return;
   var url;try{url=new URL(href,document.baseURI)}catch(_){return}
   if(!isHttp(url))return;
   event.preventDefault();event.stopPropagation();open(url);
@@ -784,6 +1169,38 @@ window.addEventListener('submit',function(event){
   if(event.target&&event.target.tagName==='FORM')submit(event.target,event.submitter);
 },true);
 try{HTMLFormElement.prototype.submit=function(){submit(this,null)}}catch(error){}
+function findSearchField(){
+  var fields=document.querySelectorAll('input[name="q"],textarea[name="q"],input[type="search"],input[role="combobox"],textarea[role="combobox"]');
+  for(var i=0;i<fields.length;i++){var value=fields[i].value;if(typeof value==='string'&&value.trim())return fields[i]}
+  return null;
+}
+function openSiteSearch(field){
+  if(!field)return false;
+  var value=String(field.value||'').trim();
+  if(!value)return false;
+  var host;try{host=new URL(origin).hostname.replace(/^www\./i,'').toLowerCase()}catch(error){return false}
+  if(!/^google\.[a-z.]+$/i.test(host))return false;
+  var target;try{target=new URL('/search?q='+encodeURIComponent(value),origin)}catch(error){return false}
+  open(target);return true;
+}
+// Google's search control is not a normal form submit; without this fallback
+// its button appears to work but the query never reaches the proxy.
+window.addEventListener('click',function(event){
+  var node=event.target;
+  var button=node&&node.closest?node.closest('button,input[type="button"],input[type="submit"]'):null;
+  if(!button)return;
+  var label=button.getAttribute('aria-label')||button.value||button.textContent||'';
+  if(!/^(?:google\s+)?search$/i.test(label.trim()))return;
+  if(button.form)return;
+  if(openSiteSearch(findSearchField())){event.preventDefault();event.stopPropagation();}
+},true);
+window.addEventListener('keydown',function(event){
+  if(event.key!=='Enter'||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey)return;
+  var node=event.target;
+  var form=node&&(node.form||(node.closest&&node.closest('form')));
+  if(form)return;
+  if(openSiteSearch(findSearchField()||node)){event.preventDefault();event.stopPropagation();}
+},true);
 // Catch scripted location changes before
 // the frame leaves the proxy. Chromium supports the Navigation API; the click
 // and submit handlers above remain the fallback elsewhere.
@@ -809,8 +1226,8 @@ if(window.navigation&&window.navigation.addEventListener){
  */
 function addFullscreenFallback(html: string): string {
   const script = `<script>(function(){
-if(window.__quillFullscreenFallback)return;
-window.__quillFullscreenFallback=true;
+if(window.__stetFullscreenFallback)return;
+window.__stetFullscreenFallback=true;
 var active=null,saved='',savedOverflow=null,exitButton=null,timer=null;
 function removeExitButton(){if(exitButton&&exitButton.parentNode)exitButton.parentNode.removeChild(exitButton);exitButton=null}
 function clearFaux(){
@@ -837,8 +1254,8 @@ function enter(element){
   exitButton.style.cssText='position:fixed;top:10px;right:10px;z-index:2147483647;padding:8px 10px;background:rgba(0,0,0,.72);color:#fff;border:1px solid rgba(255,255,255,.55);border-radius:6px;font:13px system-ui;cursor:pointer';
   exitButton.addEventListener('click',exitFullscreen);
   document.body.appendChild(exitButton);
-  if(!window.__quillFullscreenEscape){
-    window.__quillFullscreenEscape=true;
+  if(!window.__stetFullscreenEscape){
+    window.__stetFullscreenEscape=true;
     document.addEventListener('keydown',function(event){if(event.key==='Escape')exitFullscreen()},true);
   }
 }
@@ -878,9 +1295,9 @@ document.addEventListener('fullscreenchange',function(){if(document.fullscreenEl
  * script cannot hide the site forever).
  */
 function addLoadingState(html: string, host: string): string {
-  const overlay = `<div id="quill-live-loading" role="status" aria-live="polite"><span class="quill-live-spinner" aria-hidden="true"></span><p>Loading <strong>${escapeHtml(host)}</strong>…</p></div>`
-  const style = `<style>#quill-live-loading{position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#f6f4ef;color:#6f695f;font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;transition:opacity .25s ease;pointer-events:none}#quill-live-loading p{margin:0}#quill-live-loading strong{color:#24221d;font-weight:600}#quill-live-loading.quill-live-done{opacity:0}#quill-live-loading.quill-live-done .quill-live-spinner{animation:none}.quill-live-spinner{width:22px;height:22px;border-radius:50%;border:2px solid #ddd6ca;border-top-color:#817b70;animation:quill-live-spin .8s linear infinite}@keyframes quill-live-spin{to{transform:rotate(360deg)}}</style>`
-  const script = `<script>(function(){var done=false;function hide(){if(done)return;done=true;var el=document.getElementById('quill-live-loading');if(!el)return;el.classList.add('quill-live-done');setTimeout(function(){el.remove()},300)}window.addEventListener('load',function(){setTimeout(hide,350)},{once:true});setTimeout(hide,12000)})()</script>`
+  const overlay = `<div id="stet-live-loading" role="status" aria-live="polite"><span class="stet-live-spinner" aria-hidden="true"></span><p>Loading <strong>${escapeHtml(host)}</strong>…</p></div>`
+  const style = `<style>#stet-live-loading{position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#f6f4ef;color:#6f695f;font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;transition:opacity .25s ease;pointer-events:none}#stet-live-loading p{margin:0}#stet-live-loading strong{color:#24221d;font-weight:600}#stet-live-loading.stet-live-done{opacity:0}#stet-live-loading.stet-live-done .stet-live-spinner{animation:none}.stet-live-spinner{width:22px;height:22px;border-radius:50%;border:2px solid #ddd6ca;border-top-color:#817b70;animation:stet-live-spin .8s linear infinite}@keyframes stet-live-spin{to{transform:rotate(360deg)}}</style>`
+  const script = `<script>(function(){var done=false;function hide(){if(done)return;done=true;var el=document.getElementById('stet-live-loading');if(!el)return;el.classList.add('stet-live-done');setTimeout(function(){el.remove()},300)}window.addEventListener('load',function(){setTimeout(hide,350)},{once:true});setTimeout(hide,12000)})()</script>`
   let out = html
   if (/<body(?:\s[^>]*)?>/i.test(out)) out = out.replace(/<body(?:\s[^>]*)?>/i, (body) => `${body}${style}${overlay}`)
   else out = `${style}${overlay}${out}`
@@ -888,26 +1305,33 @@ function addLoadingState(html: string, host: string): string {
   return `${out}${script}`
 }
 
-/** Google's own scripts hijack search and navigate the card to a page that
- * refuses framing. Keep the static form; our injected script handles the rest. */
-function stripGoogleScripts(html: string, origin: string): string {
-  let host: string
-  try {
-    host = new URL(origin).hostname
-  } catch {
-    return html
-  }
-  if (!/(^|\.)google\.[a-z.]+$/i.test(host)) return html
+/**
+ * FreezeNova's game pages inject a promo ad overlay while they are embedded.
+ * The game is the page itself, so drop the ad loader and its wgplayer tag
+ * without touching the Unity loader or canvas.
+ */
+function stripGameAdScripts(html: string): string {
   return html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
-    .replace(/<script\b[^>]*\/>/gi, '')
+    .replace(/<script\b[^>]*\bsrc\s*=\s*(?:"[^"]*\/assets\/promo\/[^"]*\.js[^"]*"|'[^']*\/assets\/promo\/[^']*\.js[^']*')[^>]*>\s*<\/script>/gi, '')
+    .replace(/<script\b[^>]*>(?:(?!<\/script>)[\s\S])*universal\.wgplayer\.com(?:(?!<\/script>)[\s\S])*<\/script>/gi, '')
 }
 
 /**
- * A page's own scripts fetch its APIs at runtime. Those requests carry the
- * site's real origin, so from the preview they are cross-origin and fail CORS.
- * Route same-site calls through the network proxy; leave third-party requests
- * untouched so their normal CORS rules still apply.
+ * Google's result page keeps reloading itself against the proxied location
+ * when its scripts run, which turns one click into a navigation loop. The
+ * basic results markup and its links are already in the document, so render
+ * that and let the injected navigation shim handle clicks and the search form.
+ */
+function stripSearchScripts(html: string): string {
+  return html.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '').replace(/<script\b[^>]*\/>/gi, '')
+}
+
+/**
+ * A page's own scripts fetch APIs and assets at runtime. Those requests carry
+ * the site's real origin, so from the preview they are cross-origin and fail
+ * CORS. Route every public HTTP(S) request through the capability proxy, not
+ * just same-site calls, so third-party game and API hosts stay behind the
+ * preview origin as well.
  */
 function addNetworkShim(html: string, proxyUrl: string, siteOrigin: string): string {
   const script = `<script>(function(){
@@ -917,8 +1341,11 @@ var appOrigin=new URL(proxy).origin;
 function proxied(raw){
   var url;try{url=new URL(raw,document.baseURI)}catch(error){return raw}
   if(url.protocol!=='http:'&&url.protocol!=='https:')return raw;
+  // Unity build files are public and CORS-enabled; their data files can be
+  // larger than a buffered preview response, so let the browser fetch them.
+  var path=url.pathname.toLowerCase();
+  if(path.indexOf('/build/')>=0||path.indexOf('/streamingassets/')>=0)return raw;
   if(url.pathname.indexOf('/api/web-proxy/')===0||url.pathname.indexOf('/api/poki-game/')===0)return raw;
-  if(url.origin!==siteOrigin&&url.origin!==appOrigin)return raw;
   if(url.origin===appOrigin)url=new URL(url.pathname+url.search+url.hash,siteOrigin);
   return proxy+'/net?url='+encodeURIComponent(url.href);
 }
@@ -956,8 +1383,8 @@ try{
 /** Keep the site's path on the proxy origin without shadowing native storage. */
 function addHistoryShim(html: string, historyUrl: string): string {
   const shim = `<script>try{history.replaceState(history.state,'',${JSON.stringify(historyUrl)})}catch(error){}</script>`
-  if (/<head(?:s[^>]*)?>/i.test(html)) return html.replace(/<head(?:s[^>]*)?>/i, (head) => `${head}${shim}`)
-  if (/<html(?:s[^>]*)?>/i.test(html)) return html.replace(/<html(?:s[^>]*)?>/i, (root) => `${root}<head>${shim}</head>`)
+  if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${shim}`)
+  if (/<html(?:\s[^>]*)?>/i.test(html)) return html.replace(/<html(?:\s[^>]*)?>/i, (root) => `${root}<head>${shim}</head>`)
   return `${shim}${html}`
 }
 
@@ -976,13 +1403,19 @@ export function renderProxyPage(
   // proxy origin. A router that reads window.location.pathname then resolves
   // the right route instead of showing its own not-found page.
   const historyUrl = new URL(`${target.pathname}${target.search}`, app.origin).href
-  const cleaned = rootRelative(
-    html
-      .replace(/<meta\b[^>]*http-equivs*=s*["']?s*(?:content-security-policy|refresh)s*["']?[^>]*>/gi, '')
+  const searchPage = Boolean(googleSearchQuery(finalUrl))
+  // Google's home/search scripts fight the proxied location and are not needed
+  // for the server-rendered search form. Other sites keep their own scripts.
+  const googleHost = /^google\.[a-z.]+$/i.test(target.hostname.replace(/^www\./i, ''))
+  const googleHome = googleHost && (target.pathname === '/' || target.pathname === '/webhp')
+  const stripGoogleScripts = searchPage || googleHome
+  const cleaned = stripGameAdScripts(rootRelative(
+    (stripGoogleScripts ? stripSearchScripts(html) : html)
+      .replace(/<meta\b[^>]*http-equiv\s*=\s*["']?(?:content-security-policy|refresh)["']?[^>]*>/gi, '')
       .replace(/<base\b[^>]*>/gi, ''),
     origin,
-  )
-  const withAssets = proxyAssetTags(stripGoogleScripts(cleaned, origin), finalUrl, app.href)
+  ))
+  const withAssets = proxyAssetTags(cleaned, finalUrl, app.href)
   const based = addBase(withAssets, base)
   const withFullscreen = addFullscreenFallback(based)
   // The isolated preview origin has real storage, cookies and same-origin

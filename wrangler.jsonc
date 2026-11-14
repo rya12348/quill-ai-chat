@@ -20,5 +20,13 @@
   "d1_databases": [
     { "binding": "DB", "database_name": "ai-chat", "database_id": "00000000-0000-0000-0000-000000000000" }
   ],
+  // Local realtime testing uses the helper Worker from
+  // freebuff-realtime/wrangler.jsonc. Sites injects its own managed REALTIME
+  // binding on deploy; this local entry is never uploaded as tenant code.
+  "durable_objects": {
+    "bindings": [
+      { "name": "REALTIME", "class_name": "FreebuffRealtime", "script_name": "freebuff-sites-realtime-local" }
+    ]
+  },
   "observability": { "enabled": true }
 }
