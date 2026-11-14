@@ -42,16 +42,29 @@ export function ModelPicker({
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const catalog = data?.items ?? MODELS.map((m) => ({ ...m, available: true }))
+  // Buffy is a local add-on, not one of the five hosted aliases. Keep the full
+  // agent and its free lane at the top instead of burying them as extra rows.
+  const localAgents = catalog.filter(
+    (model) => model.id === 'buffy' || model.id === 'buffy-lite' || model.name.toLowerCase() === 'buffy' || model.name.toLowerCase() === 'buffy free',
+  )
+  const isLocalAgent = (model: { id: string }) => localAgents.some((local) => local.id === model.id)
   // Keep the advertised five rows in a stable order. If the endpoint omits a
   // family, use the configured name and mark it unavailable instead of making
   // that choice disappear.
   const models = [
+    ...localAgents,
     ...PICKER_MODEL_NAMES.map((name) => {
       const found = catalog.find((model) => model.name === name)
       const configured = MODELS.find((model) => model.name === name)
       return found ?? (configured ? { ...configured, available: false } : undefined)
-    }).filter((model): model is (typeof catalog)[number] => Boolean(model)),
-    ...catalog.filter((model) => !PICKER_MODEL_NAMES.includes(model.name as (typeof PICKER_MODEL_NAMES)[number])),
+    })
+      .filter((model): model is (typeof catalog)[number] => Boolean(model))
+      .filter((model) => !isLocalAgent(model)),
+    ...catalog.filter(
+      (model) =>
+        !isLocalAgent(model) &&
+        !PICKER_MODEL_NAMES.includes(model.name as (typeof PICKER_MODEL_NAMES)[number]),
+    ),
   ]
   // Free lanes report their own health; the keyed API is one provider behind
   // every model, so its status applies to all of them. The list is one row per

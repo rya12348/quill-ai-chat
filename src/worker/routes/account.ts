@@ -85,14 +85,49 @@ account.get('/models', async (c) => {
   } catch {
     // A fresh deployment has no health rows yet; strength alone still works.
   }
-  const items: ModelInfo[] = pickPickerFamilies(publicLanes(c.env), statuses).map(({ family, lane }, index) => ({
-    id: lane.model,
-    name: pickerModelName(index),
-    description: pickerModelDescription(index),
-    available: true,
-    family,
-    ...(lane.billing ? { billing: lane.billing } : {}),
-  }))
+  const lanes = publicLanes(c.env)
+  // Buffy is an extra row: keep the five hosted families intact rather than
+  // letting it displace one of them. The local bridge supplies both Buffy
+  // rows; a deployment without one still advertises Buffy Free, which the
+  // Worker runs on the hosted free lanes.
+  const bridgeBuffyRows = lanes
+    .filter((lane) => lane.model === 'buffy' || lane.model === 'buffy-lite')
+    .map((lane) => ({
+      id: lane.model,
+      name: lane.label,
+      description: lane.description,
+      available: true,
+      family: lane.model === 'buffy' ? 'Buffy Agent' : 'Buffy',
+      ...(lane.billing ? { billing: lane.billing } : {}),
+    }))
+  const buffyRows = bridgeBuffyRows.length
+    ? bridgeBuffyRows
+    : lanes.length
+      ? [
+          {
+            id: 'buffy-lite',
+            name: 'Buffy',
+            description: 'Free Buffy on the strongest hosted models.',
+            available: true,
+            family: 'Buffy',
+            billing: 'free' as const,
+          },
+        ]
+      : []
+  const items: ModelInfo[] = [
+    ...buffyRows,
+    ...pickPickerFamilies(
+      lanes.filter((lane) => !lane.model.startsWith('buffy')),
+      statuses,
+    ).map(({ family, lane }, index) => ({
+      id: lane.model,
+      name: pickerModelName(index),
+      description: pickerModelDescription(index),
+      available: true,
+      family,
+      ...(lane.billing ? { billing: lane.billing } : {}),
+    })),
+  ]
   c.header('Cache-Control', 'private, no-store')
   return c.json({ items })
 })

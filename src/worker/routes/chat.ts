@@ -5,7 +5,7 @@
 import { Hono } from 'hono'
 import { streamSSE, type SSEStreamingApi } from 'hono/streaming'
 
-import { ADVISOR_PROMPT, ANALYZE_DAILY_LIMIT, BUILD_DAILY_LIMIT, DAILY_MESSAGE_LIMIT, DEFAULT_MODEL, MAX_CONTEXT_MESSAGES, MAX_INSTRUCTIONS_CHARS, MAX_MESSAGE_CHARS, RESEARCH_DAILY_LIMIT, STOPPED_REPLY, SYSTEM_PROMPT, toolModeNudge, type ModelId } from '../../shared/config'
+import { ADVISOR_PROMPT, ANALYZE_DAILY_LIMIT, BUFFY_FREE_PROMPT, BUILD_DAILY_LIMIT, DAILY_MESSAGE_LIMIT, DEFAULT_MODEL, MAX_CONTEXT_MESSAGES, MAX_INSTRUCTIONS_CHARS, MAX_MESSAGE_CHARS, RESEARCH_DAILY_LIMIT, STOPPED_REPLY, SYSTEM_PROMPT, toolModeNudge, type ModelId } from '../../shared/config'
 import type { AgentInfo, AgentTool, AnalysisInfo, AnalysisJob, BuildInfo, CanvasInfo, ChatEvent, Message, ProofInfo, ProofJob, ResearchInfo } from '../../shared/types'
 import { isAnalyzeIntent, isBuildRequest, isCanvasRequest, isResearchIntent, isSmallTalk, isWritingRequest, needsCurrentFacts, SUGGESTED_MODE_LABEL, suggestToolMode } from '../../shared/agent'
 import { agentComplete } from '../agent'
@@ -140,7 +140,7 @@ chat.post('/', async (c) => {
   if (!regenerate && !content && !attachments.length) return c.json({ error: 'empty', message: 'Write a message or attach a file first.' }, 400)
   if (content.length > MAX_MESSAGE_CHARS) return c.json({ error: 'too_long', message: `Messages can be up to ${MAX_MESSAGE_CHARS.toLocaleString()} characters.` }, 400)
   const clientMessageId = typeof input.clientMessageId === 'string' && CLIENT_MESSAGE_ID.test(input.clientMessageId) ? input.clientMessageId : undefined
-  if (input.model !== undefined && !isModelId(input.model) && !allLanes.some((lane) => lane.model === input.model)) {
+  if (input.model !== undefined && input.model !== 'buffy-lite' && !isModelId(input.model) && !allLanes.some((lane) => lane.model === input.model)) {
     return c.json({ error: 'model', message: 'Unknown model.' }, 400)
   }
   if (input.conversationId !== undefined && typeof input.conversationId !== 'string') return c.json({ error: 'conversation', message: 'Invalid conversation.' }, 400)
@@ -245,6 +245,22 @@ chat.post('/', async (c) => {
   }
   const needsVision = attachments.some((attachment) => attachment.kind === 'image') || Boolean(priorImage)
   const lanes = usingApi ? [] : needsVision && !wantsResearch && !wantsAnalysis ? allLanes.filter((lane) => lane.vision) : allLanes
+  // Buffy Free is the local bridge lane when one is configured. A deployed
+  // Worker has no loopback bridge, so the same row falls back to the strongest
+  // hosted free lanes and keeps Buffy's no-tools identity.
+  const requestedModel = typeof input.model === 'string' ? input.model : conversationRow?.model
+  const nativeBuffyFree =
+    !usingApi &&
+    requestedModel === 'buffy-lite' &&
+    allLanes.length > 0 &&
+    !allLanes.some((lane) => lane.model === 'buffy-lite')
+  // A free choice never silently spends a paid lane. Paid lanes are used only
+  // when that exact model was selected, so a free chat, Deep pass or research
+  // run stays free even when a paid key happens to be configured.
+  const selectedPaid = typeof input.model === 'string' && lanes.some((lane) => lane.model === input.model && lane.billing === 'paid')
+  const engineLanes = (selectedPaid ? lanes : lanes.filter((lane) => lane.billing !== 'paid')).filter(
+    (lane) => !nativeBuffyFree || !lane.model.startsWith('buffy'),
+  )
   if (!usingApi && needsVision && !wantsResearch && !wantsAnalysis && !lanes.length) {
     return c.json({ error: 'vision_unavailable', message: 'No free image-capable model is configured right now. Add an OpenRouter or Gemini key and try again.' }, 503)
   }
@@ -258,18 +274,18 @@ chat.post('/', async (c) => {
     ? await latestBuild(db, owner, String(conversationRow.id), t)
     : undefined
   const buildTarget = wantsBuild ? findSiteTarget(content) : undefined
-  const research = wantsResearch && !isSmallTalk(content) && isResearchIntent(content)
-  const analyze = wantsAnalysis && Boolean(analyzeDataset) && !regenerate && isAnalyzeIntent(content)
-  const build = wantsBuild
+  const research = !nativeBuffyFree && wantsResearch && !isSmallTalk(content) && isResearchIntent(content)
+  const analyze = !nativeBuffyFree && wantsAnalysis && Boolean(analyzeDataset) && !regenerate && isAnalyzeIntent(content)
+  const build = !nativeBuffyFree && wantsBuild
     && !isSmallTalk(content)
     && (isBuildRequest(content) || Boolean(buildTarget) || (Boolean(priorBuild) && BUILD_EDIT_REQUEST.test(content)))
-  const canvas = wantsCanvas && !isSmallTalk(content) && isCanvasRequest(content)
+  const canvas = !nativeBuffyFree && wantsCanvas && !isSmallTalk(content) && isCanvasRequest(content)
   // A plain Chat reply can hand the request to the mode that actually does the
   // work. The model gets one short nudge naming that mode; the UI offers the
   // switch beside the reply. Capability checks keep the nudge truthful.
   const hasAttachments = attachments.length > 0
   const hasDataAttachment = attachments.some((attachment) => /\.(?:csv|tsv|xlsx)$/i.test(attachment.name))
-  let suggestedMode = !usingApi && (input.strategy === 'fast' || input.strategy === undefined)
+  let suggestedMode = !nativeBuffyFree && !usingApi && (input.strategy === 'fast' || input.strategy === undefined)
     ? suggestToolMode(content, { hasAttachments, hasDataAttachment })
     : null
   if (suggestedMode === 'research' && !researchEnabled) suggestedMode = null
@@ -281,7 +297,7 @@ chat.post('/', async (c) => {
   const wantsSources = /\b(?:sources?|cite|citations?|references?|bibliography)\b/i.test(content)
   const wantsResearchPaper = /\bresearch\s+(?:paper|report|essay|project)\b/i.test(content)
   const writingDocument = research && isWritingRequest(content) && !needsCurrentFacts(content) && !wantsSources && !wantsResearchPaper
-  const agent = wantsAgent
+  const agent = wantsAgent && !nativeBuffyFree
   if (research && !writingDocument) {
     const reports = await researchToday(db, owner)
     if (reports >= RESEARCH_DAILY_LIMIT) {
@@ -338,16 +354,22 @@ chat.post('/', async (c) => {
   // 'fast' answers with a single model for people who want the quicker reply.
   // Proof is free-lane only: its checks depend on the lane roster, and the
   // keyed API path has no lanes to write independent tests.
-  const proof = !research && !analyze && !build && !canvas && !agent && input.strategy === 'proof' && !usingApi && lanes.length > 0
-  const blend = !proof && !research && !analyze && !build && !canvas && !agent && input.strategy !== 'fast' && lanes.length > 1
+  const proof = !nativeBuffyFree && !research && !analyze && !build && !canvas && !agent && input.strategy === 'proof' && !usingApi && engineLanes.length > 0
+  // The full local agent is a deliberate single run, not an ensemble member.
+  // Buffy Free is a free lane: Deep mode may use it as the first draft and add
+  // the independent review pass around it.
+  const selectedFullAgent = !usingApi && input.model === 'buffy'
+  const blend = !nativeBuffyFree && !selectedFullAgent && !proof && !research && !analyze && !build && !canvas && !agent && input.strategy !== 'fast' && engineLanes.length > 1
   const existingModel = conversationRow?.model
-  const model: string = usingApi
-    ? isModelId(input.model)
-      ? input.model
-      : isModelId(existingModel)
-        ? existingModel
-        : DEFAULT_MODEL
-    : (lanes.find((lane) => lane.model === input.model) ?? lanes[0])?.model ?? DEFAULT_MODEL
+  const model: string = nativeBuffyFree
+    ? 'buffy-lite'
+    : usingApi
+      ? isModelId(input.model)
+        ? input.model
+        : isModelId(existingModel)
+          ? existingModel
+          : DEFAULT_MODEL
+      : (engineLanes.find((lane) => lane.model === input.model) ?? engineLanes.find((lane) => !lane.selectedOnly))?.model ?? DEFAULT_MODEL
   const statements: D1PreparedStatement[] = []
   if (!conversationRow) {
     conversationRow = { id: id(), owner_sub: owner, title: titleFrom(content || attachments[0]?.name || ''), model, created_at: t, updated_at: t, project_id: projectId }
@@ -826,7 +848,7 @@ chat.post('/', async (c) => {
 
       const system = [
         `Today is ${new Date().toISOString().slice(0, 10)} (UTC). Treat this as the current date; use it when deciding whether a fact is current, and prefer recent sources over older ones.`,
-        wantsAdvisor ? ADVISOR_PROMPT : SYSTEM_PROMPT,
+        nativeBuffyFree ? BUFFY_FREE_PROMPT : wantsAdvisor ? ADVISOR_PROMPT : SYSTEM_PROMPT,
         suggestedMode ? toolModeNudge(SUGGESTED_MODE_LABEL[suggestedMode]) : '',
         customInstructions ? `Standing instructions from the person you are helping:\n${customInstructions}` : '',
         projectInstructions ? `Instructions for this project (they refine, but never override, a safety rule or the request itself):\n${projectInstructions}` : '',
@@ -853,9 +875,9 @@ chat.post('/', async (c) => {
         avoid = new Set(unhealthy.results.map((row) => row.provider_id))
         const kind = kindFor(userMessage.content)
         const bucket = depthBucket(userMessage.content)
-        const laneCount = activeLanes(lanes).length
+        const laneCount = activeLanes(engineLanes).length
         const [quality, depthQuality] = await Promise.all([
-          loadLaneQuality(db, owner, lanes, kind),
+          loadLaneQuality(db, owner, engineLanes, kind),
           loadDepthQuality(db, owner, kind, bucket),
         ])
         laneQuality = quality
@@ -897,7 +919,7 @@ chat.post('/', async (c) => {
           loadBuildReferences(db, owner),
         ])
         const outcome = await agentComplete({
-          lanes: orderLanes(lanes, model),
+          lanes: orderLanes(engineLanes, model),
           question: userMessage.content,
           owner,
           model,
@@ -941,7 +963,7 @@ chat.post('/', async (c) => {
         }
       } else if (analyze) {
         const outcome = await analysisComplete({
-          lanes: orderLanes(lanes, model),
+          lanes: orderLanes(engineLanes, model),
           question: userMessage.content || 'Analyze this CSV.',
           dataset: analyzeDataset!,
           signal: controller.signal,
@@ -986,7 +1008,7 @@ chat.post('/', async (c) => {
               onStatus: (status) => { void send({ type: 'status', text: status }) },
             })
           : await buildComplete({
-              lanes: orderLanes(lanes, model),
+              lanes: orderLanes(engineLanes, model),
               health: new Map(
                 (await healthRows(db, owner)).map((row) => [row.provider_id, { status: row.status, latencyMs: row.latency_ms }]),
               ),
@@ -1012,7 +1034,7 @@ chat.post('/', async (c) => {
         if (!(await send({ type: 'build', build: buildInfo }))) return await abandon()
       } else if (canvas) {
         const outcome = await canvasComplete({
-          lanes: orderLanes(lanes, model),
+          lanes: orderLanes(engineLanes, model),
           question: userMessage.content,
           signal: controller.signal,
           onStatus: (status) => { void send({ type: 'status', text: status }) },
@@ -1028,7 +1050,7 @@ chat.post('/', async (c) => {
         if (!(await send({ type: 'canvas', canvas: canvasInfo }))) return await abandon()
       } else if (research) {
         const outcome = await researchComplete({
-          lanes: orderLanes(lanes, model),
+          lanes: orderLanes(engineLanes, model),
           owner,
           model,
           question: userMessage.content,
@@ -1068,7 +1090,7 @@ chat.post('/', async (c) => {
           library = []
         }
         const outcome = await proofComplete({
-          lanes: orderLanes(lanes, model),
+          lanes: orderLanes(engineLanes, model),
           messages: prompt,
           question: userMessage.content,
           results,
@@ -1091,7 +1113,7 @@ chat.post('/', async (c) => {
         const pieces = usingApi
           ? complete(c.env, { model: model as ModelId, messages: prompt, signal: controller.signal })
           : blend
-            ? blendComplete(orderLanes(lanes, model), {
+            ? blendComplete(orderLanes(engineLanes, model), {
                 messages: prompt,
                 signal: controller.signal,
                 reasoning: wantReasoning,
@@ -1111,7 +1133,7 @@ chat.post('/', async (c) => {
                 onStatus: (text) => send({ type: 'status', text }),
                 onLaneResult: recordLane,
               })
-            : publicComplete(orderLanes(lanes, model), { messages: prompt, signal: controller.signal, reasoning: wantReasoning, reasoningEffort, onLaneResult: recordLane })
+            : publicComplete(orderLanes(engineLanes, model), { messages: prompt, signal: controller.signal, reasoning: wantReasoning, reasoningEffort, onLaneResult: recordLane })
         for await (const piece of pieces) {
           if (gone) return
           if (piece.type === 'reasoning') {

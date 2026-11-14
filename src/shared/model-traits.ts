@@ -7,6 +7,8 @@ import type { ModelInfo } from './types'
 type TraitModel = Pick<ModelInfo, 'id' | 'name' | 'family'>
 
 const FAMILY_TRAITS: Record<string, string> = {
+  buffy: 'Agent',
+  'buffy agent': 'Agent',
   nemotron: 'Reasoning',
   qwen: 'Math',
   north: 'Code review',
@@ -36,6 +38,8 @@ const FAMILY_TRAITS: Record<string, string> = {
 }
 
 const NAME_RULES: [RegExp, string][] = [
+  [/^buffy(?: (?:lite|free))?$/i, 'Agent'],
+  [/^buffy agent$/i, 'Agent'],
   [/ministral/i, 'Quick tasks'],
   [/mistral/i, 'Writing'],
   [/nemotron/i, 'Reasoning'],

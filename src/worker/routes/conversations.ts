@@ -285,7 +285,9 @@ conversations.patch('/:id', async (c) => {
   let model = existing.model as string
   if (input.model !== undefined) {
     const lanes = aiConfigured(c.env) ? [] : publicLanes(c.env)
-    const allowed = isModelId(input.model) || (typeof input.model === 'string' && lanes.some((lane) => lane.model === input.model))
+    const allowed =
+      isModelId(input.model) ||
+      (typeof input.model === 'string' && (input.model === 'buffy-lite' || lanes.some((lane) => lane.model === input.model)))
     if (!allowed) return c.json({ error: 'Unknown model.' }, 400)
     model = input.model as string
   }

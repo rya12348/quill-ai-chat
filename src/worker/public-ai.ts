@@ -137,6 +137,10 @@ export type PublicLane = {
   vision?: boolean
   /** Sent as a bearer token; LLM7 documents the literal "unused" for anonymous use. */
   key?: string
+  /** A local-only lane that must not quietly join another model's fallback chain. */
+  selectedOnly?: boolean
+  /** The bridge checks its own readiness; probing it here would duplicate a model call. */
+  skipHealth?: boolean
 }
 
 type LaneInput = {
@@ -229,6 +233,8 @@ function requestBody(lane: PublicLane, input: LaneInput, stream: boolean): Recor
 /** A readable name for a model id, so the picker does not show a slug. */
 function labelFor(id: string): string {
   const lower = id.toLowerCase()
+  if (lower === 'buffy') return 'Buffy Agent'
+  if (lower === 'buffy-lite') return 'Buffy'
   if (lower.includes('deepseek-r1-distill-qwen-32b')) return 'DeepSeek R1 Distill 32B'
   if (lower === 'deepseek-flash' || lower === 'deepseek-flash-latest' || lower.includes('deepseek-v4.1')) return 'DeepSeek V4.1 Flash'
   if (lower.includes('deepseek-v3.2')) return 'DeepSeek V3.2'
@@ -327,6 +333,8 @@ function labelFor(id: string): string {
  * list; the site chooses the best lane of that family instead.
  */
 const FAMILY_RULES: [RegExp, string][] = [
+  [/^buffy-lite$/i, 'Buffy'],
+  [/^buffy$|\bbuffy\b/i, 'Buffy Agent'],
   // DeepSeek first: its R1 distills are built on Qwen, but they are still
   // DeepSeek models and must not be absorbed into the Qwen family.
   [/deepseek/i, 'DeepSeek'],
@@ -429,7 +437,13 @@ export function laneStrength(model: string, url?: string): number {
   }
   const optionalCloudflare = host === 'api.cloudflare.com'
   let base = 60
-  if (/gpt-6|claude-opus|claude-sonnet-5|gemini-4|deepseek-v4-pro|kimi-k3|glm-5\.3(?!-flash)|qwen3\.8-max|qwen3\.8-2\.4t|step-5/.test(id)) base = 92
+  if (id === 'buffy') base = 95
+  else if (id === 'buffy-lite') base = 82
+  // The 550B Ultra lane is the strongest free model when it answers. Its
+  // health/quality record demotes it automatically after a 429, so preferring
+  // it here does not put a rate-limited lane ahead of a working smaller one.
+  else if (/nemotron-3-ultra/.test(id) && /openrouter\.ai|integrate\.api\.nvidia\.com/.test(host)) base = 93
+  else if (/gpt-6|claude-opus|claude-sonnet-5|gemini-4|deepseek-v4-pro|kimi-k3|glm-5\.3(?!-flash)|qwen3\.8-max|qwen3\.8-2\.4t|step-5/.test(id)) base = 92
   // BlockRun's keyless Nemotron 3 Super 120B is a known-working lane and is
   // deliberately ranked above the rate-limited free router variants. A 120B
   // model that answers beats a 550B model that returns 429.
@@ -492,6 +506,46 @@ function withOverride(model: string | undefined, defaults: string[]): string[] {
   return [...new Set([...(preferred ? [preferred] : []), ...defaults])]
 }
 
+/**
+ * The local Buffy bridge as an ordinary picker model. It is deliberately
+ * selectedOnly: choosing another model must not silently send that chat to the
+ * bridge, and a deployed Worker has no BUFFY_BRIDGE_URL unless its owner adds one.
+ */
+export function buffyLanes(env: Env): PublicLane[] {
+  // This bridge runs on the developer's machine. A deployed Worker cannot
+  // reach it (and production may inherit the URL from a local env file), so
+  // expose these rows only in a Vite development build with the local flag.
+  const dev = (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true
+  if (!dev || env.BUFFY_BRIDGE_LOCAL !== '1') return []
+  const raw = env.BUFFY_BRIDGE_URL?.trim()
+  if (!raw) return []
+  const base = raw.replace(/\/+$/, '')
+  const endpoint = /\/(?:v1\/)?chat\/completions$/.test(base) ? base : `${base}/v1/chat/completions`
+  const token = env.BUFFY_BRIDGE_TOKEN?.trim()
+  const shared = { ...(token ? { key: token } : {}), selectedOnly: true, skipHealth: true }
+  // Selecting Buffy Agent gets the full Codebuff agent. Its bridge falls back
+  // to the free lane when the account has no credits, so the row stays usable
+  // without a second, silent paid path. Buffy itself is the zero-credit row.
+  return [
+    {
+      url: endpoint,
+      model: 'buffy',
+      label: 'Buffy Agent',
+      description: 'Your local Codebuff agent — frontier when credits are available, free fallback otherwise.',
+      billing: 'paid',
+      ...shared,
+    },
+    {
+      url: `${endpoint}${endpoint.includes('?') ? '&' : '?'}free=1`,
+      model: 'buffy-lite',
+      label: 'Buffy',
+      description: 'Zero-credit lane on the strongest free models.',
+      billing: 'free',
+      ...shared,
+    },
+  ]
+}
+
 /** Ordered free lanes: keyed strong models first, then the anonymous fallbacks. */
 export function publicLanes(env: Env): PublicLane[] {
   const lanes: PublicLane[] = []
@@ -549,6 +603,20 @@ export function publicLanes(env: Env): PublicLane[] {
         label: labelFor(model),
         description: free ? 'Included via your OpenRouter key' : 'Paid via your OpenRouter key',
         billing: free ? 'free' : 'paid',
+        key: env.OPENROUTER_API_KEY,
+      })
+    }
+    // A deployment's OPENROUTER_MODELS secret often lists only the models the
+    // owner picked. Keep the strongest zero-cost model available even when the
+    // secret predates it; the free suffix cannot spend the balance.
+    const freeUltra = 'nvidia/nemotron-3-ultra-550b-a55b:free'
+    if (!models.includes(freeUltra)) {
+      lanes.push({
+        url: OPENROUTER_URL,
+        model: freeUltra,
+        label: 'Nemotron 3 Ultra 550B',
+        description: 'Free 550B lane via your OpenRouter key',
+        billing: 'free',
         key: env.OPENROUTER_API_KEY,
       })
     }
@@ -744,6 +812,7 @@ export function publicLanes(env: Env): PublicLane[] {
   for (const lane of anonymousLanes()) {
     if (!lanes.some((known) => known.model === lane.model)) lanes.push(lane)
   }
+  lanes.push(...buffyLanes(env))
   // Capability is derived from the final lane, including env overrides, so an
   // image turn cannot accidentally fall through to a text-only model.
   const withVision = lanes.map((lane) => ({ ...lane, vision: laneSupportsVision(lane) }))
@@ -787,8 +856,9 @@ function anonymousLanes(): PublicLane[] {
 
 /** Puts the model someone picked first, keeping the rest as fallbacks. */
 export function orderLanes(lanes: PublicLane[], model?: string): PublicLane[] {
-  const first = lanes.find((lane) => lane.model === model)
-  return first ? [first, ...lanes.filter((lane) => lane !== first)] : lanes
+  const eligible = lanes.filter((lane) => !lane.selectedOnly || lane.model === model)
+  const first = eligible.find((lane) => lane.model === model)
+  return first ? [first, ...eligible.filter((lane) => lane !== first)] : eligible
 }
 
 /** One failure, cooled down and turned into a sentence the app can show. */

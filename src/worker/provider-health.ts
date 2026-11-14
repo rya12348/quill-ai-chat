@@ -65,6 +65,9 @@ export function providerDescriptors(env: Env): ProviderDescriptor[] {
   const seen = new Set<string>()
   const items: ProviderDescriptor[] = []
   for (const lane of publicLanes(env)) {
+    // The local Buffy bridge is a picker model, not a hosted provider: probing
+    // it would spend a model call just to duplicate its own health endpoint.
+    if (lane.skipHealth) continue
     const id = laneKey(lane)
     if (seen.has(id)) continue
     seen.add(id)

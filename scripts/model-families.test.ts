@@ -53,7 +53,9 @@ test('one row per family, represented by its strongest lane', () => {
   ]
   const picks = pickModelFamilies(lanes)
   assert.deepEqual(picks.map((pick) => pick.family), ['Nemotron', 'DeepSeek', 'GPT'])
-  assert.equal(picks[0]?.lane.model, 'nvidia/nemotron-3-super-120b')
+  // The 550B Ultra lane is deliberately the Nemotron representative now; the
+  // 120B Super is the fallback when Ultra is rate-limited.
+  assert.equal(picks[0]?.lane.model, 'nvidia/nemotron-3-ultra-550b-a55b')
   assert.equal(picks[1]?.lane.model, 'deepseek-ai/deepseek-v4.1-flash')
 })
 

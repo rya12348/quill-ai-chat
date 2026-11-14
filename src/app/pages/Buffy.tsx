@@ -8,6 +8,7 @@ type Message = { role: 'user' | 'assistant'; content: string }
 type BridgeStatus = {
   ready: boolean
   configured: boolean
+  mode?: 'bridge' | 'free'
   reason?: string
   model?: string
   mock?: boolean
@@ -18,6 +19,11 @@ const SUGGESTIONS = [
   'What does this project do, and where should I start reading?',
   'Review the browser agent for bugs or fragile assumptions.',
   'Explain the tradeoffs in the current model routing.',
+]
+const FREE_SUGGESTIONS = [
+  'Explain how a transformer works in plain English.',
+  'Help me debug a React component that re-renders too often.',
+  'Write a short launch plan for a small web app.',
 ]
 
 function readSaved(): Message[] {
@@ -55,6 +61,8 @@ export function Buffy() {
   const [activity, setActivity] = useState('')
   const [status, setStatus] = useState<BridgeStatus | null>(null)
   const [statusLoading, setStatusLoading] = useState(true)
+  const freeMode = status?.mode === 'free'
+  const suggestions = freeMode ? FREE_SUGGESTIONS : SUGGESTIONS
   const abortRef = useRef<AbortController | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -227,12 +235,14 @@ export function Buffy() {
         </span>
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-[17px] font-medium leading-tight">Buffy</h1>
-          <p className="truncate text-[12.5px] text-faint">The Codebuff coding agent, locally bridged</p>
+          <p className="truncate text-[12.5px] text-faint">
+            {freeMode ? 'Free hosted models · no Codebuff credits needed' : 'The Codebuff coding agent, locally bridged'}
+          </p>
         </div>
         {status?.ready && (
           <span className="hidden items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-[11.5px] text-muted sm:flex">
-            <span className="size-1.5 rounded-full bg-emerald-500" />
-            {status.mock ? 'Mock bridge' : 'Bridge connected'}
+            <span className={`size-1.5 rounded-full ${freeMode ? 'bg-sky-500' : 'bg-emerald-500'}`} />
+            {freeMode ? 'Free lane' : status.mock ? 'Mock bridge' : 'Bridge connected'}
           </span>
         )}
         <button
@@ -258,10 +268,10 @@ export function Buffy() {
               </div>
 
               {statusLoading ? (
-                <p className="mt-8 text-[13px] text-faint">Checking the local bridge…</p>
+                <p className="mt-8 text-[13px] text-faint">Checking Buffy…</p>
               ) : status?.ready ? (
                 <div className="mt-8 grid gap-2">
-                  {SUGGESTIONS.map((suggestion) => (
+                  {suggestions.map((suggestion) => (
                     <button
                       key={suggestion}
                       type="button"
@@ -392,7 +402,7 @@ export function Buffy() {
           )}
         </form>
         <p className="mx-auto mt-1.5 w-full max-w-[760px] text-[10.5px] text-faint">
-          Local bridge · Codebuff when available · free fallback otherwise
+          {freeMode ? 'Buffy · hosted free models · no tools or file access' : 'Local bridge · Codebuff when available · free fallback otherwise'}
         </p>
       </div>
 

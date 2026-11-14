@@ -246,7 +246,17 @@ export function Chat() {
       })
     : availableModels
   const presetModels = healthyModels.length ? healthyModels : usableModels
-  const fallbackModel = usableModels[Math.floor((usableModels.length - 1) / 2)] ?? usableModels[0]
+  // A fresh local install starts on the free Buffy lane when the bridge is
+  // advertised. The full agent stays one click away for anyone with credits.
+  // In a hosted deployment there is no bridge, so never fall through to a
+  // paid row: the no-credit lanes must be the default.
+  const freeModels = usableModels.filter((model) => !('billing' in model) || model.billing !== 'paid')
+  const fallbackModel =
+    usableModels.find((model) => model.id === 'buffy-lite') ??
+    usableModels.find((model) => model.id === 'buffy') ??
+    freeModels[0] ??
+    usableModels[Math.floor((usableModels.length - 1) / 2)] ??
+    usableModels[0]
   const selectedModel = usableModels.some((m) => m.id === newModel) ? newModel : fallbackModel?.id ?? DEFAULT_MODEL
   const mine = turn !== null && (turn.conversationId === (id ?? null) || (id === undefined && turn.conversationId === owned.current))
   const busy = mine && turn.status !== 'error'

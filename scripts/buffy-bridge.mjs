@@ -31,19 +31,38 @@ const TOKEN = (process.env.BUFFY_BRIDGE_TOKEN || '').trim()
 const MODEL = (process.env.BUFFY_MODEL || 'anthropic/claude-opus-4.7').trim()
 const COST_MODE = (process.env.BUFFY_COST_MODE || 'normal').trim()
 const NVIDIA_KEY = (process.env.NVIDIA_API_KEY || '').trim()
+const OPENROUTER_KEY = (process.env.OPENROUTER_API_KEY || '').trim()
 const FALLBACK_MODEL = (process.env.BUFFY_FALLBACK_MODEL || 'stepfun-ai/step-5-preview').trim()
 const MOCK = process.env.BUFFY_MOCK === '1'
 const MAX_BODY_BYTES = 512 * 1024
 const MAX_CONTEXT_CHARS = 48_000
 const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions'
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const OVH_URL = 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions'
 const KILO_URL = 'https://api.kilo.ai/api/gateway/chat/completions'
 const BLOCKRUN_URL = 'https://blockrun.ai/api/v1/chat/completions'
+const ULTRA_MODEL = 'nvidia/nemotron-3-ultra-550b-a55b'
+// After a 402, do not make every chat wait for the same failed paid call.
+let codebuffBlockedUntil = 0
 
 const BUFFY_INSTRUCTIONS = `You are Buffy, the Codebuff coding agent, talking with the person inside Ink.
 
 Be direct, technically precise and useful. Answer the question that was asked. Do not pad the reply with introductions, restatements, or a summary of what you are about to do. If you are unsure, say what you would need to check.
 
 You have read-only access to the Ink project (read_files, code_search, glob, list_directory), web search, and think_deeply. Use those tools when the answer depends on the actual code or on current information. Never read .env, .dev.vars, credential files, or anything under .freebuff; those are private. You cannot edit files or run terminal commands in this chat. When a change is needed, explain the exact change and where it goes.
+
+Format for a chat window: short paragraphs, markdown lists only when they help, and code blocks with a language tag. Never claim you changed, ran or tested something when you did not.`
+
+// The free lane has no tools. Giving it the agent instructions above made it
+// imitate tool calls; these instructions keep the same persona without
+// promising capabilities it cannot use.
+const BUFFY_FREE_INSTRUCTIONS = `You are Buffy, the Codebuff coding agent, talking with the person inside Ink.
+
+Be direct, technically precise and useful. Answer the question that was asked. Do not pad the reply with introductions, restatements, or a summary of what you are about to do. If you are unsure, say what you would need to check.
+
+You are running as Buffy Free: you have no tools. You cannot read files, search the web, run commands, or change anything, and you must not claim otherwise. Never output a tool name, a JSON tool call, or a fake tool result. You have only the fixed, secret-free project snapshot supplied below; use it when it helps, and say plainly when a question needs a file or fact that is not in it.
+
+Your name is Buffy. The surrounding app is called Ink; never introduce yourself as Ink.
 
 Format for a chat window: short paragraphs, markdown lists only when they help, and code blocks with a language tag. Never claim you changed, ran or tested something when you did not.`
 
@@ -199,9 +218,22 @@ async function mockReply(res) {
 /** Free OpenAI-compatible lanes used only when the Codebuff run cannot start. */
 function fallbackLanes() {
   return [
-    ...(NVIDIA_KEY
-      ? [{ url: NVIDIA_URL, model: FALLBACK_MODEL, headers: { authorization: `Bearer ${NVIDIA_KEY}` } }]
+    // OpenRouter's free Ultra variant is the strongest zero-cost lane. It is
+    // still free even when the same OpenRouter key also has paid models.
+    ...(OPENROUTER_KEY
+      ? [{ url: OPENROUTER_URL, model: `${ULTRA_MODEL}:free`, headers: { authorization: `Bearer ${OPENROUTER_KEY}` } }]
       : []),
+    // NVIDIA NIM's free allowance includes the same 550B model.
+    ...(NVIDIA_KEY
+      ? [
+          { url: NVIDIA_URL, model: ULTRA_MODEL, headers: { authorization: `Bearer ${NVIDIA_KEY}` } },
+          { url: NVIDIA_URL, model: FALLBACK_MODEL, headers: { authorization: `Bearer ${NVIDIA_KEY}` } },
+        ]
+      : []),
+    // Keyless fallbacks, strongest first. OVH allows only a few requests a
+    // minute, so it sits behind the keyed lanes and ahead of the tiny models.
+    { url: OVH_URL, model: 'Qwen3.5-397B-A17B', headers: {} },
+    { url: KILO_URL, model: `${ULTRA_MODEL}:free`, headers: {} },
     { url: KILO_URL, model: 'kilo-auto/free', headers: {} },
     { url: BLOCKRUN_URL, model: 'nvidia/nemotron-3.5-lightning', headers: {} },
   ]
@@ -233,7 +265,7 @@ async function projectSnapshot() {
 }
 
 async function fallbackReply(res, prompt, signal, reason) {
-  writeStatus(res, 'Buffy Lite is answering…')
+  writeStatus(res, 'Buffy Free is answering…')
   const snapshot = await projectSnapshot()
   let lastError = ''
   for (const lane of fallbackLanes()) {
@@ -244,11 +276,11 @@ async function fallbackReply(res, prompt, signal, reason) {
         body: JSON.stringify({
           model: lane.model,
           stream: true,
-          max_tokens: 2_048,
+          max_tokens: 4_096,
           messages: [
             {
               role: 'system',
-              content: `${BUFFY_INSTRUCTIONS}\n\nBuffy Lite: Codebuff is unavailable (${String(reason).slice(0, 160)}). Answer with the same persona using this model. You do not have project tools in Lite mode, and you must not claim to have read access or to have inspected files; you have only the fixed snapshot below.${snapshot ? `\n\nFixed read-only project snapshot:\n${snapshot}` : ''}`,
+              content: `${BUFFY_FREE_INSTRUCTIONS}\n\nCodebuff is unavailable (${String(reason).slice(0, 160)}).${snapshot ? `\n\nFixed read-only project snapshot:\n${snapshot}` : ''}`,
             },
             { role: 'user', content: prompt },
           ],
@@ -283,7 +315,7 @@ async function fallbackReply(res, prompt, signal, reason) {
               const parsed = JSON.parse(raw)
               const piece = parsed?.choices?.[0]?.delta?.content
               if (typeof piece === 'string' && piece) {
-                if (!gotText) writeDelta(res, '**Buffy Lite** (free fallback)\n\n')
+                if (!gotText) writeDelta(res, '**Buffy Free** (no credits)\n\n')
                 gotText = true
                 writeDelta(res, piece)
               }
@@ -295,6 +327,7 @@ async function fallbackReply(res, prompt, signal, reason) {
         }
       }
       if (gotText) {
+        console.log('buffy.fallback.lane', { model: lane.model, url: lane.url })
         finish(res)
         return
       }
@@ -315,6 +348,10 @@ async function runBuffy(res, prompt, signal) {
   writeStatus(res, 'Buffy is thinking…')
   if (!client) {
     await fallbackReply(res, prompt, signal, 'CODEBUFF_API_KEY is missing')
+    return
+  }
+  if (Date.now() < codebuffBlockedUntil) {
+    await fallbackReply(res, prompt, signal, 'Codebuff is out of credits')
     return
   }
 
@@ -364,6 +401,7 @@ async function runBuffy(res, prompt, signal) {
       }
     }
     if (!streamed) throw new Error('Buffy finished without a text reply.')
+    codebuffBlockedUntil = 0
     finish(res)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The Codebuff run failed.'
@@ -373,6 +411,8 @@ async function runBuffy(res, prompt, signal) {
       return
     }
     // A Codebuff account with no remaining credits returns before any text.
+    // Remember it briefly so the next message goes straight to the free lane.
+    if (/credit|payment required|402/i.test(message)) codebuffBlockedUntil = Date.now() + 10 * 60_000
     // Keep the chat usable with a clearly labelled free lane.
     await fallbackReply(res, prompt, signal, message)
   }
@@ -439,6 +479,7 @@ const server = createServer(async (req, res) => {
   const controller = new AbortController()
   res.on('close', () => controller.abort())
   const prompt = buildPrompt(messages)
+  const freeOnly = url.searchParams.get('free') === '1'
 
   if (MOCK) {
     await mockReply(res)
@@ -447,7 +488,8 @@ const server = createServer(async (req, res) => {
 
   const timeout = setTimeout(() => controller.abort(), 180_000)
   try {
-    await runBuffy(res, prompt, controller.signal)
+    if (freeOnly) await fallbackReply(res, prompt, controller.signal, 'the free model lane is selected')
+    else await runBuffy(res, prompt, controller.signal)
   } finally {
     clearTimeout(timeout)
   }

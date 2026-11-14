@@ -5,6 +5,8 @@ import type { ModelInfo } from './types'
 // upstream ids, so every render path resolves through this helper instead of
 // printing whatever string happened to be saved.
 const FALLBACKS: [RegExp, string][] = [
+  [/^buffy-lite$/i, 'Buffy'],
+  [/^buffy$/i, 'Buffy Agent'],
   [/claude|sonnet|opus|haiku/i, 'Sable'],
   [/kimi|moonshot/i, 'Sable'],
   [/stepfun|step[- ]?\d/i, 'Quill'],
