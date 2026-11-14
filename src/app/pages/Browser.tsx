@@ -470,9 +470,9 @@ export function Browser() {
     plan: [],
     notes: [],
   })
-  const clearAgentMemory = () => {
+  const clearAgentMemory = (options?: { keepScript?: boolean }) => {
     agentMemory.current = { task: '', plan: [] as string[], notes: [] as string[] }
-    setScript('')
+    if (!options?.keepScript) setScript('')
     try {
       localStorage.removeItem(BROWSER_MEMORY_KEY)
     } catch {
@@ -1297,6 +1297,8 @@ export function Browser() {
     let agentPlan: string[] = [...agentMemory.current.plan]
     let agentNotes: string[] = [...agentMemory.current.notes]
     let agentScript = resumingTask ? script : ''
+    // A new task must not show or reuse the previous task's program.
+    if (!resumingTask) setScript('')
     saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
     const blockedActions = new Set<string>()
     let blockedRepeats = 0
@@ -3115,7 +3117,9 @@ export function Browser() {
           const report = cleanDoneMessage(planned.action.message)
           append({ role: 'stet', text: report, ...planMeta })
           setAnswer(report)
-          clearAgentMemory()
+          // Keep the finished program visible as evidence of what ran, but do
+          // not restore it as unfinished work on the next visit.
+          clearAgentMemory({ keepScript: true })
           reachedEnd = true
           setPhase('')
           break
