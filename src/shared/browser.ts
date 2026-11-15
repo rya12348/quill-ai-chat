@@ -16,6 +16,26 @@ export function isPageEditingTask(task: string): boolean {
 /** The exact sentence that tells the caller the page cannot answer yet. */
 export const PAGE_ANSWER_UNAVAILABLE = 'That answer is not visible on this page.'
 
+/** Read a reflection on a failed attempt. Returns null when it is unusable, so
+ * a broken reflection never stops the run. */
+export function parseReflection(raw: string): { diagnosis: string; options: string[] } | null {
+  const match = raw.match(/\{[\s\S]*\}/)
+  if (!match) return null
+  try {
+    const parsed = JSON.parse(match[0]) as { diagnosis?: unknown; options?: unknown }
+    const options = Array.isArray(parsed.options)
+      ? parsed.options.filter((option): option is string => typeof option === 'string' && Boolean(option.trim())).slice(0, 3)
+      : []
+    if (!options.length) return null
+    return {
+      diagnosis: typeof parsed.diagnosis === 'string' ? parsed.diagnosis.slice(0, 300) : '',
+      options: options.map((option) => option.slice(0, 300)),
+    }
+  } catch {
+    return null
+  }
+}
+
 /** Read a reviewer's completion verdict. Returns null when the reply is not a
  * usable verdict, so a broken review never blocks a real result. */
 export function parseCompletionVerdict(raw: string): { complete: boolean; missing: string } | null {

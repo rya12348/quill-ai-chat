@@ -1306,6 +1306,7 @@ export function Browser() {
     let clarifyAsks = 0
     let completionAudits = 0
     let stuckRecoveries = 0
+    let reflections = 0
     // Blocked actions belong to the page they failed on. After a navigation, or
     // after a popup closes and the target returns to the main tab, those ids
     // are stale. Keeping them made the agent refuse to click a button it had
@@ -2970,6 +2971,44 @@ export function Browser() {
       setAddress(current.url)
       syncPageBlocks(current)
       setPhase(recent ? 'Using the current page…' : 'Page loaded.')
+
+      // When something fails, think about why before trying again. The reviewer
+      // proposes genuinely different routes, and those become working notes for
+      // the next plan instead of a slightly changed repeat of the same idea.
+      const reflectOn = async (attempt: string, result: string): Promise<boolean> => {
+        if (reflections >= 2) return false
+        reflections += 1
+        setPhase('Working out why that failed…')
+        try {
+          const verdict = await api<{ diagnosis?: string; options?: string[] }>('/browser/reflect', {
+            method: 'POST',
+            signal: controller.signal,
+            json: {
+              task: instruction,
+              attempt: attempt.slice(0, 300),
+              result: result.slice(0, 1_200),
+              snapshot: current.snapshot,
+              notes: agentNotes,
+            },
+          })
+          const options = (verdict.options ?? []).filter(Boolean).slice(0, 3)
+          if (!verdict.diagnosis && !options.length) return false
+          append({
+            role: 'stet',
+            text: `That didn't produce the result. ${verdict.diagnosis || 'Trying a different approach.'}`,
+            ...(options.length ? { thoughts: options } : {}),
+          })
+          agentNotes = [
+            ...agentNotes,
+            `Reflection: ${verdict.diagnosis || 'the last attempt failed'}. Different routes to try: ${options.join(' | ') || 'use a different tool or target'}.`,
+          ].slice(-8)
+          agentMemory.current.notes = agentNotes
+          saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
+          return true
+        } catch {
+          return false
+        }
+      }
       for (let step = 0; step < MAX_ACTIONS; step += 1) {
         if (controller.signal.aborted) break
         const roundStep = step % MAX_STEPS
@@ -3314,6 +3353,9 @@ export function Browser() {
             if (isSessionLoss(refreshCause)) throw refreshCause
             // Keep the last known state; the next plan can still be useful.
           }
+          if ((planned.action.type === 'evaluate' || planned.action.type === 'style' || failures >= 2) && !controller.signal.aborted) {
+            await reflectOn(`${label}: ${JSON.stringify(planned.action).slice(0, 220)}`, failure)
+          }
           setPhase('Trying another route…')
           continue
         }
@@ -3402,6 +3444,15 @@ export function Browser() {
           const stalls = (stalledActions.get(actionKey) ?? 0) + 1
           stalledActions.set(actionKey, stalls)
           if (stalls >= 2) {
+            // Two identical no-ops is the point to think, not the point to
+            // stop. Ask for a diagnosis and different routes, then continue.
+            blockedActions.add(actionKey)
+            const recovered = await reflectOn(label, 'The page did not change after this action twice.')
+            if (recovered && !controller.signal.aborted) {
+              stalledActions.delete(actionKey)
+              setPhase('Trying a different approach…')
+              continue
+            }
             const message = `The page did not change after “${label}” twice, so I stopped repeating it. The page is still open; tell me a different next step or try another site.`
             append({ role: 'stet', text: message })
             setAnswer(message)

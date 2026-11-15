@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directPageSearch, directSearchAnswer, directSiteSearch, isDocumentWritingTask, isPageEditingTask, isSameBrowserSite, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCompletionVerdict } from '../src/shared/browser'
+import { answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directPageSearch, directSearchAnswer, directSiteSearch, isDocumentWritingTask, isPageEditingTask, isSameBrowserSite, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCompletionVerdict, parseReflection } from '../src/shared/browser'
 import type { BrowserElement } from '../src/shared/types'
 
 test('a page answer never exposes a model reasoning trace', () => {
@@ -414,6 +414,15 @@ test('page edits are recognized and reading or navigating is not', () => {
   assert.equal(isPageEditingTask('what is the page title?'), false)
   assert.equal(isPageEditingTask('click the login button'), false)
   assert.equal(isPageEditingTask('delete my account'), false)
+})
+
+test('a reflection is read only when it offers a different route', () => {
+  assert.deepEqual(
+    parseReflection('{"diagnosis":"the selector matched a hidden copy","options":["target the visible card","set the style by class"]}'),
+    { diagnosis: 'the selector matched a hidden copy', options: ['target the visible card', 'set the style by class'] },
+  )
+  assert.equal(parseReflection('{"diagnosis":"it failed"}'), null)
+  assert.equal(parseReflection('try again'), null)
 })
 
 test('a completion verdict is read only when it is usable', () => {

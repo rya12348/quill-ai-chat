@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 
 import { DAILY_MESSAGE_LIMIT } from '../../shared/config'
-import { cleanPageAnswer, directBrowserTask, directFormFill, isPageEditingTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCompletionVerdict } from '../../shared/browser'
+import { cleanPageAnswer, directBrowserTask, directFormFill, isPageEditingTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCompletionVerdict, parseReflection } from '../../shared/browser'
 import type { BrowserAction, BrowserActResponse, BrowserElement, BrowserInspectResult, BrowserSnapshot } from '../../shared/types'
 import { AiError, aiConfigured, completeText, isModelId, type ChatMessage } from '../ai'
 import { MODELS, type ModelId } from '../../shared/config'
@@ -952,7 +952,8 @@ Rules:
 34. Keep your code on the scratchpad. The exact program you ran is shown back to you on the next step. If it throws, do not start over and do not fall back to clicking: read the error, change the code, and run the corrected version. Write scripts so running them twice is safe.
 35. done.message is a short report to the person, not a transcript. Say what you completed and the key result in at most two sentences. Never paste page text, a full description of the page, or your working notes.
 36. Never refuse, lecture, or announce a limitation. The person asked you to use their browser, so ordinary browsing work is yours to do. If a site truly blocks progress (sign-in, payment, CAPTCHA, a missing permission), name that exact blocker, keep the page open and try another route. Never say you cannot do the task and never finish with a refusal. Confirm before genuinely destructive actions; do not refuse ordinary ones.
-37. Your completion is audited against the page. Do not finish until the page itself shows the requested result; your summary is not evidence. If a review note says something is still missing, fix that exact thing and verify it before finishing.`
+37. Your completion is audited against the page. Do not finish until the page itself shows the requested result; your summary is not evidence. If a review note says something is still missing, fix that exact thing and verify it before finishing.
+38. When an attempt fails or the evidence does not match the request, work out why before acting again. Read the reflection in your notes, name the likely cause to yourself, and choose a genuinely different approach. Never repeat the same idea with only cosmetic changes, and never treat a failed attempt as a reason to end the run.`
 
 // The command prompt for ordinary browser steps. It deliberately omits the
 // observe/think/plan loop: a short instruction needs one action, not an essay.
@@ -2441,6 +2442,98 @@ Reply with ONLY one JSON object: {"complete":true} or {"complete":false,"missing
   }
   return { complete: true, missing: '', lane: 'none' }
 }
+
+/**
+ * Diagnose a failed attempt and propose genuinely different routes. This is the
+ * "why didn't that work?" step: the next plan gets specific alternatives
+ * instead of retrying the same idea with small changes.
+ */
+async function reflectOnAttempt(
+  env: Env,
+  task: string,
+  attempt: string,
+  result: string,
+  state: BrowserSnapshot,
+  notes: string[],
+): Promise<{ diagnosis: string; options: string[]; lane: string }> {
+  const lanes = candidateLanes(publicLanes(env))
+    .filter((lane) => !laneIsCooling(lane))
+    .sort((a, b) => browserDeepScore(b) - browserDeepScore(a))
+    .slice(0, 2)
+  if (!lanes.length) return { diagnosis: '', options: [], lane: 'none' }
+  const messages: ChatMessage[] = [
+    {
+      role: 'system',
+      content: `You are the strategy reviewer for a browser agent. An attempt did not produce the requested outcome.
+Diagnose the most likely reason from the evidence, then propose 2 or 3 genuinely different ways to get the result.
+- Options must be concrete and specific to this page: name the element, selector, keyboard route, page-code approach, frame URL, site search, or navigation.
+- Do not restate the failed attempt or suggest a cosmetic variation of it.
+- Prefer code (evaluate) for page changes; prefer a different route for navigation or blocked controls.
+Reply with ONLY one JSON object: {"diagnosis":"one sentence","options":["route one","route two"]}.`,
+    },
+    {
+      role: 'user',
+      content: [
+        `TASK: ${task}`,
+        '',
+        `FAILED ATTEMPT: ${attempt}`,
+        `RESULT: ${result.slice(0, 1_500) || '(no result)'}`,
+        '',
+        'WORKING NOTES:',
+        notes.length ? notes.map((note) => `- ${note}`).join('\n') : '(none)',
+        '',
+        `URL: ${state.url}`,
+        `TITLE: ${state.title}`,
+        '',
+        'VISIBLE PAGE TEXT:',
+        state.text.slice(0, 5_000) || '(empty)',
+        '',
+        'INTERACTIVE ELEMENTS:',
+        state.elements
+          .slice(0, 50)
+          .map((element) => `<${element.tag}> ${element.label || '(no label)'}${element.href ? ` href=${element.href.slice(0, 100)}` : ''}`)
+          .join('\n') || '(none)',
+      ].join('\n'),
+    },
+  ]
+  for (const lane of lanes) {
+    try {
+      const raw = await laneTextStreaming(lane, {
+        messages,
+        temperature: 0.2,
+        maxTokens: 300,
+        signal: AbortSignal.timeout(10_000),
+        idleMs: 5_000,
+        timeoutMs: 10_000,
+        allowCooling: true,
+      })
+      const reflection = parseReflection(raw)
+      if (reflection) return { ...reflection, lane: lane.label }
+    } catch {
+      // A reviewer that cannot answer must not stop the run.
+    }
+  }
+  return { diagnosis: '', options: [], lane: 'none' }
+}
+
+browser.post('/reflect', async (c) => {
+  const limit = await rateLimit(c.get('db'), 'browser:reflect', c.req.raw, 80, RATE_WINDOWS.chat)
+  if (!limit.allowed) return tooManyRequests(c, limit)
+  const raw = (await c.req.json<{ task?: unknown; attempt?: unknown; result?: unknown; snapshot?: unknown; notes?: unknown }>().catch(() => null)) as
+    | { task?: unknown; attempt?: unknown; result?: unknown; snapshot?: unknown; notes?: unknown }
+    | null
+  const task = text(raw?.task, 2_000)
+  const attempt = text(raw?.attempt, 400)
+  const result = text(raw?.result, 2_000)
+  const state = snapshot(raw?.snapshot)
+  if (!task || !attempt || !state) return privateJson(c, { error: 'invalid_request', message: 'The task, attempt and page are required.' }, 400)
+  const notes = stringList(raw?.notes, 8, 400)
+  try {
+    return privateJson(c, await reflectOnAttempt(c.env, task, attempt, result, state, notes))
+  } catch {
+    return privateJson(c, { diagnosis: '', options: [], lane: 'none' })
+  }
+})
 
 browser.post('/audit', async (c) => {
   const limit = await rateLimit(c.get('db'), 'browser:audit', c.req.raw, 60, RATE_WINDOWS.chat)
