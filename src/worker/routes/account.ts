@@ -6,7 +6,7 @@ import { aiConfigured, availableModels } from '../ai'
 import { analyzeEnabledFor, authMode, buildEnabledFor, isAccountUser, isGuestUser, isOwner, privateJson, researchEnabledFor } from '../auth'
 import { guestUsageToday, now, utcDay, usageToday } from '../db'
 import type { AppContext } from '../env'
-import { isLocalBridgeRequest, pickPickerFamilies, pickerModelDescription, pickerModelName, publicLanes } from '../public-ai'
+import { isLocalBridgeRequest, laneStrength, pickPickerFamilies, pickerModelDescription, pickerModelName, publicLanes } from '../public-ai'
 import { healthRows } from '../provider-health'
 import { guestUsageKey } from '../rate-limit'
 import { searchConfigured } from '../search'
@@ -102,6 +102,7 @@ account.get('/models', async (c) => {
       description: lane.description,
       available: true,
       family: lane.model === 'buffy' ? 'Buffy Agent' : 'Buffy',
+      strength: laneStrength(lane.model, lane.url),
       ...(lane.billing ? { billing: lane.billing } : {}),
     }))
   const buffyRows = bridgeBuffyRows.length
@@ -115,6 +116,7 @@ account.get('/models', async (c) => {
             available: true,
             family: 'Buffy',
             billing: 'free' as const,
+            strength: 82,
           },
         ]
       : []
@@ -138,6 +140,7 @@ account.get('/models', async (c) => {
       available: true,
       family: 'Claude',
       billing: 'free',
+      strength: laneStrength('claude-haiku-5-5'),
     },
     ...pickPickerFamilies(
       lanes.filter((lane) => !lane.model.startsWith('buffy')),
@@ -157,6 +160,7 @@ account.get('/models', async (c) => {
           description: actual ? frontierDescriptions[lane.model] ?? lane.description : pickerModelDescription(index),
           available: true,
           family,
+          strength: laneStrength(lane.model, lane.url),
           ...(lane.billing ? { billing: lane.billing } : {}),
         }
       }),

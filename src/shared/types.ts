@@ -339,7 +339,8 @@ export type BrowserAction =
   | { type: 'forward' }
   | { type: 'reload' }
   | { type: 'wait'; ms: number }
-  | { type: 'waitFor'; selector?: string; text?: string; state?: 'visible' | 'hidden' | 'ended' | 'time'; timeoutMs?: number }
+  | { type: 'waitFor'; selector?: string; text?: string; state?: 'visible' | 'hidden' | 'ended' | 'attention' | 'time'; timeoutMs?: number }
+  | { type: 'questionLoop'; answers: { question: string; answer: string }[]; timeoutMs?: number }
   | { type: 'inspect'; selector?: string }
   | { type: 'screenshot' }
   | { type: 'style'; css: string }
@@ -667,6 +668,8 @@ export interface ModelInfo {
   family?: string
   /** True when routes for this family may spend paid credits. */
   billing?: LaneBilling
+  /** Capability score; the picker lists strongest first. */
+  strength?: number
 }
 
 /** One free mode's daily allowance, as GET /api/me reports it. */

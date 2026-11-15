@@ -3,7 +3,7 @@ import { Check, ChevronDown } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { MODELS, PICKER_MODEL_NAMES } from '../../shared/config'
-import type { ProviderStatus, ReasoningEffort } from '../../shared/types'
+import type { ModelInfo, ProviderStatus, ReasoningEffort } from '../../shared/types'
 import { useModels, useProviders } from '../lib/api'
 import { cx } from '../lib/cx'
 import { MODEL_PRESET_OPTIONS, type ModelChoice, type ModelPreset } from '../lib/model-presets'
@@ -48,21 +48,29 @@ export function ModelPicker({
     (model) => model.id === 'buffy' || model.id === 'buffy-lite' || model.name.toLowerCase() === 'buffy' || model.name.toLowerCase() === 'buffy free',
   )
   const isLocalAgent = (model: { id: string }) => localAgents.some((local) => local.id === model.id)
-  // Keep the advertised five rows in a stable order. If the endpoint omits a
-  // family, use the configured name and mark it unavailable instead of making
-  // that choice disappear.
+  // The free Claude row is a brand row, not one of the five aliases. Show it
+  // directly after Buffy so the no-key brand model is easy to find.
+  const freeBrands = catalog.filter((model) => model.id === 'claude-haiku-5-5')
+  const isFreeBrand = (model: { id: string }) => freeBrands.some((brand) => brand.id === model.id)
+  const catalogKnown = (data?.items?.length ?? 0) > 0
+  // Before the free list arrives, keep the configured aliases as a fallback.
+  // Once it arrives, trust it: an omitted row is retired rather than re-added.
+  const keepConfigured = !catalogKnown || health?.mode === 'api'
   const models = [
     ...localAgents,
-    ...PICKER_MODEL_NAMES.map((name) => {
-      const found = catalog.find((model) => model.name === name)
-      const configured = MODELS.find((model) => model.name === name)
-      return found ?? (configured ? { ...configured, available: false } : undefined)
-    })
+    ...freeBrands,
+    ...PICKER_MODEL_NAMES
+      .map((name) => {
+        const found = catalog.find((model) => model.name === name)
+        const configured = keepConfigured ? MODELS.find((model) => model.name === name) : undefined
+        return found ?? (configured ? { ...configured, available: false } : undefined)
+      })
       .filter((model): model is (typeof catalog)[number] => Boolean(model))
-      .filter((model) => !isLocalAgent(model)),
+      .filter((model) => !isLocalAgent(model) && !isFreeBrand(model)),
     ...catalog.filter(
       (model) =>
         !isLocalAgent(model) &&
+        !isFreeBrand(model) &&
         !PICKER_MODEL_NAMES.includes(model.name as (typeof PICKER_MODEL_NAMES)[number]),
     ),
   ]
@@ -95,7 +103,11 @@ export function ModelPicker({
         lane.lastErrorCode === 'quota',
     )
   }
-  const options = models
+  // Strongest first. The server supplies a capability score for every row;
+  // the pinned rows above are only a construction order, not display order.
+  const options = catalogKnown
+    ? [...models].sort((a, b) => ((b as ModelInfo).strength ?? 0) - ((a as ModelInfo).strength ?? 0))
+    : models
   const current = options.find((m) => m.id === value) ?? options[0]
   const unavailable = (model: (typeof options)[number]) =>
     !model.available || unusable(model) || statusFor(model) === 'down'
