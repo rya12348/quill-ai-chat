@@ -478,6 +478,7 @@ export function laneStrength(model: string, url?: string): number {
   // health/quality record demotes it automatically after a 429, so preferring
   // it here does not put a rate-limited lane ahead of a working smaller one.
   else if (/claude-opus-5\.5|gpt-6-astra/.test(id)) base = 98
+  else if (/step-5/.test(id)) base = 98
   else if (/inkling-2-small/.test(id)) base = 97
   else if (/ernie-5\.5|particle-1/.test(id)) base = 95
   else if (/nemotron-3-ultra/.test(id) && /openrouter\.ai|integrate\.api\.nvidia\.com/.test(host)) base = 93

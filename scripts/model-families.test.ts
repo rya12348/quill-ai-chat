@@ -193,7 +193,7 @@ test('a free NVIDIA key adds Step 5 Preview and the other free NIM lanes', () =>
   assert.ok(step)
   assert.equal(step.label, 'Step 5 Preview (NVIDIA)')
   assert.equal(familyForLane(step), 'Step')
-  assert.equal(laneStrength(step.model, step.url), 92)
+  assert.equal(laneStrength(step.model, step.url), 98)
   assert.equal(laneSupportsVision(step), true)
   assert.ok(lanes.some((lane) => lane.model === 'minimaxai/minimax-m3.1-flash'))
   assert.ok(lanes.some((lane) => lane.model === 'nvidia/nemotron-3.5-super-vl-120b-a12b'))

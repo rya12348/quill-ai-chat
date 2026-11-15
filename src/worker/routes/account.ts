@@ -124,9 +124,10 @@ account.get('/models', async (c) => {
   // stronger families. Retire those two rows and give their space to the
   // no-key Claude Haiku lane the Buffy page uses. The Step and GLM names are
   // kept for older lane aliases of the same models.
-  const retiredFamilies = new Set(['Step', 'GLM'])
+  const retiredFamilies = new Set(['GLM'])
   const retiredLanes = /nemotron-3-ultra-550b|deepseek-v4\.1-flash/i
   const frontierDescriptions: Record<string, string> = {
+    'stepfun-ai/step-5-preview': 'Frontier reasoning for long, hard tasks.',
     'thinkingmachines/inkling-2-small:free': 'Broad agentic knowledge, vision and research.',
     'baidu/ernie-5.5-flash-preview:free': 'Strong tool use and browsing for agent work.',
     'particle-ai/particle-1:free': 'Token-efficient coding and page edits.',
@@ -153,7 +154,7 @@ account.get('/models', async (c) => {
       .map(({ family, lane }, index) => {
         // The two free frontier lanes are new enough that a borrowed alias
         // hides what they are. Show their real names and descriptions.
-        const actual = /ernie-5\.5|particle-1|inkling-2-small/i.test(lane.model)
+        const actual = /ernie-5\.5|particle-1|inkling-2-small|step-5/i.test(lane.model)
         return {
           id: lane.model,
           name: actual ? lane.label : pickerModelName(index),
