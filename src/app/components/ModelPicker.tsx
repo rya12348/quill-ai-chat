@@ -2,7 +2,6 @@ import { motion } from 'motion/react'
 import { Check, ChevronDown } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
-import { MODELS, PICKER_MODEL_NAMES } from '../../shared/config'
 import type { ModelInfo, ProviderStatus, ReasoningEffort } from '../../shared/types'
 import { useModels, useProviders } from '../lib/api'
 import { cx } from '../lib/cx'
@@ -41,39 +40,57 @@ export function ModelPicker({
   const { data: health } = useProviders()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  const catalog = data?.items ?? MODELS.map((m) => ({ ...m, available: true }))
-  // Buffy is a local add-on, not one of the five hosted aliases. Keep the full
-  // agent and its free lane at the top instead of burying them as extra rows.
-  const localAgents = catalog.filter(
-    (model) => model.id === 'buffy' || model.id === 'buffy-lite' || model.name.toLowerCase() === 'buffy' || model.name.toLowerCase() === 'buffy free',
-  )
-  const isLocalAgent = (model: { id: string }) => localAgents.some((local) => local.id === model.id)
-  // The free Claude row is a brand row, not one of the five aliases. Show it
-  // directly after Buffy so the no-key brand model is easy to find.
-  const freeBrands = catalog.filter((model) => model.id === 'claude-haiku-5-5')
-  const isFreeBrand = (model: { id: string }) => freeBrands.some((brand) => brand.id === model.id)
-  const catalogKnown = (data?.items?.length ?? 0) > 0
-  // Before the free list arrives, keep the configured aliases as a fallback.
-  // Once it arrives, trust it: an omitted row is retired rather than re-added.
-  const keepConfigured = !catalogKnown || health?.mode === 'api'
-  const models = [
-    ...localAgents,
-    ...freeBrands,
-    ...PICKER_MODEL_NAMES
-      .map((name) => {
-        const found = catalog.find((model) => model.name === name)
-        const configured = keepConfigured ? MODELS.find((model) => model.name === name) : undefined
-        return found ?? (configured ? { ...configured, available: false } : undefined)
-      })
-      .filter((model): model is (typeof catalog)[number] => Boolean(model))
-      .filter((model) => !isLocalAgent(model) && !isFreeBrand(model)),
-    ...catalog.filter(
-      (model) =>
-        !isLocalAgent(model) &&
-        !isFreeBrand(model) &&
-        !PICKER_MODEL_NAMES.includes(model.name as (typeof PICKER_MODEL_NAMES)[number]),
-    ),
+  // Fallback rows for the first paint, before /models answers. Once the
+  // catalogue is known, every model it returns is selectable, strongest first.
+  const brandRows: ModelInfo[] = [
+    {
+      id: 'gpt-6-luna',
+      name: 'ChatGPT',
+      description: 'Free GPT-6 Luna, no key or setup.',
+      available: true,
+      family: 'ChatGPT',
+      billing: 'free',
+      strength: 90,
+    },
+    {
+      id: 'claude-haiku-5-5',
+      name: 'Claude',
+      description: 'Free Claude Haiku 5.5, no key or setup.',
+      available: true,
+      family: 'Claude',
+      billing: 'free',
+      strength: 88,
+    },
+    {
+      id: 'gemini-web',
+      name: 'Gemini',
+      description: 'Free Gemini, no key or setup.',
+      available: true,
+      family: 'Gemini',
+      billing: 'free',
+      strength: 84,
+    },
+    {
+      id: 'buffy-lite',
+      name: 'Buffy',
+      description: 'Buffy on the strongest free hosted models.',
+      available: true,
+      family: 'Buffy Agent',
+      billing: 'free',
+      strength: 82,
+    },
   ]
+  const catalog = data?.items ?? brandRows
+  const catalogKnown = (data?.items?.length ?? 0) > 0
+  // Every catalogue row, deduplicated by id. A local bridge can expose both
+  // `buffy` and `buffy-lite` for the same agent; show the full one only.
+  const models = catalogKnown
+    ? catalog.filter(
+        (model, index, all) =>
+          all.findIndex((candidate) => candidate.id === model.id) === index &&
+          (model.id !== 'buffy-lite' || !all.some((candidate) => candidate.id === 'buffy')),
+      )
+    : brandRows
   // Free lanes report their own health; the keyed API is one provider behind
   // every model, so its status applies to all of them. The list is one row per
   // family, and any working lane of that family makes the family usable.
@@ -103,10 +120,9 @@ export function ModelPicker({
         lane.lastErrorCode === 'quota',
     )
   }
-  // Strongest first. The server supplies a capability score for every row;
-  // the pinned rows above are only a construction order, not display order.
+  // Strongest first; the rows above are only a construction order.
   const options = catalogKnown
-    ? [...models].sort((a, b) => ((b as ModelInfo).strength ?? 0) - ((a as ModelInfo).strength ?? 0))
+    ? [...models].sort((a, b) => (b.strength ?? 0) - (a.strength ?? 0))
     : models
   const current = options.find((m) => m.id === value) ?? options[0]
   const unavailable = (model: (typeof options)[number]) =>
