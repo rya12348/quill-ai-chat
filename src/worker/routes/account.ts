@@ -155,13 +155,14 @@ account.get('/models', async (c) => {
       strength: laneStrength('gpt-5.4-mini'),
     },
     ...pickPickerFamilies(
-      lanes.filter((lane) => !lane.model.startsWith('buffy')),
+      lanes.filter(
+        (lane) => !lane.model.startsWith('buffy') && !retiredLanes.test(`${lane.model} ${lane.label}`),
+      ),
       statuses,
     )
-      .filter(
-        ({ family, lane }) =>
-          !retiredFamilies.has(family) && !retiredLanes.test(`${lane.model} ${lane.label}`),
-      )
+      // Retired lanes are removed before the shortlist is built, so the pinned
+      // DeepSeek row cannot displace a stronger free family only to be filtered.
+      .filter(({ family }) => !retiredFamilies.has(family))
       .map(({ family, lane }, index) => {
         // The two free frontier lanes are new enough that a borrowed alias
         // hides what they are. Show their real names and descriptions.
