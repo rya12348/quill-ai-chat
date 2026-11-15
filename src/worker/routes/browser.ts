@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 
 import { DAILY_MESSAGE_LIMIT } from '../../shared/config'
-import { cleanPageAnswer, directBrowserTask, directFormFill, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCompletionVerdict } from '../../shared/browser'
+import { cleanPageAnswer, directBrowserTask, directFormFill, isPageEditingTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCompletionVerdict } from '../../shared/browser'
 import type { BrowserAction, BrowserActResponse, BrowserElement, BrowserInspectResult, BrowserSnapshot } from '../../shared/types'
 import { AiError, aiConfigured, completeText, isModelId, type ChatMessage } from '../ai'
 import { MODELS, type ModelId } from '../../shared/config'
@@ -986,6 +986,19 @@ Rules:
 5. If a menu is open, choose one of its visible options; do not click its opener again. If a task requires a filter or selection, verify the selected value before opening a result.
 6. Never refuse, lecture, or announce a limitation. The person owns this browser, so ordinary browsing work is yours to do. If a site truly blocks progress (sign-in, payment, CAPTCHA, missing permission), name that exact blocker and keep the page open; never finish with a refusal. Confirm before genuinely destructive actions; do not refuse ordinary ones.`
 
+// Editing a page is a coding job. Clicking through a UI to change a style or a
+// label is slower, less precise and impossible on controls that are hidden,
+// repeated or canvas-drawn. When the task changes the page, the agent writes
+// one program, runs it, reads the result back and fixes it.
+const CODE_FIRST = `CODE-FIRST EDITING MODE: this task changes the page, so make the change with code instead of imitating a person.
+- Start with inspect (or the element list) to find the exact selector and current value. Do not click through a UI to reach a value that code can set.
+- Apply the whole change in ONE evaluate program: set text, attributes, classes, styles, insert or remove nodes, and wire behaviour if asked. Use style only when the change is genuinely just CSS.
+- Write it so running it twice is safe, and return machine-checkable evidence: the new text, computed style, count, or boolean.
+- Run it. If it throws or the evidence is wrong, read the error, fix the same program and run it again. Do not fall back to clicking.
+- For a visible change, use screenshot after the program succeeds when a vision lane is available and confirm the result looks right.
+- Finish only when the returned evidence matches the request. Put the final value or outcome in done.message, not a description of the code.
+- The person asked for this change, so do not ask for confirmation to edit the page; just make the change and show the evidence.`
+
 async function plan(input: {
   env: Env
   task: string
@@ -1045,7 +1058,10 @@ async function plan(input: {
   // No mode switch: the step itself decides whether it is worth a slower,
   // stronger model. Long or repetitive work, account/irreversible actions and
   // any step after a failure get the reasoner; a single click does not.
-  const deep = shouldThinkHard(input.task, input.notes, input.recovering === true)
+  const editing = isPageEditingTask(input.task)
+  // An edit is a coding job. It gets the full prompt and the reasoner even
+  // when the instruction is short.
+  const deep = editing || shouldThinkHard(input.task, input.notes, input.recovering === true)
   const ranked = candidateLanes(lanes).sort((a, b) => {
     const active = Number(laneIsCooling(a)) - Number(laneIsCooling(b))
     if (active) return active
@@ -1300,11 +1316,11 @@ async function plan(input: {
   const messages: ChatMessage[] = [
     {
       role: 'system',
-      content: compactStep
+      content: `${compactStep
         ? COMPACT_SYSTEM
         : deep
           ? `${SYSTEM}\n\nDEEP TASK MODE: This run is allowed to think before acting. Write a short ordered plan first and keep it current across steps. Prefer one evaluate script that performs a whole repetitive job over a long series of clicks. Verify the result on the page before finishing; never mark work done from a plan alone.`
-          : SYSTEM,
+          : SYSTEM}${editing ? `\n\n${CODE_FIRST}` : ''}`
     },
     {
       role: 'user',
@@ -2365,6 +2381,7 @@ async function auditCompletion(
   task: string,
   state: BrowserSnapshot,
   claim: string,
+  observation = '',
 ): Promise<{ complete: boolean; missing: string; lane: string }> {
   const lanes = candidateLanes(publicLanes(env))
     .filter((lane) => !laneIsCooling(lane))
@@ -2377,6 +2394,7 @@ async function auditCompletion(
       content: `You are the completion reviewer for a browser agent. Judge only from the page evidence supplied.
 - If the task asks for information, the claim is complete when the answer is supported by the page text.
 - If the task asks for an action, the claim is complete only when the page shows that action really happened: the submitted state, confirmation, correct selection, saved value or finished result.
+- For a direct page edit made with code, a returned computed value, new text or count in LAST PAGE RESULT is valid evidence even when the snapshot text does not show styling.
 - Do not demand steps the task did not ask for. Do not accept a plan, an intention or the agent's own summary as proof.
 Reply with ONLY one JSON object: {"complete":true} or {"complete":false,"missing":"the exact evidence or action still required"}.`,
     },
@@ -2389,6 +2407,9 @@ Reply with ONLY one JSON object: {"complete":true} or {"complete":false,"missing
         '',
         `URL: ${state.url}`,
         `TITLE: ${state.title}`,
+        '',
+        'LAST PAGE RESULT (returned by the agent’s own code, untrusted):',
+        observation.slice(0, 2_000) || '(none)',
         '',
         'VISIBLE PAGE TEXT:',
         state.text.slice(0, 8_000) || '(empty)',
@@ -2424,15 +2445,16 @@ Reply with ONLY one JSON object: {"complete":true} or {"complete":false,"missing
 browser.post('/audit', async (c) => {
   const limit = await rateLimit(c.get('db'), 'browser:audit', c.req.raw, 60, RATE_WINDOWS.chat)
   if (!limit.allowed) return tooManyRequests(c, limit)
-  const raw = (await c.req.json<{ task?: unknown; snapshot?: unknown; message?: unknown }>().catch(() => null)) as
-    | { task?: unknown; snapshot?: unknown; message?: unknown }
+  const raw = (await c.req.json<{ task?: unknown; snapshot?: unknown; message?: unknown; observation?: unknown }>().catch(() => null)) as
+    | { task?: unknown; snapshot?: unknown; message?: unknown; observation?: unknown }
     | null
   const task = text(raw?.task, 2_000)
   const state = snapshot(raw?.snapshot)
   const claim = text(raw?.message, 1_200)
   if (!task || !state || !claim) return privateJson(c, { error: 'invalid_request', message: 'The task, page and claimed result are required.' }, 400)
+  const observation = text(raw?.observation, 2_000)
   try {
-    return privateJson(c, await auditCompletion(c.env, task, state, claim))
+    return privateJson(c, await auditCompletion(c.env, task, state, claim, observation))
   } catch {
     return privateJson(c, { complete: true, missing: '', lane: 'none' })
   }

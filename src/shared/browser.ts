@@ -1,5 +1,18 @@
 import type { BrowserAction, BrowserElement } from './types'
 
+/**
+ * True when the task changes the page itself (content, style, layout, DOM)
+ * rather than navigating or reading it. Those tasks are done with code, not by
+ * pretending to be a person clicking around.
+ */
+export function isPageEditingTask(task: string): boolean {
+  const changes = /\b(?:change|edit|modify|update|replace|rewrite|restyle|recolor|redesign|remove|hide|show|add|insert|move|resize|set|turn|make)\b/i.test(task)
+  if (!changes) return false
+  return /\b(?:page|site|website|dom|html|css|style|stylesheet|layout|theme|background|colou?r|font|text|heading|title|button|link|nav|menu|header|footer|sidebar|banner|section|card|table|row|column|image|logo|border|margin|padding|spacing|size|width|height|modal|popup|dark|light|red|blue|green|black|white)\b/i.test(
+    task,
+  )
+}
+
 /** The exact sentence that tells the caller the page cannot answer yet. */
 export const PAGE_ANSWER_UNAVAILABLE = 'That answer is not visible on this page.'
 

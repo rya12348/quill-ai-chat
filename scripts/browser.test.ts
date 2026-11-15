@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directPageSearch, directSearchAnswer, directSiteSearch, isDocumentWritingTask, isSameBrowserSite, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCompletionVerdict } from '../src/shared/browser'
+import { answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directPageSearch, directSearchAnswer, directSiteSearch, isDocumentWritingTask, isPageEditingTask, isSameBrowserSite, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCompletionVerdict } from '../src/shared/browser'
 import type { BrowserElement } from '../src/shared/types'
 
 test('a page answer never exposes a model reasoning trace', () => {
@@ -404,6 +404,16 @@ test('site search and page search resolve to native typing', () => {
     text: 'cats',
     submit: true,
   })
+})
+
+test('page edits are recognized and reading or navigating is not', () => {
+  assert.equal(isPageEditingTask('change the background to black'), true)
+  assert.equal(isPageEditingTask('replace the heading with Welcome'), true)
+  assert.equal(isPageEditingTask('make the button blue'), true)
+  assert.equal(isPageEditingTask('hide the sidebar'), true)
+  assert.equal(isPageEditingTask('what is the page title?'), false)
+  assert.equal(isPageEditingTask('click the login button'), false)
+  assert.equal(isPageEditingTask('delete my account'), false)
 })
 
 test('a completion verdict is read only when it is usable', () => {

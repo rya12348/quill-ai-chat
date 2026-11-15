@@ -1036,7 +1036,7 @@ export function Browser() {
         throw new Error(
           alive
             ? 'The local bridge is running, but this page’s address is not on its allowlist. Open Ink from its production address, or add this origin to scripts/local-bridge.mjs and restart it.'
-            : 'The local bridge is not running. Start it with: node scripts/local-bridge.mjs',
+            : 'The local bridge is not running. Restart npm run dev, or run node scripts/local-bridge.mjs.',
         )
       }
       await start()
@@ -3169,7 +3169,7 @@ export function Browser() {
             const verdict = await api<{ complete?: boolean; missing?: string; lane?: string }>('/browser/audit', {
               method: 'POST',
               signal: controller.signal,
-              json: { task: instruction, snapshot: current.snapshot, message: planned.action.message },
+              json: { task: instruction, snapshot: current.snapshot, message: planned.action.message, observation: current.observation ?? '' },
             }).catch(() => null)
             if (verdict && verdict.complete === false) {
               const missing = (verdict.missing || 'The page does not show the requested result yet.').slice(0, 300)
@@ -3898,7 +3898,7 @@ export function Browser() {
                     Use local Chrome
                   </button>
                   <p className="mt-2 max-w-[520px] text-[12px] leading-relaxed text-faint">
-                    Runs a separate Chrome window on this computer for local speed and its own saved Google sign-in. Start the bridge once with <code className="rounded bg-surface-2 px-1 py-0.5 text-[11px]">node scripts/local-bridge.mjs</code>.
+                    Runs a separate Chrome window on this computer for local speed and its own saved Google sign-in. The bridge starts with the dev server; you can also run <code className="rounded bg-surface-2 px-1 py-0.5 text-[11px]">node scripts/local-bridge.mjs</code> yourself.
                   </p>
                   {error && status !== 'unconfigured' && status !== 'quota' ? <p role="alert" className="mt-3 rounded-control border border-danger/20 bg-danger-soft px-3.5 py-2.5 text-[12.5px] leading-relaxed text-danger">{error}</p> : null}
                   <dl className="mt-6 grid max-w-[520px] gap-4 border-t border-line pt-4 sm:grid-cols-3">
