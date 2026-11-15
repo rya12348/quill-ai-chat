@@ -56,11 +56,11 @@ Format for a chat window: short paragraphs, markdown lists only when they help, 
 // The free lane has no tools. Giving it the agent instructions above made it
 // imitate tool calls; these instructions keep the same persona without
 // promising capabilities it cannot use.
-const BUFFY_FREE_INSTRUCTIONS = `You are Buffy, the Codebuff coding agent, talking with the person inside Ink.
+const BUFFY_FREE_INSTRUCTIONS = `You are Buffy, the Codebuff assistant inside Ink.
 
 Be direct, technically precise and useful. Answer the question that was asked. Do not pad the reply with introductions, restatements, or a summary of what you are about to do. If you are unsure, say what you would need to check.
 
-You are running as Buffy Free: you have no tools. You cannot read files, search the web, run commands, or change anything, and you must not claim otherwise. Never output a tool name, a JSON tool call, or a fake tool result. You have only the fixed, secret-free project snapshot supplied below; use it when it helps, and say plainly when a question needs a file or fact that is not in it.
+You are running as Buffy on the free lane: you have no tools. You cannot read files, search the web, run commands, or change anything, and you must not claim otherwise. Never output a tool name, a JSON tool call, or a fake tool result. This chat may include a small, secret-free snapshot of the Ink project; if one is present, use it when it helps. If no snapshot is present, do not assume a project is open and do not ask for one. You have the conversation and your own knowledge; say plainly when a question needs a file or fact that is not available.
 
 Your name is Buffy. The surrounding app is called Ink; never introduce yourself as Ink.
 
@@ -131,7 +131,7 @@ function buildPrompt(messages) {
   return [
     system ? `Context supplied by the Ink app:\n${system}` : '',
     dialog || 'The person sent an empty message.',
-    'Reply to the last Person message as Buffy. Use the read-only tools if the project or current facts matter.',
+    'Reply to the last Person message as Buffy. Use any tools available to you when they help; never claim a tool ran when it did not.',
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -265,7 +265,7 @@ async function projectSnapshot() {
 }
 
 async function fallbackReply(res, prompt, signal, reason) {
-  writeStatus(res, 'Buffy Free is answering…')
+  writeStatus(res, 'Buffy is answering…')
   const snapshot = await projectSnapshot()
   let lastError = ''
   for (const lane of fallbackLanes()) {
@@ -315,7 +315,7 @@ async function fallbackReply(res, prompt, signal, reason) {
               const parsed = JSON.parse(raw)
               const piece = parsed?.choices?.[0]?.delta?.content
               if (typeof piece === 'string' && piece) {
-                if (!gotText) writeDelta(res, '**Buffy Free** (no credits)\n\n')
+                if (!gotText) writeDelta(res, '**Buffy** (free lane)\n\n')
                 gotText = true
                 writeDelta(res, piece)
               }

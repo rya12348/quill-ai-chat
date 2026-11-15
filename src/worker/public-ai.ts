@@ -514,7 +514,8 @@ function withOverride(model: string | undefined, defaults: string[]): string[] {
 export function buffyLanes(env: Env): PublicLane[] {
   // This bridge runs on the developer's machine. A deployed Worker cannot
   // reach it (and production may inherit the URL from a local env file), so
-  // expose these rows only in a Vite development build with the local flag.
+  // never advertise these rows anywhere the platform has injected APP_ORIGIN.
+  if (env.APP_ORIGIN) return []
   const dev = (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true
   if (!dev || env.BUFFY_BRIDGE_LOCAL !== '1') return []
   const raw = env.BUFFY_BRIDGE_URL?.trim()

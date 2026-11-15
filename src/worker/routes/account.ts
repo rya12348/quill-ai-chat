@@ -87,9 +87,9 @@ account.get('/models', async (c) => {
   }
   const lanes = publicLanes(c.env)
   // Buffy is an extra row: keep the five hosted families intact rather than
-  // letting it displace one of them. The local bridge supplies both Buffy
-  // rows; a deployment without one still advertises Buffy Free, which the
-  // Worker runs on the hosted free lanes.
+  // letting it displace one of them. The local bridge supplies Buffy Agent and
+  // Buffy; a deployment without one still advertises Buffy, which the Worker
+  // runs on the hosted free lanes.
   const bridgeBuffyRows = lanes
     .filter((lane) => lane.model === 'buffy' || lane.model === 'buffy-lite')
     .map((lane) => ({

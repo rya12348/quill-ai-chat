@@ -1,10 +1,11 @@
-import { ArrowUp, Bot, ExternalLink, RotateCcw, Square, Terminal } from 'lucide-react'
+import { ArrowUp, Bot, ExternalLink, Paperclip, RotateCcw, Square, Terminal, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { Markdown } from '../components/Markdown'
 import { Mark } from '../components/Shell'
 
-type Message = { role: 'user' | 'assistant'; content: string }
+type BuffyFile = { name: string; text: string }
+type Message = { role: 'user' | 'assistant'; content: string; files?: BuffyFile[] }
 type BridgeStatus = {
   ready: boolean
   configured: boolean
@@ -15,6 +16,12 @@ type BridgeStatus = {
 }
 
 const STORAGE_KEY = 'buffy:chat:v1'
+const MAX_ATTACHMENTS = 4
+const MAX_ATTACHMENT_CHARS = 12_000
+const MAX_ATTACHMENT_FILE_CHARS = 8_000
+const MAX_ATTACHMENT_BYTES = 128_000
+const TEXT_FILE_ACCEPT =
+  'text/*,.md,.markdown,.txt,.json,.csv,.tsv,.js,.jsx,.ts,.tsx,.css,.html,.py,.go,.rs,.java,.c,.cpp,.h,.sh,.yml,.yaml,.toml,.ini,.log,.sql,.rb,.php,.swift,.kt,.xml,.svg'
 const SUGGESTIONS = [
   'What does this project do, and where should I start reading?',
   'Review the browser agent for bugs or fragile assumptions.',
@@ -31,16 +38,42 @@ function readSaved(): Message[] {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as unknown
     if (!Array.isArray(parsed)) return []
     return parsed
-      .filter(
-        (message): message is Message =>
-          Boolean(message) &&
-          typeof message === 'object' &&
-          ((message as Message).role === 'user' || (message as Message).role === 'assistant') &&
-          typeof (message as Message).content === 'string',
-      )
+      .map((value): Message | null => {
+        if (!value || typeof value !== 'object') return null
+        const message = value as { role?: unknown; content?: unknown; files?: unknown }
+        if ((message.role !== 'user' && message.role !== 'assistant') || typeof message.content !== 'string') return null
+        const files = Array.isArray(message.files)
+          ? message.files
+              .filter(
+                (file): file is BuffyFile =>
+                  Boolean(file) &&
+                  typeof file === 'object' &&
+                  typeof (file as BuffyFile).name === 'string' &&
+                  typeof (file as BuffyFile).text === 'string',
+              )
+              .slice(0, MAX_ATTACHMENTS)
+          : []
+        return { role: message.role, content: message.content, ...(files.length ? { files } : {}) }
+      })
+      .filter((message): message is Message => message !== null)
       .slice(-60)
   } catch {
     return []
+  }
+}
+
+/** File text is sent with the turn but kept out of the visible bubble. */
+function filesPrompt(files: BuffyFile[]): string {
+  return [
+    'The person attached the following file contents:',
+    ...files.map((file) => `--- ${file.name} ---\n${file.text}`),
+  ].join('\n\n')
+}
+
+function messageForModel(message: Message) {
+  return {
+    role: message.role,
+    content: message.files?.length ? `${message.content}\n\n${filesPrompt(message.files)}` : message.content,
   }
 }
 
@@ -57,6 +90,8 @@ function errorText(value: unknown): string {
 export function Buffy() {
   const [messages, setMessages] = useState<Message[]>(readSaved)
   const [input, setInput] = useState('')
+  const [attachments, setAttachments] = useState<BuffyFile[]>([])
+  const [fileError, setFileError] = useState('')
   const [pending, setPending] = useState(false)
   const [activity, setActivity] = useState('')
   const [status, setStatus] = useState<BridgeStatus | null>(null)
@@ -66,6 +101,7 @@ export function Buffy() {
   const abortRef = useRef<AbortController | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     try {
@@ -103,15 +139,66 @@ export function Buffy() {
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
+  const addFiles = async (incoming: File[]) => {
+    if (!incoming.length) return
+    setFileError('')
+    const slots = MAX_ATTACHMENTS - attachments.length
+    if (slots <= 0) {
+      setFileError(`Attach up to ${MAX_ATTACHMENTS} files.`)
+      return
+    }
+    if (incoming.length > slots) setFileError(`Attach up to ${MAX_ATTACHMENTS} files; the rest were skipped.`)
+    const next: BuffyFile[] = []
+    let total = attachments.reduce((sum, file) => sum + file.text.length, 0)
+    for (const file of incoming.slice(0, slots)) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        setFileError(`${file.name || 'That file'} is too large. Attach a text file under 128 KB.`)
+        continue
+      }
+      const text = await file.text().catch(() => '')
+      if (!text.trim()) {
+        setFileError(`${file.name || 'That file'} is empty or is not readable text.`)
+        continue
+      }
+      if (text.includes('\u0000')) {
+        setFileError(`${file.name || 'That file'} is not a text or code file.`)
+        continue
+      }
+      const clipped = text.slice(0, MAX_ATTACHMENT_FILE_CHARS)
+      if (clipped.length < text.length) {
+        setFileError(`${file.name || 'That file'} was clipped to ${MAX_ATTACHMENT_FILE_CHARS.toLocaleString()} characters.`)
+      }
+      if (total + clipped.length > MAX_ATTACHMENT_CHARS) {
+        setFileError(`Attachments can be up to ${MAX_ATTACHMENT_CHARS.toLocaleString()} characters at a time.`)
+        break
+      }
+      next.push({ name: file.name || 'pasted.txt', text: clipped })
+      total += clipped.length
+    }
+    if (next.length) setAttachments((current) => [...current, ...next])
+  }
+
   const send = async (raw: string) => {
     const content = raw.trim()
-    if (!content || pending || !status?.ready) return
+    const files = attachments
+    if ((!content && !files.length) || pending || !status?.ready) return
+    const displayContent = content || 'Review the attached file(s).'
     const controller = new AbortController()
     abortRef.current = controller
     setInput('')
+    setAttachments([])
+    setFileError('')
     setPending(true)
     setActivity('Buffy is thinking…')
-    setMessages((current) => [...current, { role: 'user', content }, { role: 'assistant', content: '' }])
+    setMessages((current) => [
+      ...current,
+      { role: 'user', content: displayContent, ...(files.length ? { files } : {}) },
+      { role: 'assistant', content: '' },
+    ])
+    const outgoing: Message[] = [
+      ...messages,
+      { role: 'user', content: displayContent, ...(files.length ? { files } : {}) },
+    ]
 
     let accumulated = ''
     const update = (text: string) => {
@@ -128,9 +215,7 @@ export function Buffy() {
       const response = await fetch('/api/buffy/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          messages: [...messages, { role: 'user', content }].map(({ role, content: text }) => ({ role, content: text })),
-        }),
+        body: JSON.stringify({ messages: outgoing.map(messageForModel) }),
         signal: controller.signal,
       })
       if (!response.ok) {
@@ -224,6 +309,8 @@ export function Buffy() {
     setActivity('')
     setPending(false)
     setInput('')
+    setAttachments([])
+    setFileError('')
     window.setTimeout(() => inputRef.current?.focus(), 0)
   }
 
@@ -236,7 +323,7 @@ export function Buffy() {
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-[17px] font-medium leading-tight">Buffy</h1>
           <p className="truncate text-[12.5px] text-faint">
-            {freeMode ? 'Free hosted models · no Codebuff credits needed' : 'The Codebuff coding agent, locally bridged'}
+            {freeMode ? 'Free hosted models · no project setup needed' : 'The Codebuff coding agent, locally bridged'}
           </p>
         </div>
         {status?.ready && (
@@ -263,7 +350,10 @@ export function Buffy() {
                 <Mark size={34} />
                 <div>
                   <p className="font-display text-[27px] font-medium leading-tight tracking-[-0.02em]">Talk to Buffy.</p>
-                  <p className="mt-1 text-[14px] text-muted">The Codebuff agent when credits are available, with a free fallback lane.</p>
+                  <p className="mt-1 text-[14px] text-muted">
+                    {freeMode ? 'Free chat with Buffy. No project setup needed.' : 'The Codebuff agent when credits are available, with a free fallback lane.'}
+                  </p>
+                  <p className="mt-2 text-[12px] text-faint">Attach text or code with the paperclip, or paste it into the message.</p>
                 </div>
               </div>
 
@@ -331,6 +421,19 @@ export function Buffy() {
                   <div key={`${index}-user`} className="flex justify-end">
                     <div className="max-w-[88%] rounded-card bg-surface px-4 py-3 text-[14px] leading-relaxed shadow-card">
                       <p className="whitespace-pre-wrap">{message.content}</p>
+                      {message.files?.length ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5 border-t border-line pt-2">
+                          {message.files.map((file, fileIndex) => (
+                            <span
+                              key={`${file.name}-${fileIndex}`}
+                              className="inline-flex max-w-full items-center gap-1 rounded-full bg-surface-2 px-2 py-0.5 text-[11.5px] text-muted"
+                            >
+                              <Paperclip className="size-3 shrink-0 text-faint" />
+                              <span className="truncate">{file.name}</span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ) : (
@@ -358,6 +461,36 @@ export function Buffy() {
       </section>
 
       <div className="shrink-0 border-t border-line bg-bg px-4 py-3 md:px-6">
+        {(attachments.length > 0 || fileError) && (
+          <div className="mx-auto mb-2 w-full max-w-[760px]">
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {attachments.map((file, index) => (
+                  <span
+                    key={`${file.name}-${index}`}
+                    className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[11.5px] text-muted"
+                  >
+                    <Paperclip className="size-3 shrink-0 text-faint" />
+                    <span className="truncate">{file.name}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${file.name}`}
+                      onClick={() => setAttachments((current) => current.filter((_, at) => at !== index))}
+                      className="grid size-4 place-items-center rounded-full text-faint transition-colors hover:bg-surface-2 hover:text-fg"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {fileError && (
+              <p role="alert" className="mt-1.5 text-[11.5px] leading-relaxed text-warning">
+                {fileError}
+              </p>
+            )}
+          </div>
+        )}
         <form
           onSubmit={(event) => {
             event.preventDefault()
@@ -365,6 +498,28 @@ export function Buffy() {
           }}
           className="mx-auto flex w-full max-w-[760px] items-end gap-2 rounded-card border border-line bg-surface p-2 shadow-card focus-within:border-accent/50"
         >
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            accept={TEXT_FILE_ACCEPT}
+            className="hidden"
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? [])
+              event.target.value = ''
+              void addFiles(files)
+            }}
+          />
+          <button
+            type="button"
+            aria-label="Attach text or code"
+            title="Attach text or code"
+            disabled={pending || !status?.ready}
+            onClick={() => fileRef.current?.click()}
+            className="grid size-9 shrink-0 place-items-center rounded-control text-muted transition-colors hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            <Paperclip className="size-4" />
+          </button>
           <textarea
             ref={inputRef}
             value={input}
@@ -375,8 +530,15 @@ export function Buffy() {
                 void send(input)
               }
             }}
+            onPaste={(event) => {
+              const pasted = Array.from(event.clipboardData.files)
+              if (pasted.length) {
+                event.preventDefault()
+                void addFiles(pasted)
+              }
+            }}
             rows={1}
-            placeholder={status?.ready ? 'Ask Buffy anything…' : 'Start the bridge to chat with Buffy'}
+            placeholder={status?.ready ? 'Ask anything — paste or attach text…' : 'Buffy is unavailable'}
             disabled={!status?.ready}
             aria-label="Message Buffy"
             className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2 py-1.5 text-[14px] leading-relaxed text-fg placeholder:text-faint focus:outline-none disabled:cursor-not-allowed"
@@ -393,7 +555,7 @@ export function Buffy() {
           ) : (
             <button
               type="submit"
-              disabled={!status?.ready || !input.trim()}
+              disabled={!status?.ready || (!input.trim() && !attachments.length)}
               aria-label="Send message"
               className="grid size-9 shrink-0 place-items-center rounded-control bg-fg text-bg transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-30"
             >
@@ -402,7 +564,7 @@ export function Buffy() {
           )}
         </form>
         <p className="mx-auto mt-1.5 w-full max-w-[760px] text-[10.5px] text-faint">
-          {freeMode ? 'Buffy · hosted free models · no tools or file access' : 'Local bridge · Codebuff when available · free fallback otherwise'}
+          {freeMode ? 'Buffy · free chat · no project or tools required' : 'Local bridge · Codebuff when available · free fallback otherwise'}
         </p>
       </div>
 

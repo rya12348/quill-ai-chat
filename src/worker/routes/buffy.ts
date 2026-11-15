@@ -59,7 +59,7 @@ function parseMessages(value: unknown): BuffyMessage[] {
         typeof (message as { content?: unknown }).content === 'string',
     )
     .slice(-MAX_MESSAGES)
-    .map((message) => ({ role: message.role, content: message.content.slice(0, 12_000) }))
+    .map((message) => ({ role: message.role, content: message.content.slice(0, 20_000) }))
 }
 
 /** Use the local bridge only for the owner; everyone else gets the free lane. */

@@ -21,7 +21,7 @@ export interface Env {
   // Optional override of the API origin; defaults to the Freebuff API.
   OPENAI_BASE_URL?: string
   // Optional loopback bridge that runs @codebuff/sdk for the Buffy chat page
-  // and the Buffy / Buffy Free model rows. Defaults to
+  // and the Buffy Agent model row. Defaults to
   // http://127.0.0.1:8766 on a loopback development origin.
   BUFFY_BRIDGE_URL?: string
   // Set to 1 only on the developer machine; a deployed Worker cannot reach
