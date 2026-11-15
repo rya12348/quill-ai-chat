@@ -30,6 +30,46 @@ function buffyBridge(): Plugin {
   }
 }
 
+/**
+ * Keep the opt-in local Chrome bridge alive with the dev server. It is
+ * serve-only: production Workers never spawn a Node process. Starting it once
+ * with the dev server means “Use local Chrome” works without a second terminal
+ * command. If the bridge is already running, leave that process alone.
+ */
+function localChromeBridge(): Plugin {
+  let child: ReturnType<typeof spawn> | null = null
+  let closed = false
+  return {
+    name: 'local-chrome-bridge',
+    apply: 'serve',
+    configureServer(server) {
+      const start = async () => {
+        try {
+          const response = await fetch('http://127.0.0.1:8765/health', { signal: AbortSignal.timeout(700) })
+          if (response.ok) return
+        } catch {
+          /* Not running yet; start it below. */
+        }
+        if (closed) return
+        child = spawn(process.execPath, ['scripts/local-bridge.mjs'], {
+          cwd: process.cwd(),
+          env: process.env,
+          stdio: 'inherit',
+        })
+        child.on('exit', () => {
+          child = null
+        })
+      }
+      void start()
+      server.httpServer?.once('close', () => {
+        closed = true
+        child?.kill()
+        child = null
+      })
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
   // Codespaces supplies these in process.env, not in a dotenv file.
@@ -43,7 +83,7 @@ export default defineConfig(({ mode }) => {
   )
 
   return {
-    plugins: [react(), tailwindcss(), cloudflare(), buffyBridge()],
+    plugins: [react(), tailwindcss(), cloudflare(), buffyBridge(), localChromeBridge()],
     server: {
       // Another local project binds 127.0.0.1:5173. Locally, keep this app on a
       // dedicated IPv4 loopback port so `localhost` can never mix its HTML with

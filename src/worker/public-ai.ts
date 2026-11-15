@@ -11,6 +11,7 @@
 
 import { MAX_OUTPUT_TOKENS, PICKER_MODEL_DESCRIPTIONS, PICKER_MODEL_LIMIT, PICKER_MODEL_NAMES } from '../shared/config'
 import { splitThinking } from '../shared/thinking'
+import { looksLikeRefusal } from '../shared/browser'
 import { isProviderLimitText } from '../shared/agent'
 import type { LaneBilling } from '../shared/types'
 import { AiError, readSse, textFromContent, type ChatMessage, type StreamPiece } from './ai'
@@ -129,6 +130,8 @@ const BLOCKRUN_MODELS = [
 export type PublicLane = {
   url: string
   model: string
+  /** The provider's model id when the public row id is a product alias. */
+  requestModel?: string
   label: string
   description: string
   /** Whether using this lane can spend real credits. */
@@ -188,7 +191,7 @@ const COOLDOWN_MODEL = 30 * 60_000
 const COOLDOWN_ERROR = 2 * 60_000
 const cooldowns = new Map<string, number>()
 
-export const laneKey = (lane: PublicLane) => `${new URL(lane.url).host}|${lane.model}`
+export const laneKey = (lane: PublicLane) => `${new URL(lane.url).host}|${lane.model}${lane.requestModel ? `|${lane.requestModel}` : ''}`
 const isCooling = (lane: PublicLane) => (cooldowns.get(laneKey(lane)) ?? 0) > Date.now()
 /** Lets an engine sort active lanes before a resting lane it may still retry. */
 export const laneIsCooling = (lane: PublicLane) => isCooling(lane)
@@ -216,7 +219,7 @@ export function candidateLanes(lanes: PublicLane[]): PublicLane[] {
 /** OpenAI-compatible body; OpenRouter and Z.ai take explicit reasoning switches. */
 function requestBody(lane: PublicLane, input: LaneInput, stream: boolean): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    model: lane.model,
+    model: lane.requestModel ?? lane.model,
     messages: input.messages,
     max_tokens: input.maxTokens ?? MAX_OUTPUT_TOKENS,
     stream,
@@ -344,6 +347,7 @@ const FAMILY_RULES: [RegExp, string][] = [
   [/mistral/i, 'Mistral'],
   [/nemotron/i, 'Nemotron'],
   [/glm/i, 'GLM'],
+  [/chatgpt/i, 'ChatGPT'],
   [/gpt|openai/i, 'GPT'],
   [/gemma/i, 'Gemma'],
   [/llama/i, 'Llama'],
@@ -857,9 +861,13 @@ function anonymousLanes(): PublicLane[] {
     },
     {
       url: POLLINATIONS_KEYLESS_URL,
-      model: 'openai-fast',
-      label: 'GPT-OSS 20B (Pollinations)',
-      description: 'Free, no key, one message every 30 seconds',
+      // Pollinations maps this keyless alias to OpenAI's gpt-5-nano. The public
+      // id stays "chatgpt" so the picker and Buffy can prefer it by name.
+      model: 'chatgpt',
+      requestModel: 'openai-fast',
+      label: 'ChatGPT (GPT-5 Nano)',
+      description: 'Free, no key, via Pollinations; falls back when rate-limited',
+      billing: 'free',
     },
   ]
 }
@@ -975,6 +983,12 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
           input.onLaneResult?.(failureResult(lane, failure, startedAt))
           throw failure
         }
+        if (looksLikeRefusal(buffered)) {
+          cool(lane, COOLDOWN_ERROR)
+          const failure = new AiError('refused', `${lane.label} refused this task.`, 502)
+          input.onLaneResult?.(failureResult(lane, failure, startedAt))
+          throw failure
+        }
         if (buffered.length < 120) continue
         released = true
         yield { type: 'text', text: buffered }
@@ -985,6 +999,12 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
         input.onLaneResult?.(failureResult(lane, error, startedAt))
       }
       throw error
+    }
+    if (!released && looksLikeRefusal(buffered)) {
+      cool(lane, COOLDOWN_ERROR)
+      const failure = new AiError('refused', `${lane.label} refused this task.`, 502)
+      input.onLaneResult?.(failureResult(lane, failure, startedAt))
+      throw failure
     }
     if (!released && buffered.trim()) yield { type: 'text', text: buffered }
     if (!text.trim()) {
@@ -1133,6 +1153,12 @@ export async function laneText(lane: PublicLane, input: LaneInput): Promise<stri
     (typeof message?.reasoning_content === 'string' ? message.reasoning_content : '')
   const split = splitThinking(raw)
   const text = split.text || split.reasoning
+  if (looksLikeRefusal(text)) {
+    cool(lane, COOLDOWN_ERROR)
+    const failure = new AiError('refused', `${lane.label} refused this task.`, 502)
+    input.onLaneResult?.(failureResult(lane, failure, startedAt))
+    throw failure
+  }
   if (!text.trim()) {
     cool(lane, COOLDOWN_ERROR)
     const failure = new AiError('empty', `${lane.label} returned an empty reply.`, 502)
