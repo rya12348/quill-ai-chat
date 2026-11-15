@@ -99,7 +99,7 @@ account.get('/models', async (c) => {
     .filter((lane) => lane.model === 'buffy' || lane.model === 'buffy-lite')
     .map((lane) => ({
       id: lane.model,
-      name: 'Buffy Agent',
+      name: 'Buffy',
       description: lane.description,
       available: true,
       family: 'Buffy Agent',
@@ -112,7 +112,7 @@ account.get('/models', async (c) => {
       ? [
           {
             id: 'buffy-lite',
-            name: 'Buffy Agent',
+            name: 'Buffy',
             description: 'Buffy on the strongest free hosted models — no key or setup.',
             available: true,
             family: 'Buffy Agent',
@@ -127,9 +127,17 @@ account.get('/models', async (c) => {
   // are kept for older lane aliases of the same models.
   const retiredFamilies = new Set(['GLM'])
   const retiredLanes = /nemotron-3-ultra-550b/i
+  // Provider tags, "Preview" and tier words are internal. The picker shows the
+  // model's name, not its deployment details: Step 5 Preview (NVIDIA) -> Step 5.
+  const cleanPickerName = (label: string) =>
+    label
+      .replace(/\s*\([^)]*\)\s*$/, '')
+      .replace(/\s+(?:Preview|Flash)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim()
   const frontierDescriptions: Record<string, string> = {
     'stepfun-ai/step-5-preview': 'Frontier reasoning for long, hard tasks.',
-    'deepseek-ai/deepseek-v4.1-flash': 'Opus 5.5 / Fable 5-class harness: plans, drafts three ways, reviews and repairs.',
+    'deepseek-ai/deepseek-v4.1-flash': 'Frontier harness: plans, drafts five ways, reviews and repairs.',
     'moonshotai/kimi-k3': 'Frontier reasoning, coding and agentic work.',
     'inclusionai/ling-3.2-flash:free': 'Long-context multimodal reasoning and documents.',
     'baidu/ernie-5.5-flash-preview:free': 'Strong tool use and browsing for agent work.',
@@ -155,16 +163,16 @@ account.get('/models', async (c) => {
       billing: 'free',
       strength: laneStrength('gpt-6-luna'),
     },
-    ...(lanes.some((lane) => lane.model === 'google/gemini-3.8-flash')
+    ...(lanes.some((lane) => lane.model === 'gemini-web')
       ? [
           {
-            id: 'google/gemini-3.8-flash',
+            id: 'gemini-web',
             name: 'Gemini',
-            description: 'Gemini 3.8 Flash via the server key.',
+            description: 'Free Gemini, no key or setup.',
             available: true,
             family: 'Gemini',
-            billing: 'paid' as const,
-            strength: laneStrength('google/gemini-3.8-flash', 'https://openrouter.ai/api/v1/chat/completions'),
+            billing: 'free' as const,
+            strength: laneStrength('gemini-web'),
           },
         ]
       : []),
@@ -172,7 +180,7 @@ account.get('/models', async (c) => {
       lanes.filter(
         (lane) =>
           !lane.model.startsWith('buffy') &&
-          lane.model !== 'google/gemini-3.8-flash' &&
+          lane.model !== 'gemini-web' &&
           !retiredLanes.test(`${lane.model} ${lane.label}`),
       ),
       statuses,
@@ -186,7 +194,7 @@ account.get('/models', async (c) => {
         const actual = /ernie-5\.5|particle-1|ling-3\.2|step-5|kimi-k3|deepseek-v4\.1-flash/i.test(lane.model)
         return {
           id: lane.model,
-          name: actual ? lane.label.replace(/\s*\([^)]*\)\s*$/, '') : pickerModelName(index),
+          name: actual ? cleanPickerName(lane.label) : pickerModelName(index),
           description: actual ? frontierDescriptions[lane.model] ?? lane.description : pickerModelDescription(index),
           available: true,
           family,
