@@ -62,7 +62,11 @@ test('one row per family, represented by its strongest lane', () => {
 test('the two strongest free models are lanes ranked above the 550B', () => {
   const env = { OPENROUTER_API_KEY: 'openrouter-key' } as unknown as Env
   const lanes = publicLanes(env)
-  for (const model of ['baidu/ernie-5.5-flash-preview:free', 'particle-ai/particle-1:free']) {
+  for (const model of [
+    'thinkingmachines/inkling-2-small:free',
+    'baidu/ernie-5.5-flash-preview:free',
+    'particle-ai/particle-1:free',
+  ]) {
     const found = lanes.find((lane) => lane.model === model)
     assert.ok(found, model)
     assert.equal(found.billing, 'free')

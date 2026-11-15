@@ -118,11 +118,14 @@ account.get('/models', async (c) => {
           },
         ]
       : []
-  // Stride (Step 5 Preview) and Prism (GLM-5.3 Flash) spent the most time
-  // degraded and add little over Sable, Quill and Ink. Retire those two rows
-  // and give their space to the no-key Claude Haiku lane the Buffy page uses.
+  // Stride and Prism spent the most time degraded and add little over the
+  // stronger families. Retire those two rows and give their space to the
+  // no-key Claude Haiku lane the Buffy page uses. The Step and GLM names are
+  // kept for older lane aliases of the same models.
   const retiredFamilies = new Set(['Step', 'GLM'])
+  const retiredLanes = /nemotron-3-ultra-550b|deepseek-v4\.1-flash/i
   const frontierDescriptions: Record<string, string> = {
+    'thinkingmachines/inkling-2-small:free': 'Broad agentic knowledge, vision and research.',
     'baidu/ernie-5.5-flash-preview:free': 'Strong tool use and browsing for agent work.',
     'particle-ai/particle-1:free': 'Token-efficient coding and page edits.',
   }
@@ -140,10 +143,14 @@ account.get('/models', async (c) => {
       lanes.filter((lane) => !lane.model.startsWith('buffy')),
       statuses,
     )
+      .filter(
+        ({ family, lane }) =>
+          !retiredFamilies.has(family) && !retiredLanes.test(`${lane.model} ${lane.label}`),
+      )
       .map(({ family, lane }, index) => {
         // The two free frontier lanes are new enough that a borrowed alias
         // hides what they are. Show their real names and descriptions.
-        const actual = /ernie-5\.5|particle-1/i.test(lane.model)
+        const actual = /ernie-5\.5|particle-1|inkling-2-small/i.test(lane.model)
         return {
           id: lane.model,
           name: actual ? lane.label : pickerModelName(index),
@@ -152,8 +159,7 @@ account.get('/models', async (c) => {
           family,
           ...(lane.billing ? { billing: lane.billing } : {}),
         }
-      })
-      .filter(({ family }) => !retiredFamilies.has(family)),
+      }),
   ]
   c.header('Cache-Control', 'private, no-store')
   return c.json({ items })
