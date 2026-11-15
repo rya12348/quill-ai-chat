@@ -1,16 +1,127 @@
 import type { BrowserAction, BrowserElement } from './types'
 
-/**
- * True when the task changes the page itself (content, style, layout, DOM)
- * rather than navigating or reading it. Those tasks are done with code, not by
- * pretending to be a person clicking around.
- */
+/** True when the person wants a page to look different without changing the
+ * real account: “make it look like…”, “pretend…”, “fake…”, “for fun”. That is
+ * a DOM/cosmetic edit, never a purchase, redemption or other account action. */
+export function isSimulationTask(task: string): boolean {
+  const explicit = /\b(?:make (?:it|this|the page|my (?:account|profile|page)) (?:look|seem|appear)|pretend|fake|mock(?:ed|up)?|simulat(?:e|ion)|cosmetic|visual(?:ly)?|as if|without (?:actually |really )?(?:buying|purchasing|spending|unlocking)|(?:do not|don't) (?:buy|purchase|spend|unlock))\b/i.test(
+    task,
+  )
+  // “For fun” alone is not an edit (“play this game for fun”). It only marks a
+  // simulation when paired with an appearance verb.
+  const forFun =
+    /\b(?:just )?for fun\b/i.test(task) &&
+    /\b(?:look|seem|appear|pretend|fake|mock|simulat|cosmetic|visual)\b/i.test(task)
+  return explicit || forFun
+}
+
 export function isPageEditingTask(task: string): boolean {
+  // A simulation is an edit even when the site-specific noun (“blooks”) is not
+  // in the generic page-part vocabulary. Treating it as a normal browser goal
+  // made the planner try to earn the state by buying things instead of faking it.
+  if (isSimulationTask(task)) return true
   const changes = /\b(?:change|edit|modify|update|replace|rewrite|restyle|recolor|redesign|remove|hide|show|add|insert|move|resize|set|turn|make)\b/i.test(task)
   if (!changes) return false
   return /\b(?:page|site|website|dom|html|css|style|stylesheet|layout|theme|background|colou?r|font|text|heading|title|button|link|nav|menu|header|footer|sidebar|banner|section|card|table|row|column|image|logo|border|margin|padding|spacing|size|width|height|modal|popup|dark|light|red|blue|green|black|white)\b/i.test(
     task,
   )
+}
+
+const EDIT_COLOR =
+  /(#[0-9a-f]{3,8}|rgba?\([^)]*\)|\b(?:black|white|red|blue|green|yellow|orange|purple|pink|gr[ae]y|navy|teal|cyan|magenta|brown|gold|silver)\b)/i
+
+/** Find the element a plain-language target refers to, using its visible label. */
+function editTarget(target: string, elements: BrowserElement[]): BrowserElement | null {
+  const needle = target
+    .replace(/\b(?:the|a|an|my|this|that|button|text|element|section)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+  if (!needle) return null
+  return (
+    elements.find((element) => element.label.trim().toLowerCase() === needle) ??
+    elements.find((element) => element.label.toLowerCase().includes(needle)) ??
+    elements.find((element) => needle.includes(element.label.trim().toLowerCase()) && element.label.trim().length > 2) ??
+    null
+  )
+}
+
+/**
+ * A deterministic page edit for common requests. It runs without any model, so
+ * a provider that refuses cannot block a change the page itself can express.
+ * Returns null when the request needs real reasoning.
+ */
+export function directPageEdit(task: string, elements: BrowserElement[]): BrowserAction | null {
+  const instruction = task.trim()
+  if (!instruction) return null
+  const evaluate = (expression: string): BrowserAction => ({ type: 'evaluate', expression })
+
+  const mode=
+    instruction.match(/\b(?:make|turn|set)\b[\s\S]*\b(?:page|site|it)\b[\s\S]*\b(dark|light)\b/i) ??
+    instruction.match(/\b(dark|light) mode\b/i)
+  if (mode) {
+    const dark = mode[1].toLowerCase() === 'dark'
+    return evaluate(
+      `document.body.style.background=${JSON.stringify(dark ? '#0b0b0c' : '#ffffff')};document.body.style.color=${JSON.stringify(
+        dark ? '#f5f5f5' : '#111111',
+      )};return getComputedStyle(document.body).backgroundColor`,
+    )
+  }
+  const background = instruction.match(/\b(?:background|bg)\b[\s\S]*?\b(?:to|is|=)\s*([^.,;]+)/i)
+  if (background) {
+    const color = background[1].match(EDIT_COLOR)?.[1] ?? background[1].trim()
+    return evaluate(`document.body.style.background=${JSON.stringify(color)};return getComputedStyle(document.body).backgroundColor`)
+  }
+
+  const hide = instruction.match(/\b(?:hide|remove|delete)\s+(?:the\s+)?(.+?)(?:\s+(?:element|section|button|banner|sidebar))?$/i)
+  if (hide) {
+    const target = editTarget(hide[1], elements)
+    if (target) {
+      const selector = JSON.stringify(`[data-stet-id="${target.id}"]`)
+      return evaluate(
+        /remove|delete/i.test(hide[0])
+          ? `const el=document.querySelector(${selector});if(!el)throw new Error('target not found');el.remove();return true`
+          : `const el=document.querySelector(${selector});if(!el)throw new Error('target not found');el.style.display='none';return getComputedStyle(el).display`,
+      )
+    }
+  }
+
+  const recolor = instruction.match(/\b(?:make|change|set|turn)\b[\s\S]*?\b(.+?)\b(?:'s)?\s*(?:text\s*)?(?:colou?r)\b[\s\S]*?\bto\s+(.+)$/i)
+  if (recolor) {
+    const color = recolor[2].match(EDIT_COLOR)?.[1]
+    const target = editTarget(recolor[1], elements)
+    if (color && target) {
+      return evaluate(
+        `const el=document.querySelector(${JSON.stringify(`[data-stet-id="${target.id}"]`)});if(!el)throw new Error('target not found');el.style.color=${JSON.stringify(
+          color,
+        )};return getComputedStyle(el).color`,
+      )
+    }
+  }
+
+  const replace = instruction.match(/\breplace\s+(?:the\s+)?(.+?)\s+(?:text\s+)?with\s+["“']?(.+?)["”']?$/i)
+  if (replace) {
+    const target = editTarget(replace[1], elements)
+    if (target) {
+      return evaluate(
+        `const el=document.querySelector(${JSON.stringify(`[data-stet-id="${target.id}"]`)});if(!el)throw new Error('target not found');el.textContent=${JSON.stringify(
+          replace[2],
+        )};return el.textContent`,
+      )
+    }
+  }
+
+  return null
+}
+
+const PURCHASE_LABEL = /\b(?:buy|purchase|checkout|pay(?:ment)?|spend|redeem|unlock|open (?:a |the )?(?:pack|box|crate|case))\b/i
+
+/** Whether an action would spend currency or change the account. */
+export function isPurchaseAction(action: BrowserAction, elements: BrowserElement[] = []): boolean {
+  if (action.type === 'findLink') return PURCHASE_LABEL.test(action.text)
+  if (action.type !== 'click' || !action.selector) return false
+  const id = /^\[data-stet-id="([^"]+)"\]$/.exec(action.selector)?.[1]
+  return PURCHASE_LABEL.test(elements.find((element) => element.id === id)?.label ?? '')
 }
 
 /** The exact sentence that tells the caller the page cannot answer yet. */

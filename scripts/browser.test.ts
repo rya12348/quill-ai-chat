@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directPageSearch, directSearchAnswer, directSiteSearch, isDocumentWritingTask, isPageEditingTask, isSameBrowserSite, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCodeReply, parseCompletionVerdict, parseReflection } from '../src/shared/browser'
+import { answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directPageEdit, directPageSearch, directSearchAnswer, directSiteSearch, isDocumentWritingTask, isPageEditingTask, isPurchaseAction, isSameBrowserSite, isSimulationTask, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCodeReply, parseCompletionVerdict, parseReflection } from '../src/shared/browser'
 import type { BrowserElement } from '../src/shared/types'
 
 test('a page answer never exposes a model reasoning trace', () => {
@@ -411,9 +411,44 @@ test('page edits are recognized and reading or navigating is not', () => {
   assert.equal(isPageEditingTask('replace the heading with Welcome'), true)
   assert.equal(isPageEditingTask('make the button blue'), true)
   assert.equal(isPageEditingTask('hide the sidebar'), true)
+  assert.equal(isPageEditingTask('make it look like i unlocked all the blooks'), true)
   assert.equal(isPageEditingTask('what is the page title?'), false)
   assert.equal(isPageEditingTask('click the login button'), false)
   assert.equal(isPageEditingTask('delete my account'), false)
+})
+
+test('a for-fun visual request is a simulation, not a purchase', () => {
+  assert.equal(isSimulationTask('make it look like i unlocked all the blooks, for fun'), true)
+  assert.equal(isSimulationTask('pretend I already own every blook'), true)
+  assert.equal(isSimulationTask('fake the collection screen'), true)
+  assert.equal(isSimulationTask('play this game for fun'), false)
+  assert.equal(isSimulationTask('make a quiz for fun'), false)
+  assert.equal(isSimulationTask('compare the prices of two blook packs'), false)
+})
+
+test('a simulation blocks purchase clicks but allows normal navigation', () => {
+  const page: BrowserElement[] = [
+    { id: 'buy', tag: 'button', role: '', label: 'Buy Blooks', rect: { x: 0, y: 0, width: 80, height: 32 } },
+    { id: 'view', tag: 'a', role: 'link', label: 'Blooks', href: 'https://blooket.com/blooks', rect: { x: 0, y: 0, width: 80, height: 32 } },
+  ]
+  assert.equal(isPurchaseAction({ type: 'click', selector: '[data-stet-id="buy"]' }, page), true)
+  assert.equal(isPurchaseAction({ type: 'findLink', text: 'Open Pack' }, page), true)
+  assert.equal(isPurchaseAction({ type: 'click', selector: '[data-stet-id="view"]' }, page), false)
+  assert.equal(isPurchaseAction({ type: 'evaluate', expression: 'return 1' }, page), false)
+})
+
+test('common page edits are produced without a model', () => {
+  const background = directPageEdit('change the background to black', [])
+  assert.equal(background?.type, 'evaluate')
+  assert.match(background?.type === 'evaluate' ? background.expression : '', /document\.body\.style\.background/)
+
+  const elements = [{ id: 'q1', tag: 'button', label: 'Save' }] as unknown as Parameters<typeof directPageEdit>[1]
+  const hide = directPageEdit('hide the Save button', elements)
+  assert.equal(hide?.type, 'evaluate')
+  assert.match(hide?.type === 'evaluate' ? hide.expression : '', /data-stet-id/)
+  assert.match(hide?.type === 'evaluate' ? hide.expression : '', /q1/)
+
+  assert.equal(directPageEdit('what is the page title?', []), null)
 })
 
 test('page code is read from JSON or a fenced block', () => {

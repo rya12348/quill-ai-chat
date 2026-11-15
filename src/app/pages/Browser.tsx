@@ -2,7 +2,7 @@ import { ArrowLeft, ArrowRight, Code2, ExternalLink, Globe2, Loader2, Monitor, P
 import { startTransition, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
-import { answerVisibleFact, answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directFormFill, directPageSearch, directQuestionAnswer, directSearchAnswer, directSearchOpen, directSiteLookup, directSiteSearch, firstContentLink, isDocumentWritingTask, isSameBrowserSite, isPageEditingTask, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE } from '../../shared/browser'
+import { answerVisibleFact, answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directFormFill, directPageSearch, directQuestionAnswer, directSearchAnswer, directSearchOpen, directSiteLookup, directSiteSearch, firstContentLink, isDocumentWritingTask, isSameBrowserSite, directPageEdit, isPageEditingTask, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE } from '../../shared/browser'
 
 /** A signed-out Google app usually bounces to accounts.google.com, and
  * Classroom bounces to its marketing page. Both mean the task cannot continue
@@ -3282,26 +3282,40 @@ export function Browser() {
           }
           continue
         }
-        let runAction = planned.action
+        let runAction: BrowserAction = planned.action
         let runLabel = label
-        if (editingTask && planned.action.type === 'evaluate') {
-          setPhase('Writing the code…')
-          const improved = await api<{ code?: string }>('/browser/code', {
-            method: 'POST',
-            signal: controller.signal,
-            json: {
-              task: instruction,
-              snapshot: current.snapshot,
-              instruction: planned.say || label,
-              seed: planned.action.expression,
-            },
-          }).catch(() => null)
-          if (improved?.code) {
-            runAction = { type: 'evaluate', expression: improved.code }
-            runLabel = 'Run page code'
-            agentScript = improved.code
-            setScript(agentScript)
-            saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
+        if (editingTask) {
+          // A plain edit that the page itself can express does not need a model
+          // at all, so no provider can refuse it. More complex code goes to the
+          // dedicated coder below.
+          const direct = directPageEdit(instruction, current.snapshot.elements)
+          if (direct) {
+            runAction = direct
+            runLabel = 'Edit the page'
+            if (direct.type === 'evaluate') {
+              agentScript = direct.expression
+              setScript(agentScript)
+              saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
+            }
+          } else if (planned.action.type === 'evaluate') {
+            setPhase('Writing the code…')
+            const improved = await api<{ code?: string }>('/browser/code', {
+              method: 'POST',
+              signal: controller.signal,
+              json: {
+                task: instruction,
+                snapshot: current.snapshot,
+                instruction: planned.say || label,
+                seed: planned.action.expression,
+              },
+            }).catch(() => null)
+            if (improved?.code) {
+              runAction = { type: 'evaluate', expression: improved.code }
+              runLabel = 'Run page code'
+              agentScript = improved.code
+              setScript(agentScript)
+              saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
+            }
           }
         }
         setPhase(runLabel)
