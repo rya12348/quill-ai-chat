@@ -118,32 +118,38 @@ account.get('/models', async (c) => {
           },
         ]
       : []
-  const chatGptLane = lanes.find((lane) => lane.model === 'chatgpt')
+  // Stride (Step 5 Preview) and Prism (GLM-5.3 Flash) spent the most time
+  // degraded and add little over Sable, Quill and Ink. Retire those two rows
+  // and give their space to the no-key Claude Haiku lane the Buffy page uses.
+  const retiredFamilies = new Set(['Step', 'GLM'])
   const items: ModelInfo[] = [
     ...buffyRows,
-    ...(chatGptLane
-      ? [
-          {
-            id: chatGptLane.model,
-            name: 'ChatGPT',
-            description: 'GPT-5 Nano, free with no key. Falls back when busy.',
-            available: true,
-            family: 'ChatGPT',
-            billing: 'free' as const,
-          },
-        ]
-      : []),
-    ...pickPickerFamilies(
-      lanes.filter((lane) => !lane.model.startsWith('buffy') && lane.model !== 'chatgpt'),
-      statuses,
-    ).map(({ family, lane }, index) => ({
-      id: lane.model,
-      name: pickerModelName(index),
-      description: pickerModelDescription(index),
+    {
+      id: 'claude-haiku-5-5',
+      name: 'Claude',
+      description: 'Free Claude Haiku 5.5, no key or setup.',
       available: true,
-      family,
-      ...(lane.billing ? { billing: lane.billing } : {}),
-    })),
+      family: 'Claude',
+      billing: 'free',
+    },
+    ...pickPickerFamilies(
+      lanes.filter((lane) => !lane.model.startsWith('buffy')),
+      statuses,
+    )
+      .map(({ family, lane }, index) => {
+        // The two free frontier lanes are new enough that a borrowed alias
+        // hides what they are. Show their real names and descriptions.
+        const actual = /ernie-5\.5|particle-1/i.test(lane.model)
+        return {
+          id: lane.model,
+          name: actual ? lane.label : pickerModelName(index),
+          description: actual ? lane.description : pickerModelDescription(index),
+          available: true,
+          family,
+          ...(lane.billing ? { billing: lane.billing } : {}),
+        }
+      })
+      .filter(({ family }) => !retiredFamilies.has(family)),
   ]
   c.header('Cache-Control', 'private, no-store')
   return c.json({ items })
