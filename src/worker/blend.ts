@@ -24,6 +24,8 @@ type BlendInput = {
   reasoningEffort?: 'low' | 'medium' | 'high'
   /** Force the full team, even for a short question. */
   team?: boolean
+  /** The selected lane is frontier-class: always plan, draft, review and verify. */
+  frontier?: boolean
   onTeam?: (team: TeamInfo) => Promise<unknown> | unknown
   onStatus?: Status
   onLaneResult?: (result: LaneResult) => void
@@ -93,6 +95,8 @@ PASS
 FIX: <a short, precise description of what is wrong>
 Do not rewrite the answer and do not add any other commentary.`
 
+const FRONTIER_BAR = `Frontier standard: this answer is being held to Claude Opus 5.5 and Claude Fable 5 quality. Be exhaustive about constraints, exact about numbers, code and quotations, explicit about uncertainty, and never pad. A separate checker will reject a generic, partial or subtly wrong answer.`
+
 const TRIVIAL = /^(?:hi|hello|hey|thanks|thank you|ok(?:ay)?|cool|nice|great|got it|bye|goodbye)[\s!.,?]*$/i
 const HARD =
   /```|(?:^|\n)\s*(?:[-*]|\d+\.)\s|\b(?:step[- ]by[- ]step|why|compare|contrast|analy[sz]e|prove|derive|design|debug|refactor|optimi[sz]e|evaluate|trade-?offs?|architecture|algorithm|calculate|solve|plan|strategy|essay|critique)\b|[=∑∫√]/i
@@ -129,6 +133,14 @@ const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0
 const hostOf = (lane: PublicLane) => new URL(lane.url).host
 
 /** Adds a lens and, for deep questions, the plan to the system message. */
+function withFrontierBar(messages: ChatMessage[]): ChatMessage[] {
+  const [first, ...rest] = messages
+  if (first?.role === 'system') {
+    return [{ ...first, content: `${textFromContent(first.content)}\n\n${FRONTIER_BAR}` }, ...rest]
+  }
+  return [{ role: 'system', content: FRONTIER_BAR }, ...messages]
+}
+
 function withLens(messages: ChatMessage[], lens: string, plan?: string): ChatMessage[] {
   const guide = [
     lens,
@@ -364,9 +376,21 @@ async function reviseFinal(referee: PublicLane, candidate: string, issues: strin
   }
 }
 
-export async function* blendComplete(lanes: PublicLane[], input: BlendInput): AsyncGenerator<StreamPiece> {
+export async function* blendComplete(lanes: PublicLane[], baseInput: BlendInput): AsyncGenerator<StreamPiece> {
+  // A frontier choice buys the full harness on every turn, not only when the
+  // heuristic notices a hard question. The model is the same; the extra
+  // planning, independent drafts, review, verification and repair are what
+  // close the gap to the stronger closed models on benchmark-shaped work.
+  const input: BlendInput = baseInput.frontier
+    ? {
+        ...baseInput,
+        reasoning: true,
+        reasoningEffort: 'high',
+        messages: withFrontierBar(baseInput.messages),
+      }
+    : baseInput
   const question = textFromContent([...input.messages].reverse().find((message) => message.role === 'user')?.content ?? '')
-  const teamMode = input.team === true && !TRIVIAL.test(question.trim())
+  const teamMode = (input.team === true || input.frontier === true) && !TRIVIAL.test(question.trim())
   const depth = teamMode ? 'deep' : (input.depth ?? depthFor(question, activeLanes(lanes).length))
 
   if (depth === 'quick') {
@@ -489,19 +513,25 @@ export async function* blendComplete(lanes: PublicLane[], input: BlendInput): As
     if (input.signal?.aborted) return
 
     if (finalText.trim()) {
-      await input.onStatus?.('A second strong lane is checking the final answer…')
-      const check = await verifyFinal(verifier, finalText, drafts, review, input)
-      if (input.signal?.aborted) return
-      if (check.checked && check.issues) {
+      // Frontier gets two independent check cycles: verify, repair, then
+      // verify the repair. A normal deep pass keeps the single check so it
+      // does not pay for a second round when one already passed.
+      const passes = input.frontier ? 2 : 1
+      for (let pass = 0; pass < passes; pass += 1) {
+        await input.onStatus?.(
+          pass === 0 ? 'A second strong lane is checking the final answer…' : 'The repaired answer is being checked again…',
+        )
+        const check = await verifyFinal(verifier, finalText, drafts, review, input)
+        if (input.signal?.aborted) return
+        verified = check.checked
+        if (!check.checked || !check.issues) break
         await input.onStatus?.('The check found an issue; the referee is repairing it…')
         const repairText = await reviseFinal(referee, finalText, check.issues, input)
         if (input.signal?.aborted) return
-        if (repairText.trim()) {
-          finalText = repairText
-          repairedFinal = true
-        }
+        if (!repairText.trim()) break
+        finalText = repairText
+        repairedFinal = true
       }
-      verified = check.checked
     }
   }
 

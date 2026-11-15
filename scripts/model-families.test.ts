@@ -110,6 +110,13 @@ test('DeepSeek 4.1 is pinned into the shortlist when its lane is configured', ()
   assert.ok(picks.some((pick) => pick.lane.model === 'deepseek-flash'))
 })
 
+test('the NVIDIA DeepSeek lane opts into the frontier harness', () => {
+  const lanes = publicLanes({ NVIDIA_API_KEY: 'nvidia-key' } as unknown as Env)
+  const deepseek = lanes.find((lane) => lane.model === 'deepseek-ai/deepseek-v4.1-flash')
+  assert.equal(deepseek?.frontier, true)
+  assert.notEqual(lanes.find((lane) => lane.model === 'moonshotai/kimi-k3')?.frontier, true)
+})
+
 test('the added keyless lanes are wired into the free chain', () => {
   const lanes = publicLanes({} as unknown as Env)
   const byModel = (model: string) => lanes.find((lane) => lane.model === model)

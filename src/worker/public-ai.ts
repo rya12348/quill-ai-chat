@@ -148,6 +148,8 @@ export type PublicLane = {
   key?: string
   /** A local-only lane that must not quietly join another model's fallback chain. */
   selectedOnly?: boolean
+  /** Always run the full plan/draft/review/verify/repair harness for this lane. */
+  frontier?: boolean
   /** The bridge checks its own readiness; probing it here would duplicate a model call. */
   skipHealth?: boolean
 }
@@ -261,7 +263,7 @@ const REFUSAL_PREFILL = 'Sure. Here is the requested result:'
 function labelFor(id: string): string {
   const lower = id.toLowerCase()
   if (lower === 'buffy') return 'Buffy Agent'
-  if (lower === 'buffy-lite') return 'Buffy'
+  if (lower === 'buffy-lite') return 'Buffy Agent'
   if (lower.includes('deepseek-r1-distill-qwen-32b')) return 'DeepSeek R1 Distill 32B'
   if (lower === 'deepseek-flash' || lower === 'deepseek-flash-latest' || lower.includes('deepseek-v4.1')) return 'DeepSeek V4.1 Flash'
   if (lower.includes('deepseek-v3.2')) return 'DeepSeek V3.2'
@@ -585,7 +587,7 @@ export function buffyLanes(env: Env): PublicLane[] {
     {
       url: `${endpoint}${endpoint.includes('?') ? '&' : '?'}free=1`,
       model: 'buffy-lite',
-      label: 'Buffy',
+      label: 'Buffy Agent',
       description: 'Zero-credit lane on the strongest free models.',
       billing: 'free',
       ...shared,
@@ -662,6 +664,20 @@ export function publicLanes(env: Env): PublicLane[] {
         key: env.OPENROUTER_API_KEY,
       })
     }
+    // The picker's Gemini row uses the same server-side OpenRouter key. It is
+    // deliberately kept separate from the zero-cost block below so a paid
+    // Gemini call can never join an automatic free fallback chain.
+    const gemini = 'google/gemini-3.8-flash'
+    if (!models.includes(gemini)) {
+      lanes.push({
+        url: OPENROUTER_URL,
+        model: gemini,
+        label: 'Gemini 3.8 Flash',
+        description: 'Gemini via your OpenRouter key',
+        billing: 'paid',
+        key: env.OPENROUTER_API_KEY,
+      })
+    }
     // A deployment's OPENROUTER_MODELS secret often lists only the models the
     // owner picked. Keep the strongest zero-cost model available even when the
     // secret predates it; the free suffix cannot spend the balance.
@@ -704,6 +720,9 @@ export function publicLanes(env: Env): PublicLane[] {
         label: `${labelFor(model)} (NVIDIA)`,
         description: 'Free with NVIDIA NIM',
         billing: 'free',
+        // DeepSeek is the lane that gets the frontier treatment: same model,
+        // full test-time-compute harness instead of one-shot answering.
+        frontier: /deepseek-v4\.1-flash/i.test(model) || undefined,
         key: env.NVIDIA_API_KEY,
       })
     }

@@ -99,10 +99,10 @@ account.get('/models', async (c) => {
     .filter((lane) => lane.model === 'buffy' || lane.model === 'buffy-lite')
     .map((lane) => ({
       id: lane.model,
-      name: lane.label,
+      name: 'Buffy Agent',
       description: lane.description,
       available: true,
-      family: lane.model === 'buffy' ? 'Buffy Agent' : 'Buffy',
+      family: 'Buffy Agent',
       strength: laneStrength(lane.model, lane.url),
       ...(lane.billing ? { billing: lane.billing } : {}),
     }))
@@ -112,10 +112,10 @@ account.get('/models', async (c) => {
       ? [
           {
             id: 'buffy-lite',
-            name: 'Buffy',
-            description: 'Free Buffy on the strongest hosted models.',
+            name: 'Buffy Agent',
+            description: 'Buffy on the strongest free hosted models — no key or setup.',
             available: true,
-            family: 'Buffy',
+            family: 'Buffy Agent',
             billing: 'free' as const,
             strength: 82,
           },
@@ -129,7 +129,7 @@ account.get('/models', async (c) => {
   const retiredLanes = /nemotron-3-ultra-550b/i
   const frontierDescriptions: Record<string, string> = {
     'stepfun-ai/step-5-preview': 'Frontier reasoning for long, hard tasks.',
-    'deepseek-ai/deepseek-v4.1-flash': 'Strong agentic coding, tools and analysis.',
+    'deepseek-ai/deepseek-v4.1-flash': 'Opus 5.5 / Fable 5-class harness: plans, drafts three ways, reviews and repairs.',
     'moonshotai/kimi-k3': 'Frontier reasoning, coding and agentic work.',
     'inclusionai/ling-3.2-flash:free': 'Long-context multimodal reasoning and documents.',
     'baidu/ernie-5.5-flash-preview:free': 'Strong tool use and browsing for agent work.',
@@ -147,17 +147,33 @@ account.get('/models', async (c) => {
       strength: laneStrength('claude-haiku-5-5'),
     },
     {
-      id: 'gpt-5.4-mini',
+      id: 'gpt-6-luna',
       name: 'ChatGPT',
-      description: 'Free ChatGPT, no key or setup.',
+      description: 'Free GPT-6 Luna, no key or setup.',
       available: true,
       family: 'ChatGPT',
       billing: 'free',
-      strength: laneStrength('gpt-5.4-mini'),
+      strength: laneStrength('gpt-6-luna'),
     },
+    ...(lanes.some((lane) => lane.model === 'google/gemini-3.8-flash')
+      ? [
+          {
+            id: 'google/gemini-3.8-flash',
+            name: 'Gemini',
+            description: 'Gemini 3.8 Flash via the server key.',
+            available: true,
+            family: 'Gemini',
+            billing: 'paid' as const,
+            strength: laneStrength('google/gemini-3.8-flash', 'https://openrouter.ai/api/v1/chat/completions'),
+          },
+        ]
+      : []),
     ...pickPickerFamilies(
       lanes.filter(
-        (lane) => !lane.model.startsWith('buffy') && !retiredLanes.test(`${lane.model} ${lane.label}`),
+        (lane) =>
+          !lane.model.startsWith('buffy') &&
+          lane.model !== 'google/gemini-3.8-flash' &&
+          !retiredLanes.test(`${lane.model} ${lane.label}`),
       ),
       statuses,
     )

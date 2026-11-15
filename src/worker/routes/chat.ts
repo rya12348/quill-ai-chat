@@ -27,11 +27,12 @@ import { guestUsageKey, RATE_WINDOWS, rateLimit, tooManyRequests } from '../rate
 import { researchComplete } from '../research'
 import { findSiteTarget, webProxyPath, webProxyToken } from '../site-proxy'
 import { searchConfigured, searchPrompt, shouldSearch, type SearchResult } from '../search'
+import { DUCK_MODELS, duckComplete, duckTurn, type DuckMessage } from './buffy'
 import type { AppContext } from '../env'
 
 export const chat = new Hono<AppContext>()
 
-type Input = { conversationId?: unknown; content?: unknown; attachments?: unknown; dataset?: unknown; model?: unknown; regenerate?: unknown; strategy?: unknown; reasoning?: unknown; effort?: unknown; projectId?: unknown; clientMessageId?: unknown }
+type Input = { conversationId?: unknown; content?: unknown; attachments?: unknown; dataset?: unknown; model?: unknown; regenerate?: unknown; strategy?: unknown; reasoning?: unknown; effort?: unknown; projectId?: unknown; clientMessageId?: unknown; duck?: unknown }
 
 // Replies in flight per user in this isolate (start times, so a slot that was
 // never released still expires). A cheap brake on a tab that fires requests
@@ -144,7 +145,16 @@ chat.post('/', async (c) => {
   if (!regenerate && !content && !attachments.length) return c.json({ error: 'empty', message: 'Write a message or attach a file first.' }, 400)
   if (content.length > MAX_MESSAGE_CHARS) return c.json({ error: 'too_long', message: `Messages can be up to ${MAX_MESSAGE_CHARS.toLocaleString()} characters.` }, 400)
   const clientMessageId = typeof input.clientMessageId === 'string' && CLIENT_MESSAGE_ID.test(input.clientMessageId) ? input.clientMessageId : undefined
-  if (input.model !== undefined && input.model !== 'buffy-lite' && !isModelId(input.model) && !allLanes.some((lane) => lane.model === input.model)) {
+  // The free brand lanes need a proof solved in the visitor's browser. Only a
+  // proof for the exact requested model is accepted; without one the request
+  // would silently answer from a different free lane.
+  const duckRequested =
+    !usingApi && typeof input.model === 'string' && (DUCK_MODELS as readonly string[]).includes(input.model)
+  const duck = duckRequested ? duckTurn(input.duck) : null
+  if (duckRequested && (!duck || duck.model !== input.model)) {
+    return c.json({ error: 'model', message: 'The free model session expired. Send the message again.' }, 400)
+  }
+  if (input.model !== undefined && input.model !== 'buffy-lite' && !duckRequested && !isModelId(input.model) && !allLanes.some((lane) => lane.model === input.model)) {
     return c.json({ error: 'model', message: 'Unknown model.' }, 400)
   }
   if (input.conversationId !== undefined && typeof input.conversationId !== 'string') return c.json({ error: 'conversation', message: 'Invalid conversation.' }, 400)
@@ -253,8 +263,10 @@ chat.post('/', async (c) => {
   // Worker has no loopback bridge, so the same row falls back to the strongest
   // hosted free lanes and keeps Buffy's no-tools identity.
   const requestedModel = typeof input.model === 'string' ? input.model : conversationRow?.model
+  const duckFree = Boolean(!usingApi && duck && requestedModel === duck.model)
   const nativeBuffyFree =
     !usingApi &&
+    !duckFree &&
     requestedModel === 'buffy-lite' &&
     allLanes.length > 0 &&
     !allLanes.some((lane) => lane.model === 'buffy-lite')
@@ -262,7 +274,9 @@ chat.post('/', async (c) => {
   // when that exact model was selected, so a free chat, Deep pass or research
   // run stays free even when a paid key happens to be configured.
   const selectedPaid = typeof input.model === 'string' && lanes.some((lane) => lane.model === input.model && lane.billing === 'paid')
-  const engineLanes = (selectedPaid ? lanes : lanes.filter((lane) => lane.billing !== 'paid')).filter(
+  // A paid choice is a single-model choice: do not blend it with every other
+  // paid lane just because the deployment has keys for them.
+  const engineLanes = (selectedPaid ? lanes.filter((lane) => lane.model === input.model) : lanes.filter((lane) => lane.billing !== 'paid')).filter(
     (lane) => !nativeBuffyFree || !lane.model.startsWith('buffy'),
   )
   if (!usingApi && needsVision && !wantsResearch && !wantsAnalysis && !lanes.length) {
@@ -278,18 +292,18 @@ chat.post('/', async (c) => {
     ? await latestBuild(db, owner, String(conversationRow.id), t)
     : undefined
   const buildTarget = wantsBuild ? findSiteTarget(content) : undefined
-  const research = !nativeBuffyFree && wantsResearch && !isSmallTalk(content) && isResearchIntent(content)
-  const analyze = !nativeBuffyFree && wantsAnalysis && Boolean(analyzeDataset) && !regenerate && isAnalyzeIntent(content)
-  const build = !nativeBuffyFree && wantsBuild
+  const research = !duckFree && !nativeBuffyFree && wantsResearch && !isSmallTalk(content) && isResearchIntent(content)
+  const analyze = !duckFree && !nativeBuffyFree && wantsAnalysis && Boolean(analyzeDataset) && !regenerate && isAnalyzeIntent(content)
+  const build = !duckFree && !nativeBuffyFree && wantsBuild
     && !isSmallTalk(content)
     && (isBuildRequest(content) || Boolean(buildTarget) || (Boolean(priorBuild) && BUILD_EDIT_REQUEST.test(content)))
-  const canvas = !nativeBuffyFree && wantsCanvas && !isSmallTalk(content) && isCanvasRequest(content)
+  const canvas = !duckFree && !nativeBuffyFree && wantsCanvas && !isSmallTalk(content) && isCanvasRequest(content)
   // A plain Chat reply can hand the request to the mode that actually does the
   // work. The model gets one short nudge naming that mode; the UI offers the
   // switch beside the reply. Capability checks keep the nudge truthful.
   const hasAttachments = attachments.length > 0
   const hasDataAttachment = attachments.some((attachment) => /\.(?:csv|tsv|xlsx)$/i.test(attachment.name))
-  let suggestedMode = !nativeBuffyFree && !usingApi && (input.strategy === 'fast' || input.strategy === undefined)
+  let suggestedMode = !duckFree && !nativeBuffyFree && !usingApi && (input.strategy === 'fast' || input.strategy === undefined)
     ? suggestToolMode(content, { hasAttachments, hasDataAttachment })
     : null
   if (suggestedMode === 'research' && !researchEnabled) suggestedMode = null
@@ -301,7 +315,7 @@ chat.post('/', async (c) => {
   const wantsSources = /\b(?:sources?|cite|citations?|references?|bibliography)\b/i.test(content)
   const wantsResearchPaper = /\bresearch\s+(?:paper|report|essay|project)\b/i.test(content)
   const writingDocument = research && isWritingRequest(content) && !needsCurrentFacts(content) && !wantsSources && !wantsResearchPaper
-  const agent = wantsAgent && !nativeBuffyFree
+  const agent = wantsAgent && !duckFree && !nativeBuffyFree
   if (research && !writingDocument) {
     const reports = await researchToday(db, owner)
     if (reports >= RESEARCH_DAILY_LIMIT) {
@@ -358,14 +372,19 @@ chat.post('/', async (c) => {
   // 'fast' answers with a single model for people who want the quicker reply.
   // Proof is free-lane only: its checks depend on the lane roster, and the
   // keyed API path has no lanes to write independent tests.
-  const proof = !nativeBuffyFree && !research && !analyze && !build && !canvas && !agent && input.strategy === 'proof' && !usingApi && engineLanes.length > 0
+  const proof = !duckFree && !nativeBuffyFree && !research && !analyze && !build && !canvas && !agent && input.strategy === 'proof' && !usingApi && engineLanes.length > 0
   // The full local agent is a deliberate single run, not an ensemble member.
   // Buffy Free is a free lane: Deep mode may use it as the first draft and add
   // the independent review pass around it.
   const selectedFullAgent = !usingApi && input.model === 'buffy'
-  const blend = !nativeBuffyFree && !selectedFullAgent && !proof && !research && !analyze && !build && !canvas && !agent && input.strategy !== 'fast' && engineLanes.length > 1
+  // A frontier lane must not be downgraded to a one-shot answer just because
+  // the person left the speed switch on Fast. Its extra passes are the point.
+  const selectedFrontier = Boolean(engineLanes.find((lane) => lane.frontier && lane.model === input.model))
+  const blend = !duckFree && !nativeBuffyFree && !selectedFullAgent && !proof && !research && !analyze && !build && !canvas && !agent && (input.strategy !== 'fast' || selectedFrontier) && engineLanes.length > 1
   const existingModel = conversationRow?.model
-  const model: string = nativeBuffyFree
+  const model: string = duckFree && duck
+    ? duck.model
+    : nativeBuffyFree
     ? 'buffy-lite'
     : usingApi
       ? isModelId(input.model)
@@ -768,7 +787,7 @@ chat.post('/', async (c) => {
       // Search after `start`, so the reader sees the plan while results load.
       // Planning is bounded and optional: a slow or broken search still leaves
       // the reply to stream, with a notice instead of an error.
-      if (!research && !analyze && !build && !canvas && !agent && searchConfigured(c.env) && shouldSearch(userMessage.content)) {
+      if (!duckFree && !research && !analyze && !build && !canvas && !agent && searchConfigured(c.env) && shouldSearch(userMessage.content)) {
         const retrieval = await planAndRetrieve({
           env: c.env,
           model: model as ModelId,
@@ -896,7 +915,27 @@ chat.post('/', async (c) => {
                 ? 'quick'
                 : chooseDepth(userMessage.content, depthFor(userMessage.content, laneCount), depthQuality)
       }
-      if (agent) {
+      if (duckFree && duck) {
+        // Plain chat on a free brand lane. It has no tools, so modes and
+        // search stay off; the browser-solved proof above authorizes the call.
+        const duckMessages: DuckMessage[] = prompt.map((message) => ({
+          role: message.role,
+          content:
+            typeof message.content === 'string'
+              ? message.content
+              : message.content
+                  .filter((part) => part.type === 'text')
+                  .map((part) => part.text)
+                  .join('\n'),
+        }))
+        const duckSystem =
+          'You are Ink, a thoughtful writing, research and coding assistant. Answer the person directly and concisely. You have no tools in this chat: do not claim to have browsed, run code, read files or changed anything.'
+        for await (const piece of duckComplete(duck, duckMessages, controller.signal, duckSystem)) {
+          if (gone) return
+          text += piece
+          if (!(await send({ type: 'delta', text: piece }))) return await abandon()
+        }
+      } else if (agent) {
         // Agent reuses the free-mode engines as tools. The plan is untrusted,
         // so each restricted tool is checked against its daily allowance right
         // before it runs and is shown as skipped when the allowance is gone.
@@ -1123,6 +1162,7 @@ chat.post('/', async (c) => {
                 reasoning: wantReasoning,
                 reasoningEffort,
                 team: input.strategy === 'team',
+                frontier: selectedFrontier || Boolean(engineLanes.find((lane) => lane.frontier && lane.model === model)),
                 onTeam: (team) => send({ type: 'team', team }),
                 avoid,
                 quality: laneQuality,
