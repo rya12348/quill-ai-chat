@@ -97,6 +97,8 @@ Do not rewrite the answer and do not add any other commentary.`
 
 const FRONTIER_BAR = `Frontier standard: this answer is being held to Claude Opus 5.5 and Claude Fable 5 quality. Be exhaustive about constraints, exact about numbers, code and quotations, explicit about uncertainty, and never pad. A separate checker will reject a generic, partial or subtly wrong answer.`
 
+const CHECKLIST = `Before anyone answers my last message, extract every explicit requirement, constraint, format rule, example, number and edge case into a numbered checklist. One line per requirement, no answers and no commentary. If the request is open-ended, include the qualities a demanding reviewer would require. Keep it under 20 lines.`
+
 const TRIVIAL = /^(?:hi|hello|hey|thanks|thank you|ok(?:ay)?|cool|nice|great|got it|bye|goodbye)[\s!.,?]*$/i
 const HARD =
   /```|(?:^|\n)\s*(?:[-*]|\d+\.)\s|\b(?:step[- ]by[- ]step|why|compare|contrast|analy[sz]e|prove|derive|design|debug|refactor|optimi[sz]e|evaluate|trade-?offs?|architecture|algorithm|calculate|solve|plan|strategy|essay|critique)\b|[=∑∫√]/i
@@ -258,6 +260,25 @@ async function planFor(lane: PublicLane | undefined, input: BlendInput): Promise
   }
 }
 
+/** Turns the request into an explicit checklist the drafts and checkers must satisfy. */
+async function checklistFor(lane: PublicLane | undefined, input: BlendInput): Promise<string> {
+  if (!lane) return ''
+  try {
+    return await laneText(lane, {
+      messages: [...input.messages, { role: 'user', content: CHECKLIST }],
+      signal: input.signal,
+      reasoning: input.reasoning,
+      reasoningEffort: input.reasoningEffort,
+      maxTokens: 400,
+      temperature: 0.2,
+      onLaneResult: input.onLaneResult,
+      onReasoning: input.onReasoning,
+    })
+  } catch {
+    return ''
+  }
+}
+
 /** Tries the independent reviewer first, then the referee as a last resort. */
 async function critiqueDrafts(candidates: (PublicLane | undefined)[], drafts: Draft[], input: BlendInput): Promise<string> {
   const seen = new Set<string>()
@@ -308,6 +329,7 @@ async function verifyFinal(
   drafts: Draft[],
   review: string,
   input: BlendInput,
+  checklist = '',
 ): Promise<Verification> {
   if (!lane || !candidate.trim()) return { checked: false, issues: '' }
   const prompt: ChatMessage[] = [
@@ -323,6 +345,7 @@ async function verifyFinal(
         '### Earlier drafts',
         drafts.map((draft, index) => `Draft ${index + 1} (${draft.lane.label}):\n${clip(draft.text, 2_500)}`).join('\n\n'),
         review ? `\n### Reviewer's notes\n${clip(review, 2_500)}` : '',
+        checklist ? `\n### Requirements checklist\n${clip(checklist, 2_000)}` : '',
       ].join('\n'),
     },
   ]
@@ -344,7 +367,7 @@ async function verifyFinal(
 }
 
 /** The referee repairs the answer after the independent check finds a problem. */
-async function reviseFinal(referee: PublicLane, candidate: string, issues: string, input: BlendInput): Promise<string> {
+async function reviseFinal(referee: PublicLane, candidate: string, issues: string, input: BlendInput, checklist = ''): Promise<string> {
   const prompt: ChatMessage[] = [
     ...input.messages,
     {
@@ -353,6 +376,7 @@ async function reviseFinal(referee: PublicLane, candidate: string, issues: strin
         'An independent checker found a problem with the candidate answer below. Rewrite the complete final answer, fixing the problem and preserving everything that was already correct.',
         '',
         `Checker's finding:\n${clip(issues, 2_000)}`,
+        checklist ? `\nRequirements checklist:\n${clip(checklist, 2_000)}` : '',
         '',
         `Candidate answer:\n${clip(candidate, 7_000)}`,
         '',
@@ -405,7 +429,7 @@ export async function* blendComplete(lanes: PublicLane[], baseInput: BlendInput)
     return
   }
 
-  const selection = chooseTeam(lanes, depth === 'deep' ? 3 : 2, depth === 'deep', input.avoid, input.quality)
+  const selection = chooseTeam(lanes, depth === 'deep' ? (input.frontier ? 5 : 3) : 2, depth === 'deep', input.avoid, input.quality)
   if (!selection || !selection.drafters.length) {
     yield* publicComplete(lanes, input)
     return
@@ -414,14 +438,20 @@ export async function* blendComplete(lanes: PublicLane[], baseInput: BlendInput)
   const drafters = selection.drafters
 
   let plan = ''
+  let checklist = ''
   if (depth === 'deep') {
     await input.onStatus?.(teamMode ? 'The strongest available model is planning the approach…' : 'Planning the approach…')
     plan = await planFor(referee, input)
     if (input.signal?.aborted) return
+    if (input.frontier) {
+      await input.onStatus?.('Extracting every requirement into a checklist…')
+      checklist = await checklistFor(referee, input)
+      if (input.signal?.aborted) return
+    }
   }
 
   await input.onStatus?.(teamMode ? `${drafters.length} models are drafting independently…` : `${drafters.length} models are drafting…`)
-  const drafts = await draftAll(drafters, input, plan)
+  const drafts = await draftAll(drafters, input, [plan, checklist ? `Requirements checklist:\n${checklist}` : ''].filter(Boolean).join('\n\n'))
   if (input.signal?.aborted) return
 
   if (!drafts.length) {
@@ -484,6 +514,7 @@ export async function* blendComplete(lanes: PublicLane[], baseInput: BlendInput)
         '',
         drafts.map((draft, index) => `### Draft ${index + 1} (${draft.lane.label})\n${clip(draft.text, 6_000)}`).join('\n\n'),
         review ? `\n### Reviewer's notes\n${clip(review, 3_000)}` : '',
+        checklist ? `\n### Requirements checklist\n${clip(checklist, 2_000)}` : '',
         '',
         'Write the final answer to my last message now.',
       ].join('\n'),
@@ -516,17 +547,17 @@ export async function* blendComplete(lanes: PublicLane[], baseInput: BlendInput)
       // Frontier gets two independent check cycles: verify, repair, then
       // verify the repair. A normal deep pass keeps the single check so it
       // does not pay for a second round when one already passed.
-      const passes = input.frontier ? 2 : 1
+      const passes = input.frontier ? 3 : 1
       for (let pass = 0; pass < passes; pass += 1) {
         await input.onStatus?.(
           pass === 0 ? 'A second strong lane is checking the final answer…' : 'The repaired answer is being checked again…',
         )
-        const check = await verifyFinal(verifier, finalText, drafts, review, input)
+        const check = await verifyFinal(verifier, finalText, drafts, review, input, checklist)
         if (input.signal?.aborted) return
         verified = check.checked
         if (!check.checked || !check.issues) break
         await input.onStatus?.('The check found an issue; the referee is repairing it…')
-        const repairText = await reviseFinal(referee, finalText, check.issues, input)
+        const repairText = await reviseFinal(referee, finalText, check.issues, input, checklist)
         if (input.signal?.aborted) return
         if (!repairText.trim()) break
         finalText = repairText
