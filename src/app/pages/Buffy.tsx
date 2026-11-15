@@ -323,13 +323,13 @@ export function Buffy() {
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-[17px] font-medium leading-tight">Buffy</h1>
           <p className="truncate text-[12.5px] text-faint">
-            {freeMode ? 'Free hosted models · no project setup needed' : 'The Codebuff coding agent, locally bridged'}
+            {freeMode ? 'ChatGPT first · free fallbacks · no project setup' : 'The Codebuff coding agent, locally bridged'}
           </p>
         </div>
         {status?.ready && (
           <span className="hidden items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-[11.5px] text-muted sm:flex">
             <span className={`size-1.5 rounded-full ${freeMode ? 'bg-sky-500' : 'bg-emerald-500'}`} />
-            {freeMode ? 'Free lane' : status.mock ? 'Mock bridge' : 'Bridge connected'}
+            {freeMode ? 'ChatGPT first' : status.mock ? 'Mock bridge' : 'Bridge connected'}
           </span>
         )}
         <button
@@ -351,7 +351,7 @@ export function Buffy() {
                 <div>
                   <p className="font-display text-[27px] font-medium leading-tight tracking-[-0.02em]">Talk to Buffy.</p>
                   <p className="mt-1 text-[14px] text-muted">
-                    {freeMode ? 'Free chat with Buffy. No project setup needed.' : 'The Codebuff agent when credits are available, with a free fallback lane.'}
+                    {freeMode ? 'Free chat with Buffy. ChatGPT (GPT-5 Nano) is tried first, with free fallbacks if it is busy.' : 'The Codebuff agent when credits are available, with a free fallback lane.'}
                   </p>
                   <p className="mt-2 text-[12px] text-faint">Attach text or code with the paperclip, or paste it into the message.</p>
                 </div>
@@ -564,7 +564,7 @@ export function Buffy() {
           )}
         </form>
         <p className="mx-auto mt-1.5 w-full max-w-[760px] text-[10.5px] text-faint">
-          {freeMode ? 'Buffy · free chat · no project or tools required' : 'Local bridge · Codebuff when available · free fallback otherwise'}
+          {freeMode ? 'Buffy · ChatGPT first · free fallbacks · no project required' : 'Local bridge · Codebuff when available · free fallback otherwise'}
         </p>
       </div>
 

@@ -205,7 +205,7 @@ buffy.post('/chat', async (c) => {
         event: 'status',
         data: JSON.stringify({ type: 'status', text: 'Buffy is thinking…' }),
       })
-      const completion = publicComplete(orderLanes(lanes, 'buffy'), {
+      const completion = publicComplete(orderLanes(lanes, 'chatgpt'), {
         messages: [
           {
             role: 'system',

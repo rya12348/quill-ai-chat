@@ -118,10 +118,23 @@ account.get('/models', async (c) => {
           },
         ]
       : []
+  const chatGptLane = lanes.find((lane) => lane.model === 'chatgpt')
   const items: ModelInfo[] = [
     ...buffyRows,
+    ...(chatGptLane
+      ? [
+          {
+            id: chatGptLane.model,
+            name: 'ChatGPT',
+            description: 'GPT-5 Nano, free with no key. Falls back when busy.',
+            available: true,
+            family: 'ChatGPT',
+            billing: 'free' as const,
+          },
+        ]
+      : []),
     ...pickPickerFamilies(
-      lanes.filter((lane) => !lane.model.startsWith('buffy')),
+      lanes.filter((lane) => !lane.model.startsWith('buffy') && lane.model !== 'chatgpt'),
       statuses,
     ).map(({ family, lane }, index) => ({
       id: lane.model,

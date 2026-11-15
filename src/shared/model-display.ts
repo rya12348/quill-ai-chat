@@ -7,6 +7,7 @@ import type { ModelInfo } from './types'
 const FALLBACKS: [RegExp, string][] = [
   [/^buffy-lite$/i, 'Buffy'],
   [/^buffy$/i, 'Buffy Agent'],
+  [/^chatgpt$/i, 'ChatGPT'],
   [/claude|sonnet|opus|haiku/i, 'Sable'],
   [/kimi|moonshot/i, 'Sable'],
   [/stepfun|step[- ]?\d/i, 'Quill'],
