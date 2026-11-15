@@ -131,6 +131,19 @@ test('the added keyless lanes are wired into the free chain', () => {
   }
 })
 
+test('ChatGPT is a keyless free lane backed by OpenAI gpt-5-nano', () => {
+  const lanes = publicLanes({} as unknown as Env)
+  const chatgpt = lanes.find((lane) => lane.model === 'chatgpt')
+
+  assert.ok(chatgpt)
+  assert.equal(chatgpt.requestModel, 'openai-fast')
+  assert.equal(chatgpt.label, 'ChatGPT (GPT-5 Nano)')
+  assert.equal(chatgpt.billing, 'free')
+  assert.equal(chatgpt.key, undefined)
+  assert.equal(familyForLane(chatgpt), 'ChatGPT')
+  assert.equal(lanes.some((lane) => lane.model === 'openai-fast'), false)
+})
+
 test('an Alibaba Model Studio key adds the free-trial frontier lanes', () => {
   const env = { DASHSCOPE_API_KEY: 'dash-key' } as unknown as Env
   const lanes = publicLanes(env).filter((lane) => lane.url.includes('dashscope-intl.aliyuncs.com'))
