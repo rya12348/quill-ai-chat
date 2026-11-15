@@ -2,7 +2,7 @@ import { ArrowLeft, ArrowRight, Code2, ExternalLink, Globe2, Loader2, Monitor, P
 import { startTransition, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
-import { answerVisibleFact, answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directFormFill, directPageSearch, directQuestionAnswer, directSearchAnswer, directSearchOpen, directSiteLookup, directSiteSearch, firstContentLink, isDocumentWritingTask, isSameBrowserSite, directPageEdit, isPageEditingTask, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE } from '../../shared/browser'
+import { answerVisibleFact, answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directFormFill, directPageSearch, directQuestionAnswer, directSearchAnswer, directSearchOpen, directSiteLookup, directSiteSearch, firstContentLink, isDocumentWritingTask, isSameBrowserSite, directPageEdit, isPageEditingTask, isSimulationTask, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE } from '../../shared/browser'
 
 /** A signed-out Google app usually bounces to accounts.google.com, and
  * Classroom bounces to its marketing page. Both mean the task cannot continue
@@ -189,6 +189,16 @@ function usablePageAnswer(raw: string): string {
 
 /** A question that still needs the browser to click, navigate or type first. */
 function needsPageAction(task: string, afterNavigation = false): boolean {
+  // “Answer every question” on a quiz, worksheet or lesson is not a request for
+  // a chat answer: the answers have to be entered on the page, and the video
+  // may need to be resumed between them. Keep genuine reading questions such
+  // as “what is the answer to question 1?” on the fast read-only lane.
+  if (
+    /\b(?:answer|solve|respond\s+to|complete|finish|do)\b[\s\S]{0,80}\b(?:every|all|each|the|these|those)\s+(?:questions?|quiz|test|exercise|assignment)\b/i.test(task) ||
+    /\b(?:answer|solve)\b[\s\S]{0,40}\bquestions\b/i.test(task)
+  ) {
+    return true
+  }
   if (
     /\b(?:click|open|go\s+to|navigate|visit|fill|type|search|select|choose|submit|upload|download|scroll|press|buy|book|order|sign\s+in|log\s+in|sign\s+up|delete|remove|add|save|send|compare|apply|checkout|play|pause|next|previous|back|forward|reload)\b/i.test(
       task,
@@ -283,7 +293,9 @@ function actionLabel(action: BrowserAction, elements: BrowserElement[] = []): st
     case 'waitFor':
       return action.state === 'time'
         ? `Wait ${Math.round((action.timeoutMs ?? 0) / 1_000)}s`
-        : `Wait for ${action.selector || action.text || 'the video'} to become ${action.state || 'visible'}`
+        : action.state === 'attention'
+          ? 'Wait for a video question or pause'
+          : `Wait for ${action.selector || action.text || 'the video'} to become ${action.state || 'visible'}`
     case 'inspect':
       return action.selector ? `Inspect ${action.selector}` : 'Inspect the page'
     case 'screenshot':
@@ -2963,6 +2975,8 @@ export function Browser() {
     // Editing is a coding job: a dedicated coder writes the page program
     // instead of asking the action planner to squeeze JavaScript into JSON.
     const editingTask = isPageEditingTask(instruction)
+    const simulationTask = isSimulationTask(instruction)
+    let simulationHtml = ''
     const failedActions = new Map<string, number>()
     const stalledActions = new Map<string, number>()
     try {
@@ -3286,9 +3300,9 @@ export function Browser() {
         let runLabel = label
         if (editingTask) {
           // A plain edit that the page itself can express does not need a model
-          // at all, so no provider can refuse it. More complex code goes to the
-          // dedicated coder below.
-          const direct = directPageEdit(instruction, current.snapshot.elements)
+          // at all, so no provider can refuse it. More complex code and all
+          // cosmetic simulations go to the dedicated coder below.
+          const direct = simulationTask ? null : directPageEdit(instruction, current.snapshot.elements)
           if (direct) {
             runAction = direct
             runLabel = 'Edit the page'
@@ -3297,8 +3311,19 @@ export function Browser() {
               setScript(agentScript)
               saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
             }
-          } else if (planned.action.type === 'evaluate') {
-            setPhase('Writing the code…')
+          } else if (simulationTask || planned.action.type === 'evaluate') {
+            setPhase(simulationTask ? 'Making it look right…' : 'Writing the code…')
+            // A visual simulation needs the real markup: locked states live in
+            // classes, overlays and counters that the element list does not
+            // carry. Read it once, then let the coder edit the rendered state.
+            if (simulationTask && !simulationHtml) {
+              const inspected = await api<{ html?: string }>('/browser/inspect', {
+                method: 'POST',
+                signal: controller.signal,
+                json: { selector: 'body' },
+              }).catch(() => null)
+              simulationHtml = inspected?.html ?? ''
+            }
             const improved = await api<{ code?: string }>('/browser/code', {
               method: 'POST',
               signal: controller.signal,
@@ -3306,7 +3331,9 @@ export function Browser() {
                 task: instruction,
                 snapshot: current.snapshot,
                 instruction: planned.say || label,
-                seed: planned.action.expression,
+                seed: planned.action.type === 'evaluate' ? planned.action.expression : '',
+                simulation: simulationTask,
+                html: simulationHtml,
               },
             }).catch(() => null)
             if (improved?.code) {
