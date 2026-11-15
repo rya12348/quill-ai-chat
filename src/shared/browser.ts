@@ -16,6 +16,29 @@ export function isPageEditingTask(task: string): boolean {
 /** The exact sentence that tells the caller the page cannot answer yet. */
 export const PAGE_ANSWER_UNAVAILABLE = 'That answer is not visible on this page.'
 
+/** Read a page program from the coding model. Accepts JSON or a fenced block,
+ * so a model that ignores the schema still produces usable code. */
+export function parseCodeReply(raw: string): { code: string; explanation: string } | null {
+  const trimmed = raw.trim()
+  const json = trimmed.match(/\{[\s\S]*\}/)
+  if (json) {
+    try {
+      const parsed = JSON.parse(json[0]) as { code?: unknown; explanation?: unknown }
+      if (typeof parsed.code === 'string' && parsed.code.trim()) {
+        return {
+          code: parsed.code.trim().slice(0, 12_000),
+          explanation: typeof parsed.explanation === 'string' ? parsed.explanation.slice(0, 300) : '',
+        }
+      }
+    } catch {
+      // Fall through to a fenced block.
+    }
+  }
+  const fenced = trimmed.match(/```(?:js|javascript|ts|typescript)?\s*([\s\S]*?)```/i)
+  const code = (fenced?.[1] ?? '').trim()
+  return code ? { code: code.slice(0, 12_000), explanation: '' } : null
+}
+
 /** Read a reflection on a failed attempt. Returns null when it is unusable, so
  * a broken reflection never stops the run. */
 export function parseReflection(raw: string): { diagnosis: string; options: string[] } | null {
@@ -56,9 +79,11 @@ export function parseCompletionVerdict(raw: string): { complete: boolean; missin
 /** True when a model is refusing the task instead of doing it. Kept narrow so
  * an honest "not found here" is not mistaken for a refusal. */
 export function looksLikeRefusal(raw: string): boolean {
-  const text = raw.trim()
+  const text = raw.trim().replace(/[’‘]/g, "'")
   if (!text) return false
-  return /\b(?:as an ai(?: language model)?|i(?:'m| am) (?:just )?an ai|i(?:'m| am) unable to (?:help|assist|do|access|browse|complete|perform|comply|continue)|i (?:can(?:no|')t|won't|will not) (?:help|assist|do|access|browse|complete|perform|comply|continue|engage)|i (?:don't|do not) have (?:the )?(?:ability|access|permission|capability)|i(?:'m| am) not able to (?:help|assist|do|access|browse)|i must decline|i(?:'m| am) sorry, but i can(?:'|no)t)\b/i.test(
+  // “I can't help but notice…” is ordinary prose, not a refusal to do work.
+  if (/\bi can(?:no|')t help (?:but|noticing|thinking|wondering|feeling)\b/i.test(text)) return false
+  return /\b(?:as an ai(?: language model)?|i(?:'m| am) (?:just )?an ai|i(?:'m| am) unable to (?:help|assist|do|access|browse|complete|perform|comply|continue|provide|create|generate|write|share|offer|answer|fulfill|support|make|tell)|i (?:can(?:no|')t|won't|will not) (?:help|assist|do|access|browse|complete|perform|comply|continue|engage|provide|create|generate|write|share|offer|answer|fulfill|support|make|tell)|i (?:don't|do not) have (?:the )?(?:ability|access|permission|capability)|i(?:'m| am) not able to (?:help|assist|do|access|browse)|i(?:'m| am) not comfortable|i must (?:respectfully )?decline|i(?:'m| am) sorry, but i can(?:'|no)t|i (?:won't|will not) be able to|not something i (?:can|will) (?:do|help with))\b/i.test(
     text,
   )
 }

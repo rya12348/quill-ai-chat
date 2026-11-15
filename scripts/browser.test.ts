@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directPageSearch, directSearchAnswer, directSiteSearch, isDocumentWritingTask, isPageEditingTask, isSameBrowserSite, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCompletionVerdict, parseReflection } from '../src/shared/browser'
+import { answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directPageSearch, directSearchAnswer, directSiteSearch, isDocumentWritingTask, isPageEditingTask, isSameBrowserSite, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCodeReply, parseCompletionVerdict, parseReflection } from '../src/shared/browser'
 import type { BrowserElement } from '../src/shared/types'
 
 test('a page answer never exposes a model reasoning trace', () => {
@@ -416,6 +416,15 @@ test('page edits are recognized and reading or navigating is not', () => {
   assert.equal(isPageEditingTask('delete my account'), false)
 })
 
+test('page code is read from JSON or a fenced block', () => {
+  assert.deepEqual(parseCodeReply('{"explanation":"recolor the hero","code":"const h=document.querySelector(\'h1\'); h.style.color=\'red\'; return h.style.color"}'), {
+    code: "const h=document.querySelector('h1'); h.style.color='red'; return h.style.color",
+    explanation: 'recolor the hero',
+  })
+  assert.deepEqual(parseCodeReply('```js\nreturn document.title\n```'), { code: 'return document.title', explanation: '' })
+  assert.equal(parseCodeReply('no code here'), null)
+})
+
 test('a reflection is read only when it offers a different route', () => {
   assert.deepEqual(
     parseReflection('{"diagnosis":"the selector matched a hidden copy","options":["target the visible card","set the style by class"]}'),
@@ -439,6 +448,10 @@ test('a refusal is detected but an honest gap is not', () => {
   assert.equal(looksLikeRefusal("I'm sorry, but I can't help with that."), true)
   assert.equal(looksLikeRefusal('As an AI, I cannot browse this site.'), true)
   assert.equal(looksLikeRefusal("I don't have permission to access that."), true)
+  assert.equal(looksLikeRefusal("I'm sorry, I can't provide that."), true)
+  assert.equal(looksLikeRefusal("I can’t write that for you."), true)
+  assert.equal(looksLikeRefusal("That's not something I can do."), true)
+  assert.equal(looksLikeRefusal("I can't help but notice the pattern."), false)
   assert.equal(looksLikeRefusal("I can't find that on this page."), false)
   assert.equal(looksLikeRefusal('The page needs a sign-in before the quiz opens.'), false)
   assert.equal(looksLikeRefusal(''), false)

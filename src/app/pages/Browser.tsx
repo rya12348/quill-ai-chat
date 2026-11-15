@@ -2,7 +2,7 @@ import { ArrowLeft, ArrowRight, Code2, ExternalLink, Globe2, Loader2, Monitor, P
 import { startTransition, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
-import { answerVisibleFact, answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directFormFill, directPageSearch, directQuestionAnswer, directSearchAnswer, directSearchOpen, directSiteLookup, directSiteSearch, firstContentLink, isDocumentWritingTask, isSameBrowserSite, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE } from '../../shared/browser'
+import { answerVisibleFact, answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directFormFill, directPageSearch, directQuestionAnswer, directSearchAnswer, directSearchOpen, directSiteLookup, directSiteSearch, firstContentLink, isDocumentWritingTask, isSameBrowserSite, isPageEditingTask, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE } from '../../shared/browser'
 
 /** A signed-out Google app usually bounces to accounts.google.com, and
  * Classroom bounces to its marketing page. Both mean the task cannot continue
@@ -2960,6 +2960,9 @@ export function Browser() {
       })
 
     let reachedEnd = false
+    // Editing is a coding job: a dedicated coder writes the page program
+    // instead of asking the action planner to squeeze JavaScript into JSON.
+    const editingTask = isPageEditingTask(instruction)
     const failedActions = new Map<string, number>()
     const stalledActions = new Map<string, number>()
     try {
@@ -3279,15 +3282,37 @@ export function Browser() {
           }
           continue
         }
-        setPhase(label)
-        flashMarker(markerFor(planned.action, current))
+        let runAction = planned.action
+        let runLabel = label
+        if (editingTask && planned.action.type === 'evaluate') {
+          setPhase('Writing the code…')
+          const improved = await api<{ code?: string }>('/browser/code', {
+            method: 'POST',
+            signal: controller.signal,
+            json: {
+              task: instruction,
+              snapshot: current.snapshot,
+              instruction: planned.say || label,
+              seed: planned.action.expression,
+            },
+          }).catch(() => null)
+          if (improved?.code) {
+            runAction = { type: 'evaluate', expression: improved.code }
+            runLabel = 'Run page code'
+            agentScript = improved.code
+            setScript(agentScript)
+            saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
+          }
+        }
+        setPhase(runLabel)
+        flashMarker(markerFor(runAction, current))
         const actStartedAt = Date.now()
         let next: BrowserViewState
         try {
           next = await api<BrowserViewState>('/browser/act', {
             method: 'POST',
             signal: controller.signal,
-            json: { action: planned.action },
+            json: { action: runAction },
           })
         } catch (cause) {
           if (controller.signal.aborted) throw cause
@@ -3296,16 +3321,16 @@ export function Browser() {
           // page action can fail after earlier steps succeeded. Keep the run
           // and give the planner the failure as evidence for its next choice.
           const failure = messageFor(cause)
-          const actionKey = JSON.stringify(planned.action)
+          const actionKey = JSON.stringify(runAction)
           const failures = (failedActions.get(actionKey) ?? 0) + 1
           failedActions.set(actionKey, failures)
           blockedActions.add(actionKey)
           agentNotes = [
             ...agentNotes,
-            `${label} failed: ${failure}. Try a different target or tool; do not repeat it.`,
+            `${runLabel} failed: ${failure}. Try a different target or tool; do not repeat it.`,
           ].slice(-8)
           agentMemory.current.notes = agentNotes
-          if (planned.action.type === 'evaluate') {
+          if (runAction.type === 'evaluate') {
             agentNotes = [
               ...agentNotes,
               `The last script threw: ${failure.slice(0, 400)}. Fix that code and run the corrected version; do not fall back to clicking.`,
@@ -3336,8 +3361,8 @@ export function Browser() {
               'I will re-read the page and change the target or tool instead of ending the run.',
             ],
           })
-          append({ role: 'action', text: `${label} failed`, detail: failure })
-          history.push({ action: `${label} (failed)`, result: failure })
+          append({ role: 'action', text: `${runLabel} failed`, detail: failure })
+          history.push({ action: `${runLabel} (failed)`, result: failure })
           try {
             const refreshed = await api<BrowserViewState>('/browser/state', {
               method: 'POST',
@@ -3353,8 +3378,8 @@ export function Browser() {
             if (isSessionLoss(refreshCause)) throw refreshCause
             // Keep the last known state; the next plan can still be useful.
           }
-          if ((planned.action.type === 'evaluate' || planned.action.type === 'style' || failures >= 2) && !controller.signal.aborted) {
-            await reflectOn(`${label}: ${JSON.stringify(planned.action).slice(0, 220)}`, failure)
+          if ((runAction.type === 'evaluate' || runAction.type === 'style' || failures >= 2) && !controller.signal.aborted) {
+            await reflectOn(`${runLabel}: ${JSON.stringify(runAction).slice(0, 220)}`, failure)
           }
           setPhase('Trying another route…')
           continue

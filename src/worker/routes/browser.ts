@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 
 import { DAILY_MESSAGE_LIMIT } from '../../shared/config'
-import { cleanPageAnswer, directBrowserTask, directFormFill, isPageEditingTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCompletionVerdict, parseReflection } from '../../shared/browser'
+import { cleanPageAnswer, directBrowserTask, directFormFill, isPageEditingTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCodeReply, parseCompletionVerdict, parseReflection } from '../../shared/browser'
 import type { BrowserAction, BrowserActResponse, BrowserElement, BrowserInspectResult, BrowserSnapshot } from '../../shared/types'
 import { AiError, aiConfigured, completeText, isModelId, type ChatMessage } from '../ai'
 import { MODELS, type ModelId } from '../../shared/config'
@@ -2442,6 +2442,110 @@ Reply with ONLY one JSON object: {"complete":true} or {"complete":false,"missing
   }
   return { complete: true, missing: '', lane: 'none' }
 }
+
+/**
+ * Write the page program with a dedicated coding prompt. The browser planner
+ * decides WHAT to change; this model writes the actual code with room for a
+ * real program instead of squeezing JavaScript into an action schema.
+ */
+async function writePageCode(
+  env: Env,
+  task: string,
+  state: BrowserSnapshot,
+  instruction: string,
+  seed: string,
+  error: string,
+): Promise<{ code: string; explanation: string; lane: string } | null> {
+  const codeScore = (lane: PublicLane) =>
+    browserDeepScore(lane) + (/deepseek|step-5|qwen3\.8-max|gpt-6|claude-opus|kimi-k3/i.test(lane.model) ? 6 : 0)
+  const lanes = candidateLanes(publicLanes(env))
+    .filter((lane) => !laneIsCooling(lane))
+    .sort((a, b) => codeScore(b) - codeScore(a))
+    .slice(0, 2)
+  if (!lanes.length) return null
+  const messages: ChatMessage[] = [
+    {
+      role: 'system',
+      content: `You are a senior front-end engineer controlling one live web page through a single async JavaScript function.
+Write ONE complete program that accomplishes the request on the current page. Rules:
+- Use document, querySelector, textContent, classList, style, setAttribute, insertAdjacentHTML, dispatchEvent, await, and same-origin fetch freely.
+- Target elements robustly: prefer ids, data attributes and accessible labels over brittle nth-child chains. If a selector may match several nodes, handle all intended ones explicitly.
+- Make the whole change in one run and make it idempotent: running it twice must not duplicate anything.
+- Preserve unrelated content. Do not remove the page, navigate away, submit payments, or touch other origins.
+- Return machine-checkable evidence from the program (new text, computed style, count, boolean). Do not use alert/confirm.
+- If previous code and an error are supplied, fix that exact failure rather than starting over.
+Reply with ONLY JSON: {"explanation":"one sentence","code":"...the full async body, no markdown fences..."}.`,
+    },
+    {
+      role: 'user',
+      content: [
+        `REQUEST: ${task}`,
+        instruction ? `PLANNER INTENT: ${instruction}` : '',
+        '',
+        `URL: ${state.url}`,
+        `TITLE: ${state.title}`,
+        '',
+        'VISIBLE PAGE TEXT:',
+        state.text.slice(0, 6_000) || '(empty)',
+        '',
+        'INTERACTIVE ELEMENTS:',
+        state.elements
+          .slice(0, 80)
+          .map(
+            (element) =>
+              `<${element.tag}${element.role ? ` role=${element.role}` : ''}> ${element.label || '(no label)'}` +
+              `${element.href ? ` href=${element.href.slice(0, 120)}` : ''}` +
+              `${element.value ? ` value="${element.value.slice(0, 60)}"` : ''}`,
+          )
+          .join('\n') || '(none)',
+        '',
+        seed ? `PREVIOUS PROGRAM:\n${seed.slice(0, 6_000)}` : '',
+        error ? `THAT PROGRAM FAILED WITH:\n${error.slice(0, 1_200)}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    },
+  ]
+  for (const lane of lanes) {
+    try {
+      const raw = await laneTextStreaming(lane, {
+        messages,
+        temperature: 0.1,
+        maxTokens: 2_000,
+        signal: AbortSignal.timeout(30_000),
+        idleMs: 12_000,
+        timeoutMs: 30_000,
+        allowCooling: true,
+      })
+      const reply = parseCodeReply(raw)
+      if (reply) return { ...reply, lane: lane.label }
+    } catch {
+      // Try the next coder lane.
+    }
+  }
+  return null
+}
+
+browser.post('/code', async (c) => {
+  const limit = await rateLimit(c.get('db'), 'browser:code', c.req.raw, 80, RATE_WINDOWS.chat)
+  if (!limit.allowed) return tooManyRequests(c, limit)
+  const raw = (await c.req.json<{ task?: unknown; snapshot?: unknown; instruction?: unknown; seed?: unknown; error?: unknown }>().catch(() => null)) as
+    | { task?: unknown; snapshot?: unknown; instruction?: unknown; seed?: unknown; error?: unknown }
+    | null
+  const task = text(raw?.task, 2_000)
+  const state = snapshot(raw?.snapshot)
+  if (!task || !state) return privateJson(c, { error: 'invalid_request', message: 'The task and page are required.' }, 400)
+  const instruction = text(raw?.instruction, 600)
+  const seed = text(raw?.seed, 6_000)
+  const error = text(raw?.error, 1_200)
+  try {
+    const reply = await writePageCode(c.env, task, state, instruction, seed, error)
+    if (!reply) return privateJson(c, { error: 'code_unavailable', message: 'No coding model answered. Try again.' }, 503)
+    return privateJson(c, reply)
+  } catch {
+    return privateJson(c, { error: 'code_unavailable', message: 'No coding model answered. Try again.' }, 503)
+  }
+})
 
 /**
  * Diagnose a failed attempt and propose genuinely different routes. This is the
