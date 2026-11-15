@@ -1305,6 +1305,7 @@ export function Browser() {
     let emptyPlans = 0
     let clarifyAsks = 0
     let completionAudits = 0
+    let stuckRecoveries = 0
     // Blocked actions belong to the page they failed on. After a navigation, or
     // after a popup closes and the target returns to the main tab, those ids
     // are stale. Keeping them made the agent refuse to click a button it had
@@ -3210,7 +3211,27 @@ export function Browser() {
           })
           setPhase('Trying another route…')
           if (blockedRepeats >= 2) {
-            const message = 'The browser kept choosing a step that had already failed, so I stopped repeating it. The page is still open; tell me a different next step.'
+            // Two dead routes is evidence, not the end. Force one more attempt
+            // with the failed actions named, and let the planner's automatic
+            // escalation pick a stronger model for the new route.
+            if (stuckRecoveries < 2) {
+              stuckRecoveries += 1
+              blockedRepeats = 0
+              append({
+                role: 'stet',
+                text: 'That route is exhausted. Re-reading the page and trying a genuinely different one.',
+                thoughts: ['The same dead action came back twice.', 'A different target, keyboard route, page script or navigation is required.'],
+              })
+              agentNotes = [
+                ...agentNotes,
+                'Two different attempts did nothing. Do not repeat the blocked actions. Re-read the page and choose a genuinely different route: another element, keyboard input, page code, the site search, an embedded-frame URL, Back or Reload.',
+              ].slice(-8)
+              agentMemory.current.notes = agentNotes
+              saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
+              setPhase('Trying a different route…')
+              continue
+            }
+            const message = 'The browser kept choosing steps that had already failed, so I stopped repeating them. The page is still open; tell me a different next step.'
             append({ role: 'stet', text: message })
             setAnswer(message)
             reachedEnd = true
