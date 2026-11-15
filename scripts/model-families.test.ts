@@ -59,6 +59,19 @@ test('one row per family, represented by its strongest lane', () => {
   assert.equal(picks[1]?.lane.model, 'deepseek-ai/deepseek-v4.1-flash')
 })
 
+test('Muse Spark 1.3 is a free lane ranked above the 550B', () => {
+  const env = { OPENROUTER_API_KEY: 'openrouter-key' } as unknown as Env
+  const lanes = publicLanes(env)
+  const muse = lanes.find((lane) => lane.model === 'meta/muse-spark-1.3-contributor:free')
+  assert.ok(muse)
+  assert.equal(muse.label, 'Muse Spark 1.3')
+  assert.equal(muse.billing, 'free')
+  assert.ok(
+    laneStrength(muse.model, muse.url) >
+      laneStrength('nvidia/nemotron-3-ultra-550b-a55b:free', 'https://openrouter.ai/api/v1/chat/completions'),
+  )
+})
+
 test('the picker uses the five short model names in order', () => {
   assert.deepEqual([...PICKER_MODEL_NAMES], ['Sable', 'Quill', 'Stride', 'Ink', 'Prism'])
   assert.equal(new Set(PICKER_MODEL_DESCRIPTIONS).size, PICKER_MODEL_NAMES.length)
@@ -131,17 +144,16 @@ test('the added keyless lanes are wired into the free chain', () => {
   }
 })
 
-test('ChatGPT is a keyless free lane backed by OpenAI gpt-5-nano', () => {
+test('the keyless Pollinations lane stays honestly labeled GPT-OSS', () => {
   const lanes = publicLanes({} as unknown as Env)
-  const chatgpt = lanes.find((lane) => lane.model === 'chatgpt')
+  const lane = lanes.find((item) => item.url.includes('text.pollinations.ai') && item.model === 'pollinations-gpt-oss')
 
-  assert.ok(chatgpt)
-  assert.equal(chatgpt.requestModel, 'openai-fast')
-  assert.equal(chatgpt.label, 'ChatGPT (GPT-5 Nano)')
-  assert.equal(chatgpt.billing, 'free')
-  assert.equal(chatgpt.key, undefined)
-  assert.equal(familyForLane(chatgpt), 'ChatGPT')
-  assert.equal(lanes.some((lane) => lane.model === 'openai-fast'), false)
+  assert.ok(lane)
+  assert.equal(lane.requestModel, 'openai-fast')
+  assert.equal(lane.label, 'GPT-OSS 20B (Pollinations)')
+  assert.equal(lane.billing, 'free')
+  assert.equal(lane.key, undefined)
+  assert.equal(lanes.some((item) => item.model === 'chatgpt'), false)
 })
 
 test('an Alibaba Model Studio key adds the free-trial frontier lanes', () => {

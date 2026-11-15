@@ -40,6 +40,9 @@ const SAMBANOVA_URL = 'https://api.sambanova.ai/v1/chat/completions'
 // Verified free variants, checked against the live catalogs. Free model IDs
 // rotate, so a 404/429 lane cools down and the next one takes over.
 const OPENROUTER_FREE_MODELS = [
+  // Strongest genuinely free model in the catalog: Muse Spark 1.3 Contributor
+  // Free scores above Step 5 Preview and Nemotron 3 Ultra on the AA index.
+  'meta/muse-spark-1.3-contributor:free',
   'nvidia/nemotron-3-ultra-550b-a55b:free',
   'nvidia/nemotron-3.5-super-vl:free',
   'nvidia/nemotron-3.5-lightning:free',
@@ -271,12 +274,14 @@ function labelFor(id: string): string {
     const name = version ? `GLM-${version}` : 'GLM'
     return lower.includes('flash') ? `${name} Flash` : name
   }
+  if (lower.includes('gpt-6-astra')) return 'GPT-6 Astra'
   if (lower.includes('gpt-6.1-sol')) return 'GPT-6.1 Sol'
   if (lower.includes('gpt-6.1')) return 'GPT-6.1'
   if (lower.includes('gpt-6')) return 'GPT-6'
   if (lower.includes('openrouter/free')) return 'OpenRouter Free Router'
   if (lower.includes('claude-sonnet-5-5')) return 'Claude Sonnet 5.5'
   if (lower.includes('claude-sonnet-5')) return 'Claude Sonnet 5'
+  if (lower.includes('claude-opus-5.5')) return 'Claude Opus 5.5'
   if (lower.includes('claude-opus-5')) return 'Claude Opus 5'
   if (lower.includes('claude')) return 'Claude'
   if (lower.includes('gemini-4-argon')) return 'Gemini 4 Argon'
@@ -321,6 +326,7 @@ function labelFor(id: string): string {
   if (lower.includes('ultra')) return 'Nemotron 3 Ultra 550B'
   if (lower.includes('nemotron')) return 'Nemotron 3 Nano 30B'
   if (lower.includes('step-5')) return 'Step 5 Preview'
+  if (lower.includes('muse-spark')) return 'Muse Spark 1.3'
   if (lower.includes('muse-glimmer')) return 'Muse Glimmer 30B'
   if (lower.includes('dots')) return 'Dots3 Note'
   if (lower.includes('liquid')) return 'Liquid LFM3 1.7B'
@@ -464,6 +470,8 @@ export function laneStrength(model: string, url?: string): number {
   // The 550B Ultra lane is the strongest free model when it answers. Its
   // health/quality record demotes it automatically after a 429, so preferring
   // it here does not put a rate-limited lane ahead of a working smaller one.
+  else if (/claude-opus-5\.5|gpt-6-astra/.test(id)) base = 98
+  else if (/muse-spark/.test(id)) base = 96
   else if (/nemotron-3-ultra/.test(id) && /openrouter\.ai|integrate\.api\.nvidia\.com/.test(host)) base = 93
   else if (/gpt-6|claude-opus|claude-sonnet-5|gemini-4|deepseek-v4-pro|kimi-k3|glm-5\.3(?!-flash)|qwen3\.8-max|qwen3\.8-2\.4t|step-5/.test(id)) base = 92
   // BlockRun's keyless Nemotron 3 Super 120B is a known-working lane and is
@@ -648,6 +656,19 @@ export function publicLanes(env: Env): PublicLane[] {
         model: freeUltra,
         label: 'Nemotron 3 Ultra 550B',
         description: 'Free 550B lane via your OpenRouter key',
+        billing: 'free',
+        key: env.OPENROUTER_API_KEY,
+      })
+    }
+    // Muse Spark 1.3 Contributor Free is the strongest zero-cost model in the
+    // catalog. Keep it even when OPENROUTER_MODELS pins a shorter list.
+    const muse = 'meta/muse-spark-1.3-contributor:free'
+    if (!models.includes(muse)) {
+      lanes.push({
+        url: OPENROUTER_URL,
+        model: muse,
+        label: 'Muse Spark 1.3',
+        description: 'Free via your OpenRouter key',
         billing: 'free',
         key: env.OPENROUTER_API_KEY,
       })
