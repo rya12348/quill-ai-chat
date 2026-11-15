@@ -1304,6 +1304,7 @@ export function Browser() {
     let blockedRepeats = 0
     let emptyPlans = 0
     let clarifyAsks = 0
+    let completionAudits = 0
     // Blocked actions belong to the page they failed on. After a navigation, or
     // after a popup closes and the target returns to the main tab, those ids
     // are stale. Keeping them made the agent refuse to click a button it had
@@ -3156,6 +3157,35 @@ export function Browser() {
             reachedEnd = true
             setPhase('')
             break
+          }
+          // Check the claim against the page before ending. This is the same
+          // habit as re-reading a diff: a summary can be wrong, so a second
+          // strong model reviews the live page. A rejected finish turns into
+          // another working step with the missing evidence named.
+          if (completionAudits < 2) {
+            completionAudits += 1
+            setPhase('Checking the result…')
+            const verdict = await api<{ complete?: boolean; missing?: string; lane?: string }>('/browser/audit', {
+              method: 'POST',
+              signal: controller.signal,
+              json: { task: instruction, snapshot: current.snapshot, message: planned.action.message },
+            }).catch(() => null)
+            if (verdict && verdict.complete === false) {
+              const missing = (verdict.missing || 'The page does not show the requested result yet.').slice(0, 300)
+              append({
+                role: 'stet',
+                text: `Not finished yet — ${missing}`,
+                thoughts: ['I checked the page instead of trusting my own summary.', 'The missing evidence is the next thing to fix.'],
+              })
+              agentNotes = [
+                ...agentNotes,
+                `A reviewer checked the page and says the task is NOT complete: ${missing}. Do that now and verify it on the page before finishing.`,
+              ].slice(-8)
+              agentMemory.current.notes = agentNotes
+              saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
+              setPhase('Fixing what the review found…')
+              continue
+            }
           }
           const report = cleanDoneMessage(planned.action.message)
           append({ role: 'stet', text: report, ...planMeta })

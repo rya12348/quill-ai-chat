@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directPageSearch, directSearchAnswer, directSiteSearch, isDocumentWritingTask, isSameBrowserSite, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE } from '../src/shared/browser'
+import { answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directPageSearch, directSearchAnswer, directSiteSearch, isDocumentWritingTask, isSameBrowserSite, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCompletionVerdict } from '../src/shared/browser'
 import type { BrowserElement } from '../src/shared/types'
 
 test('a page answer never exposes a model reasoning trace', () => {
@@ -404,6 +404,16 @@ test('site search and page search resolve to native typing', () => {
     text: 'cats',
     submit: true,
   })
+})
+
+test('a completion verdict is read only when it is usable', () => {
+  assert.deepEqual(parseCompletionVerdict('{"complete":true}'), { complete: true, missing: '' })
+  assert.deepEqual(parseCompletionVerdict('review: {"complete":false,"missing":"the quiz result is not shown"}'), {
+    complete: false,
+    missing: 'the quiz result is not shown',
+  })
+  assert.equal(parseCompletionVerdict('I think it is done'), null)
+  assert.equal(parseCompletionVerdict('not json'), null)
 })
 
 test('a refusal is detected but an honest gap is not', () => {

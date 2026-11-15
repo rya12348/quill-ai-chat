@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 
 import { DAILY_MESSAGE_LIMIT } from '../../shared/config'
-import { cleanPageAnswer, directBrowserTask, directFormFill, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE } from '../../shared/browser'
+import { cleanPageAnswer, directBrowserTask, directFormFill, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCompletionVerdict } from '../../shared/browser'
 import type { BrowserAction, BrowserActResponse, BrowserElement, BrowserInspectResult, BrowserSnapshot } from '../../shared/types'
 import { AiError, aiConfigured, completeText, isModelId, type ChatMessage } from '../ai'
 import { MODELS, type ModelId } from '../../shared/config'
@@ -951,7 +951,8 @@ Rules:
 33. Do not stop on the first page that lacks the answer. For a question, first use the site's own search, menus, tabs, embedded-frame URLs and page scripts, and try at least three genuinely different routes. Use ask only for a sign-in, missing information or a destructive confirmation, never merely because the answer was not on the page you happened to open.
 34. Keep your code on the scratchpad. The exact program you ran is shown back to you on the next step. If it throws, do not start over and do not fall back to clicking: read the error, change the code, and run the corrected version. Write scripts so running them twice is safe.
 35. done.message is a short report to the person, not a transcript. Say what you completed and the key result in at most two sentences. Never paste page text, a full description of the page, or your working notes.
-36. Never refuse, lecture, or announce a limitation. The person asked you to use their browser, so ordinary browsing work is yours to do. If a site truly blocks progress (sign-in, payment, CAPTCHA, a missing permission), name that exact blocker, keep the page open and try another route. Never say you cannot do the task and never finish with a refusal. Confirm before genuinely destructive actions; do not refuse ordinary ones.`
+36. Never refuse, lecture, or announce a limitation. The person asked you to use their browser, so ordinary browsing work is yours to do. If a site truly blocks progress (sign-in, payment, CAPTCHA, a missing permission), name that exact blocker, keep the page open and try another route. Never say you cannot do the task and never finish with a refusal. Confirm before genuinely destructive actions; do not refuse ordinary ones.
+37. Your completion is audited against the page. Do not finish until the page itself shows the requested result; your summary is not evidence. If a review note says something is still missing, fix that exact thing and verify it before finishing.`
 
 // The command prompt for ordinary browser steps. It deliberately omits the
 // observe/think/plan loop: a short instruction needs one action, not an essay.
@@ -2351,6 +2352,89 @@ browser.post('/answer', async (c) => {
     return privateJson(c, await answerPage(c.env, task, state))
   } catch (error) {
     return errorResponse(c, error)
+  }
+})
+
+/**
+ * Check a claimed completion against the live page. This is the browser agent's
+ * equivalent of reading its own diff: a second, strong model decides whether
+ * the page really shows the result before the run is allowed to end.
+ */
+async function auditCompletion(
+  env: Env,
+  task: string,
+  state: BrowserSnapshot,
+  claim: string,
+): Promise<{ complete: boolean; missing: string; lane: string }> {
+  const lanes = candidateLanes(publicLanes(env))
+    .filter((lane) => !laneIsCooling(lane))
+    .sort((a, b) => browserDeepScore(b) - browserDeepScore(a))
+    .slice(0, 2)
+  if (!lanes.length) return { complete: true, missing: '', lane: 'none' }
+  const messages: ChatMessage[] = [
+    {
+      role: 'system',
+      content: `You are the completion reviewer for a browser agent. Judge only from the page evidence supplied.
+- If the task asks for information, the claim is complete when the answer is supported by the page text.
+- If the task asks for an action, the claim is complete only when the page shows that action really happened: the submitted state, confirmation, correct selection, saved value or finished result.
+- Do not demand steps the task did not ask for. Do not accept a plan, an intention or the agent's own summary as proof.
+Reply with ONLY one JSON object: {"complete":true} or {"complete":false,"missing":"the exact evidence or action still required"}.`,
+    },
+    {
+      role: 'user',
+      content: [
+        `TASK: ${task}`,
+        '',
+        `CLAIMED RESULT: ${claim}`,
+        '',
+        `URL: ${state.url}`,
+        `TITLE: ${state.title}`,
+        '',
+        'VISIBLE PAGE TEXT:',
+        state.text.slice(0, 8_000) || '(empty)',
+        '',
+        'INTERACTIVE ELEMENTS:',
+        state.elements
+          .slice(0, 60)
+          .map((element) => `${element.tag} ${element.label || '(no label)'}${element.value ? ` value="${element.value.slice(0, 80)}"` : ''}`)
+          .join('\n') || '(none)',
+      ].join('\n'),
+    },
+  ]
+  for (const lane of lanes) {
+    try {
+      const raw = await laneTextStreaming(lane, {
+        messages,
+        temperature: 0,
+        maxTokens: 180,
+        signal: AbortSignal.timeout(8_000),
+        idleMs: 4_000,
+        timeoutMs: 8_000,
+        allowCooling: true,
+      })
+      const verdict = parseCompletionVerdict(raw)
+      if (verdict) return { ...verdict, lane: lane.label }
+    } catch {
+      // A reviewer that cannot answer must not block a real result.
+    }
+  }
+  return { complete: true, missing: '', lane: 'none' }
+}
+
+browser.post('/audit', async (c) => {
+  const limit = await rateLimit(c.get('db'), 'browser:audit', c.req.raw, 60, RATE_WINDOWS.chat)
+  if (!limit.allowed) return tooManyRequests(c, limit)
+  const raw = (await c.req.json<{ task?: unknown; snapshot?: unknown; message?: unknown }>().catch(() => null)) as
+    | { task?: unknown; snapshot?: unknown; message?: unknown }
+    | null
+  const task = text(raw?.task, 2_000)
+  const state = snapshot(raw?.snapshot)
+  const claim = text(raw?.message, 1_200)
+  if (!task || !state || !claim) return privateJson(c, { error: 'invalid_request', message: 'The task, page and claimed result are required.' }, 400)
+  try {
+    return privateJson(c, await auditCompletion(c.env, task, state, claim))
+  } catch {
+    return privateJson(c, { complete: true, missing: '', lane: 'none' })
   }
 })
 

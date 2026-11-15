@@ -3,6 +3,23 @@ import type { BrowserAction, BrowserElement } from './types'
 /** The exact sentence that tells the caller the page cannot answer yet. */
 export const PAGE_ANSWER_UNAVAILABLE = 'That answer is not visible on this page.'
 
+/** Read a reviewer's completion verdict. Returns null when the reply is not a
+ * usable verdict, so a broken review never blocks a real result. */
+export function parseCompletionVerdict(raw: string): { complete: boolean; missing: string } | null {
+  const match = raw.match(/\{[\s\S]*\}/)
+  if (!match) return null
+  try {
+    const parsed = JSON.parse(match[0]) as { complete?: unknown; missing?: unknown }
+    if (typeof parsed.complete !== 'boolean') return null
+    return {
+      complete: parsed.complete,
+      missing: typeof parsed.missing === 'string' ? parsed.missing.slice(0, 300) : '',
+    }
+  } catch {
+    return null
+  }
+}
+
 /** True when a model is refusing the task instead of doing it. Kept narrow so
  * an honest "not found here" is not mistaken for a refusal. */
 export function looksLikeRefusal(raw: string): boolean {
