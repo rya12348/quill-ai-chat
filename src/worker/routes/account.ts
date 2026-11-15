@@ -122,6 +122,10 @@ account.get('/models', async (c) => {
   // degraded and add little over Sable, Quill and Ink. Retire those two rows
   // and give their space to the no-key Claude Haiku lane the Buffy page uses.
   const retiredFamilies = new Set(['Step', 'GLM'])
+  const frontierDescriptions: Record<string, string> = {
+    'baidu/ernie-5.5-flash-preview:free': 'Strong tool use and browsing for agent work.',
+    'particle-ai/particle-1:free': 'Token-efficient coding and page edits.',
+  }
   const items: ModelInfo[] = [
     ...buffyRows,
     {
@@ -143,7 +147,7 @@ account.get('/models', async (c) => {
         return {
           id: lane.model,
           name: actual ? lane.label : pickerModelName(index),
-          description: actual ? lane.description : pickerModelDescription(index),
+          description: actual ? frontierDescriptions[lane.model] ?? lane.description : pickerModelDescription(index),
           available: true,
           family,
           ...(lane.billing ? { billing: lane.billing } : {}),
