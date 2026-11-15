@@ -6,7 +6,7 @@ import { aiConfigured, availableModels } from '../ai'
 import { analyzeEnabledFor, authMode, buildEnabledFor, isAccountUser, isGuestUser, isOwner, privateJson, researchEnabledFor } from '../auth'
 import { guestUsageToday, now, utcDay, usageToday } from '../db'
 import type { AppContext } from '../env'
-import { pickPickerFamilies, pickerModelDescription, pickerModelName, publicLanes } from '../public-ai'
+import { isLocalBridgeRequest, pickPickerFamilies, pickerModelDescription, pickerModelName, publicLanes } from '../public-ai'
 import { healthRows } from '../provider-health'
 import { guestUsageKey } from '../rate-limit'
 import { searchConfigured } from '../search'
@@ -26,7 +26,9 @@ account.get('/me', async (c) => {
     if (mode === 'development') statements.push(...seedStatements(db, user.sub))
     await db.batch(statements)
   }
-  const lanes = aiConfigured(c.env) ? [] : publicLanes(c.env)
+  const lanes = aiConfigured(c.env)
+    ? []
+    : publicLanes(c.env).filter((lane) => isLocalBridgeRequest(c.req.raw) || !lane.model.startsWith('buffy'))
   // Guests may have cleared their cookie; show the same address-keyed
   // allowance the chat route enforces instead of a misleading fresh count.
   const counts = isGuestUser(user) ? await guestUsageToday(db, await guestUsageKey(c.req.raw)) : await usageToday(db, user.sub)
@@ -85,7 +87,9 @@ account.get('/models', async (c) => {
   } catch {
     // A fresh deployment has no health rows yet; strength alone still works.
   }
-  const lanes = publicLanes(c.env)
+  const lanes = publicLanes(c.env).filter(
+    (lane) => isLocalBridgeRequest(c.req.raw) || !lane.model.startsWith('buffy'),
+  )
   // Buffy is an extra row: keep the five hosted families intact rather than
   // letting it displace one of them. The local bridge supplies Buffy Agent and
   // Buffy; a deployment without one still advertises Buffy, which the Worker

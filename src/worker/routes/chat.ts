@@ -20,7 +20,7 @@ import { canvasComplete } from '../canvas'
 import { kindFor, proofComplete, proofSignature, streamChunks } from '../proof'
 import { analysisToday, buildToday, claimGuestTurn, claimGuestUsage, guestUsageToday, id, mapConversation, mapMessage, now, parseBuild, repliesToday, researchToday, titleFrom, usageToday, utcDay } from '../db'
 import { refreshConversationSummary } from '../memory'
-import { activeLanes, laneKey, orderLanes, publicComplete, publicLanes, type LaneResult } from '../public-ai'
+import { activeLanes, isLocalBridgeRequest, laneKey, orderLanes, publicComplete, publicLanes, type LaneResult } from '../public-ai'
 import { healthRows, recordProviderResult } from '../provider-health'
 import { planAndRetrieve } from '../plan'
 import { guestUsageKey, RATE_WINDOWS, rateLimit, tooManyRequests } from '../rate-limit'
@@ -125,7 +125,11 @@ chat.post('/', async (c) => {
   // Which engine answers: the Freebuff API when a key is set, otherwise the free
   // hosted lane. Neither needs a key from the person chatting.
   const usingApi = aiConfigured(c.env)
-  const allLanes = usingApi ? [] : publicLanes(c.env)
+  // The Buffy bridge lives on the developer's machine. A deployed request must
+  // use the hosted Buffy row instead of inheriting a loopback lane from env.
+  const allLanes = usingApi
+    ? []
+    : publicLanes(c.env).filter((lane) => isLocalBridgeRequest(c.req.raw) || !lane.model.startsWith('buffy'))
   // Low skips the extra reasoning pass; Default and Max turn it on at medium
   // and high effort where the lane supports fine-grained control.
   const effort = input.effort === 'low' || input.effort === 'default' || input.effort === 'max' ? input.effort : null

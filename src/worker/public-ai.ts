@@ -547,6 +547,15 @@ export function buffyLanes(env: Env): PublicLane[] {
   ]
 }
 
+/** True only when the request arrived on the machine that runs the bridge. */
+export function isLocalBridgeRequest(request: Request): boolean {
+  try {
+    return new Set(['localhost', '127.0.0.1', '[::1]']).has(new URL(request.url).hostname)
+  } catch {
+    return false
+  }
+}
+
 /** Ordered free lanes: keyed strong models first, then the anonymous fallbacks. */
 export function publicLanes(env: Env): PublicLane[] {
   const lanes: PublicLane[] = []
