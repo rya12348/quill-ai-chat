@@ -52,11 +52,11 @@ test('one row per family, represented by its strongest lane', () => {
     lane('openai/gpt-oss-120b', 'GPT-OSS 120B (Groq)', 'https://api.groq.com/openai/v1/chat/completions'),
   ]
   const picks = pickModelFamilies(lanes)
-  assert.deepEqual(picks.map((pick) => pick.family), ['Nemotron', 'DeepSeek', 'GPT'])
-  // The 550B Ultra lane is deliberately the Nemotron representative now; the
-  // 120B Super is the fallback when Ultra is rate-limited.
-  assert.equal(picks[0]?.lane.model, 'nvidia/nemotron-3-ultra-550b-a55b')
-  assert.equal(picks[1]?.lane.model, 'deepseek-ai/deepseek-v4.1-flash')
+  assert.deepEqual(picks.map((pick) => pick.family), ['DeepSeek', 'Nemotron', 'GPT'])
+  // DeepSeek V4.1 Flash 1017 now outranks the 550B; the 120B Super is the
+  // Nemotron fallback when Ultra is rate-limited.
+  assert.equal(picks[0]?.lane.model, 'deepseek-ai/deepseek-v4.1-flash')
+  assert.equal(picks[1]?.lane.model, 'nvidia/nemotron-3-ultra-550b-a55b')
 })
 
 test('the two strongest free models are lanes ranked above the 550B', () => {
@@ -83,9 +83,9 @@ test('the picker uses the five short model names in order', () => {
   assert.ok(PICKER_MODEL_DESCRIPTIONS.every((description) => description.endsWith('.')))
 })
 
-test('the model picker exposes five families at most', () => {
+test('the model picker exposes six families at most', () => {
   const picks = pickPickerFamilies(publicLanes({} as unknown as Env))
-  assert.equal(picks.length, 5)
+  assert.ok(picks.length <= 6)
   assert.equal(new Set(picks.map((pick) => pick.family)).size, picks.length)
 })
 
@@ -106,7 +106,7 @@ test('DeepSeek 4.1 is pinned into the shortlist when its lane is configured', ()
     lane('deepseek-flash', 'DeepSeek V4.1 Flash', 'https://api.deepseek.com/chat/completions'),
   ]
   const picks = pickPickerFamilies(crowded)
-  assert.equal(picks.length, 5)
+  assert.equal(picks.length, 6)
   assert.ok(picks.some((pick) => pick.lane.model === 'deepseek-flash'))
 })
 

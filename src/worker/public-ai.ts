@@ -481,6 +481,9 @@ export function laneStrength(model: string, url?: string): number {
   else if (/claude-opus-5\.5|gpt-6-astra/.test(id)) base = 98
   // NVIDIA serves Kimi K3 free to Developer Program keys; prefer that lane
   // over the paid OpenRouter copy of the same model.
+  // DeepSeek V4.1 Flash 1017 (AA 45) edges out Kimi K3 (44). Prefer NVIDIA's
+  // free copy over any paid route of the same model.
+  else if (/deepseek-v4\.1-flash/.test(id)) base = /integrate\.api\.nvidia\.com/.test(host) ? 100 : 85
   else if (/kimi-k3/.test(id)) base = /integrate\.api\.nvidia\.com/.test(host) ? 99 : 98
   else if (/step-5/.test(id)) base = 98
   else if (/ling-3\.2/.test(id)) base = 96

@@ -93,7 +93,7 @@ export const PICKER_MODEL_DESCRIPTIONS = [
 ] as const
 
 /** The picker is a short shortlist, not the whole fallback chain. */
-export const PICKER_MODEL_LIMIT = 5
+export const PICKER_MODEL_LIMIT = 6
 
 /** Saved when a reply is stopped before any text arrived. */
 export const STOPPED_REPLY = 'Reply stopped before any text was returned.'

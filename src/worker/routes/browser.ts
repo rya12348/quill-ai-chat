@@ -880,7 +880,8 @@ function browserLaneScore(lane: PublicLane, preferredModel?: string): number {
 function browserDeepScore(lane: PublicLane): number {
   const id = lane.model.toLowerCase()
   let score = laneStrength(lane.model, lane.url)
-  if (/kimi-k3/.test(id)) score += 160
+  if (/deepseek-v4\.1-flash/.test(id)) score += 165
+  else if (/kimi-k3/.test(id)) score += 160
   else if (/claude-opus-5\.5|gpt-6-astra/.test(id)) score += 150
   // ERNIE is the strongest fast tool-use model, so it leads hard planning.
   else if (/ernie-5\.5/.test(id)) score += 135

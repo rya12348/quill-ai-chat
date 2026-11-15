@@ -125,10 +125,11 @@ account.get('/models', async (c) => {
   // stronger families. Retire those two rows and give their space to the
   // no-key Claude and ChatGPT lanes the Buffy page uses. The Step and GLM names
   // are kept for older lane aliases of the same models.
-  const retiredFamilies = new Set(['Step', 'GLM'])
-  const retiredLanes = /nemotron-3-ultra-550b|deepseek-v4\.1-flash/i
+  const retiredFamilies = new Set(['GLM'])
+  const retiredLanes = /nemotron-3-ultra-550b/i
   const frontierDescriptions: Record<string, string> = {
     'stepfun-ai/step-5-preview': 'Frontier reasoning for long, hard tasks.',
+    'deepseek-ai/deepseek-v4.1-flash': 'Strong agentic coding, tools and analysis.',
     'moonshotai/kimi-k3': 'Frontier reasoning, coding and agentic work.',
     'inclusionai/ling-3.2-flash:free': 'Long-context multimodal reasoning and documents.',
     'baidu/ernie-5.5-flash-preview:free': 'Strong tool use and browsing for agent work.',
@@ -166,7 +167,7 @@ account.get('/models', async (c) => {
       .map(({ family, lane }, index) => {
         // The two free frontier lanes are new enough that a borrowed alias
         // hides what they are. Show their real names and descriptions.
-        const actual = /ernie-5\.5|particle-1|ling-3\.2|step-5|kimi-k3/i.test(lane.model)
+        const actual = /ernie-5\.5|particle-1|ling-3\.2|step-5|kimi-k3|deepseek-v4\.1-flash/i.test(lane.model)
         return {
           id: lane.model,
           name: actual ? lane.label.replace(/\s*\([^)]*\)\s*$/, '') : pickerModelName(index),
