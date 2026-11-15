@@ -40,9 +40,10 @@ const SAMBANOVA_URL = 'https://api.sambanova.ai/v1/chat/completions'
 // Verified free variants, checked against the live catalogs. Free model IDs
 // rotate, so a 404/429 lane cools down and the next one takes over.
 const OPENROUTER_FREE_MODELS = [
-  // Strongest genuinely free model in the catalog: Muse Spark 1.3 Contributor
-  // Free scores above Step 5 Preview and Nemotron 3 Ultra on the AA index.
-  'meta/muse-spark-1.3-contributor:free',
+  // The two strongest zero-cost models currently in the OpenRouter catalog,
+  // both above Step 5 Preview and Nemotron 3 Ultra on agentic/tool benchmarks.
+  'baidu/ernie-5.5-flash-preview:free',
+  'particle-ai/particle-1:free',
   'nvidia/nemotron-3-ultra-550b-a55b:free',
   'nvidia/nemotron-3.5-super-vl:free',
   'nvidia/nemotron-3.5-lightning:free',
@@ -326,7 +327,8 @@ function labelFor(id: string): string {
   if (lower.includes('ultra')) return 'Nemotron 3 Ultra 550B'
   if (lower.includes('nemotron')) return 'Nemotron 3 Nano 30B'
   if (lower.includes('step-5')) return 'Step 5 Preview'
-  if (lower.includes('muse-spark')) return 'Muse Spark 1.3'
+  if (lower.includes('ernie-5.5')) return 'ERNIE 5.5 Flash'
+  if (lower.includes('particle-1')) return 'Particle-1'
   if (lower.includes('muse-glimmer')) return 'Muse Glimmer 30B'
   if (lower.includes('dots')) return 'Dots3 Note'
   if (lower.includes('liquid')) return 'Liquid LFM3 1.7B'
@@ -386,6 +388,8 @@ const FAMILY_RULES: [RegExp, string][] = [
   [/gemini/i, 'Gemini'],
   [/minimax/i, 'MiniMax'],
   [/muse/i, 'Muse'],
+  [/ernie/i, 'ERNIE'],
+  [/particle/i, 'Particle'],
   [/laguna/i, 'Laguna'],
   [/dots/i, 'Dots'],
   [/liquid/i, 'Liquid'],
@@ -471,7 +475,7 @@ export function laneStrength(model: string, url?: string): number {
   // health/quality record demotes it automatically after a 429, so preferring
   // it here does not put a rate-limited lane ahead of a working smaller one.
   else if (/claude-opus-5\.5|gpt-6-astra/.test(id)) base = 98
-  else if (/muse-spark/.test(id)) base = 96
+  else if (/ernie-5\.5|particle-1/.test(id)) base = 95
   else if (/nemotron-3-ultra/.test(id) && /openrouter\.ai|integrate\.api\.nvidia\.com/.test(host)) base = 93
   else if (/gpt-6|claude-opus|claude-sonnet-5|gemini-4|deepseek-v4-pro|kimi-k3|glm-5\.3(?!-flash)|qwen3\.8-max|qwen3\.8-2\.4t|step-5/.test(id)) base = 92
   // BlockRun's keyless Nemotron 3 Super 120B is a known-working lane and is
@@ -660,14 +664,15 @@ export function publicLanes(env: Env): PublicLane[] {
         key: env.OPENROUTER_API_KEY,
       })
     }
-    // Muse Spark 1.3 Contributor Free is the strongest zero-cost model in the
-    // catalog. Keep it even when OPENROUTER_MODELS pins a shorter list.
-    const muse = 'meta/muse-spark-1.3-contributor:free'
-    if (!models.includes(muse)) {
+    // Keep the two strongest zero-cost models even when OPENROUTER_MODELS pins
+    // a shorter list. ERNIE leads DeepSeek Flash on tool and terminal work;
+    // Particle-1 is the strongest free coding agent model in the catalog.
+    for (const model of ['baidu/ernie-5.5-flash-preview:free', 'particle-ai/particle-1:free']) {
+      if (models.includes(model)) continue
       lanes.push({
         url: OPENROUTER_URL,
-        model: muse,
-        label: 'Muse Spark 1.3',
+        model,
+        label: labelFor(model),
         description: 'Free via your OpenRouter key',
         billing: 'free',
         key: env.OPENROUTER_API_KEY,

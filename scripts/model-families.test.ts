@@ -59,17 +59,18 @@ test('one row per family, represented by its strongest lane', () => {
   assert.equal(picks[1]?.lane.model, 'deepseek-ai/deepseek-v4.1-flash')
 })
 
-test('Muse Spark 1.3 is a free lane ranked above the 550B', () => {
+test('the two strongest free models are lanes ranked above the 550B', () => {
   const env = { OPENROUTER_API_KEY: 'openrouter-key' } as unknown as Env
   const lanes = publicLanes(env)
-  const muse = lanes.find((lane) => lane.model === 'meta/muse-spark-1.3-contributor:free')
-  assert.ok(muse)
-  assert.equal(muse.label, 'Muse Spark 1.3')
-  assert.equal(muse.billing, 'free')
-  assert.ok(
-    laneStrength(muse.model, muse.url) >
-      laneStrength('nvidia/nemotron-3-ultra-550b-a55b:free', 'https://openrouter.ai/api/v1/chat/completions'),
-  )
+  for (const model of ['baidu/ernie-5.5-flash-preview:free', 'particle-ai/particle-1:free']) {
+    const found = lanes.find((lane) => lane.model === model)
+    assert.ok(found, model)
+    assert.equal(found.billing, 'free')
+    assert.ok(
+      laneStrength(found.model, found.url) >
+        laneStrength('nvidia/nemotron-3-ultra-550b-a55b:free', 'https://openrouter.ai/api/v1/chat/completions'),
+    )
+  }
 })
 
 test('the picker uses the five short model names in order', () => {
