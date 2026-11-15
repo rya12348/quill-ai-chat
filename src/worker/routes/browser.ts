@@ -881,8 +881,11 @@ function browserDeepScore(lane: PublicLane): number {
   const id = lane.model.toLowerCase()
   let score = laneStrength(lane.model, lane.url)
   if (/claude-opus-5\.5|gpt-6-astra/.test(id)) score += 150
-  else if (/ernie-5\.5|particle-1/.test(id)) score += 120
+  // ERNIE is the strongest free tool-use model, so it leads hard planning.
+  else if (/ernie-5\.5/.test(id)) score += 135
   else if (/nemotron-3-ultra|550b/.test(id)) score += 100
+  // Particle-1 is a coding model: keep it out of click planning.
+  else if (/particle-1/.test(id)) score += 85
   else if (/step-5/.test(id)) score += 90
   else if (/deepseek-v4\.1|deepseek-v4-pro/.test(id)) score += 80
   else if (/nemotron-3\.5-super/.test(id)) score += 72
@@ -2521,8 +2524,13 @@ async function writePageCode(
   simulation = false,
   html = '',
 ): Promise<{ code: string; explanation: string; lane: string } | null> {
-  const codeScore = (lane: PublicLane) =>
-    browserDeepScore(lane) + (/deepseek|step-5|qwen3\.8-max|gpt-6|claude-opus|kimi-k3/i.test(lane.model) ? 6 : 0)
+  // Page code is Particle-1's job; ERNIE is the second choice. The generic
+  // deep ranking stays in charge for every other lane.
+  const codeScore = (lane: PublicLane) => {
+    if (/particle-1/i.test(lane.model)) return 1_000
+    if (/ernie-5\.5/i.test(lane.model)) return 900
+    return browserDeepScore(lane) + (/deepseek|step-5|qwen3\.8-max|gpt-6|claude-opus|kimi-k3/i.test(lane.model) ? 6 : 0)
+  }
   const lanes = candidateLanes(publicLanes(env))
     .filter((lane) => !laneIsCooling(lane))
     .sort((a, b) => codeScore(b) - codeScore(a))

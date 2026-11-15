@@ -181,6 +181,19 @@ function asksForPageAnswer(task: string): boolean {
   )
 }
 
+/** A repeated browser job should start as one page program, not a chain of
+ * planner calls. Video-question work is the clearest case, but the same intent
+ * applies to quizzes, lessons and worksheets. */
+function prefersPageScript(task: string): boolean {
+  const repeated = /\b(?:every|all|each|rows?|table|pages?|items?|questions?|fields?|entries|list)\b/i.test(task)
+  const work = /\b(?:answer|solve|complete|watch|finish|do|fill|submit|extract|collect|read|list|copy|download|open|compare|summari[sz]e)\b/i.test(task)
+  return (
+    (/\b(?:videos?|quiz(?:zes)?|questions?|worksheets?|lessons?|flashcards?)\b/i.test(task) &&
+      /\b(?:answer|solve|complete|watch|finish|do|every|all|each|questions?)\b/i.test(task)) ||
+    (repeated && work)
+  )
+}
+
 /** A page-answer response that is safe to show, or an empty string. */
 function usablePageAnswer(raw: string): string {
   const answer = cleanPageAnswer(raw)
@@ -296,6 +309,8 @@ function actionLabel(action: BrowserAction, elements: BrowserElement[] = []): st
         : action.state === 'attention'
           ? 'Wait for a video question or pause'
           : `Wait for ${action.selector || action.text || 'the video'} to become ${action.state || 'visible'}`
+    case 'questionLoop':
+      return 'Run the question script'
     case 'inspect':
       return action.selector ? `Inspect ${action.selector}` : 'Inspect the page'
     case 'screenshot':
@@ -3061,6 +3076,7 @@ export function Browser() {
           ...(blockedActions.size ? { blocked: [...blockedActions].slice(-8) } : {}),
           ...(blockedActions.size ? { recovering: true } : {}),
           ...(agentScript ? { script: agentScript } : {}),
+          ...(prefersPageScript(planningTask) && !editingTask && !simulationTask ? { codeFirst: true } : {}),
           history: history.slice(-10),
         }
         let planned: BrowserActResponse | null = null
@@ -3302,7 +3318,7 @@ export function Browser() {
           // A plain edit that the page itself can express does not need a model
           // at all, so no provider can refuse it. More complex code and all
           // cosmetic simulations go to the dedicated coder below.
-          const direct = simulationTask ? null : directPageEdit(instruction, current.snapshot.elements)
+          const direct = directPageEdit(instruction, current.snapshot.elements)
           if (direct) {
             runAction = direct
             runLabel = 'Edit the page'
