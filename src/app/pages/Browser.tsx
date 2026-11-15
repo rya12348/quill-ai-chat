@@ -445,6 +445,27 @@ function viewportForPane(element: HTMLElement | null): BrowserViewport | undefin
   }
 }
 
+// A cosmetic simulation often gets the labels right but leaves the lock icon,
+// overlay or greyed-out filter behind. This runs after every simulation and
+// removes those affordances without touching the site's data.
+const SIMULATION_CLEANUP = [
+  "(() => {",
+  "  const style = document.createElement('style');",
+  "  style.setAttribute('data-stet-simulation', 'unlocked');",
+  "  style.textContent = [",
+  "    '[class*=\"locked\" i], [class*=\"lock-icon\" i], [class*=\"lockIcon\" i], [class*=\"lock-overlay\" i], [class*=\"lockOverlay\" i], [class~=\"lock\" i], [data-testid*=\"lock\" i], [aria-label*=\"lock\" i], [title*=\"lock\" i] { display: none !important; visibility: hidden !important; }',",
+  "    '[class*=\"blook\" i] { filter: none !important; opacity: 1 !important; }',",
+  "    '[class*=\"blook\" i]::before, [class*=\"blook\" i]::after { content: none !important; display: none !important; }',",
+  "  ].join('\\n');",
+  "  document.head.appendChild(style);",
+  "  let removed = 0;",
+  "  for (const el of document.querySelectorAll('[class*=\"locked\" i],[class*=\"lock-icon\" i],[class*=\"lockIcon\" i],[class*=\"lock-overlay\" i],[class*=\"lockOverlay\" i],[class~=\"lock\" i],[data-testid*=\"lock\" i],[aria-label*=\"lock\" i],[title*=\"lock\" i]')) {",
+  "    if (el instanceof HTMLElement) { el.style.display = 'none'; el.style.visibility = 'hidden'; removed += 1; }",
+  "  }",
+  "  return { removed };",
+  "})();",
+].join('\n')
+
 export function Browser() {
   const [searchParams] = useSearchParams()
   const [status, setStatus] = useState<BrowserStatus>('checking')
@@ -3353,9 +3374,12 @@ export function Browser() {
               },
             }).catch(() => null)
             if (improved?.code) {
-              runAction = { type: 'evaluate', expression: improved.code }
+              // Run the lock cleanup first: coder bodies often end in a return,
+              // so anything appended after them would never execute.
+              const code = simulationTask ? `${SIMULATION_CLEANUP}\n;${improved.code}` : improved.code
+              runAction = { type: 'evaluate', expression: code }
               runLabel = 'Run page code'
-              agentScript = improved.code
+              agentScript = code
               setScript(agentScript)
               saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
             }
@@ -3374,6 +3398,41 @@ export function Browser() {
         } catch (cause) {
           if (controller.signal.aborted) throw cause
           if (isSessionLoss(cause)) throw cause
+          // A form submit can navigate before the action response arrives. If
+          // the URL moved, the click did land; do not report the element that
+          // the new page intentionally removed as a failed action.
+          let recoveredAfterNavigation: BrowserViewState | null = null
+          try {
+            recoveredAfterNavigation = await api<BrowserViewState>('/browser/state', {
+              method: 'POST',
+              signal: controller.signal,
+            })
+          } catch (refreshCause) {
+            if (controller.signal.aborted) throw refreshCause
+            if (isSessionLoss(refreshCause)) throw refreshCause
+          }
+          if (
+            recoveredAfterNavigation &&
+            recoveredAfterNavigation.url !== current.url &&
+            ['click', 'select', 'check', 'fill', 'press'].includes(runAction.type)
+          ) {
+            current = recoveredAfterNavigation
+            setView(recoveredAfterNavigation)
+            setAddress(recoveredAfterNavigation.url)
+            syncPageBlocks(recoveredAfterNavigation)
+            setLiveReady(false)
+            setLiveNonce((value) => value + 1)
+            setScreenNonce((value) => value + 1)
+            setLastAction(label)
+            history.push({ action: label, result: stateDetail(recoveredAfterNavigation) })
+            append({
+              role: 'action',
+              text: label,
+              detail: `Step ${roundStep + 1} · thought ${formatDuration(planMs)} · acted ${formatDuration(Date.now() - actStartedAt)} · ${stateDetail(recoveredAfterNavigation)}`,
+            })
+            setPhase('Checking the page…')
+            continue
+          }
           // A selector can be stale, a page can move under a click, or a single
           // page action can fail after earlier steps succeeded. Keep the run
           // and give the planner the failure as evidence for its next choice.
@@ -3466,6 +3525,25 @@ export function Browser() {
         const detail = stateDetail(next)
         const resultDetail = next.observation ? `${detail} — ${next.observation}` : detail
         history.push({ action: label, result: resultDetail })
+        // Carry the question script's handled answers into the next plan. The
+        // final report otherwise tends to repeat only the last visible answer
+        // (for example “Q2: ?”) even though the script already solved it.
+        if (runAction.type === 'questionLoop' && next.observation) {
+          try {
+            const report = JSON.parse(next.observation) as { report?: { question?: string; answer?: string }[] }
+            const handled = (report.report ?? [])
+              .filter((entry) => entry.answer)
+              .map((entry) => `${entry.answer}${entry.question ? ` (${entry.question.slice(0, 80)})` : ''}`)
+            if (handled.length) {
+              agentNotes = [...agentNotes, `Question script answers: ${handled.join('; ')}.`].slice(-8)
+              agentMemory.current.notes = agentNotes
+              saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
+            }
+          } catch {
+            // A plain-text observation is still useful as history; it just has
+            // no structured answer list to carry forward.
+          }
+        }
         append({ role: 'action', text: label, detail: `Step ${roundStep + 1} · thought ${formatDuration(planMs)} · acted ${formatDuration(actMs)} · ${resultDetail}` })
         // “Open this and tell me its title” is already complete when the click
         // lands. The snapshot title is the answer; do not send another planner
