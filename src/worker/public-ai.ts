@@ -62,6 +62,7 @@ const LLM7_MODELS = ['gpt-oss:20b', 'codestral-latest', 'mistral-Nemo-Instruct-2
 const GROQ_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b']
 const MISTRAL_MODELS = ['mistral-large-4', 'codestral-latest', 'ministral-14b-latest']
 const NVIDIA_MODELS = [
+  'moonshotai/kimi-k3',
   'stepfun-ai/step-5-preview',
   'minimaxai/minimax-m3.1-flash',
   'nvidia/nemotron-3.5-super-vl-120b-a12b',
@@ -478,6 +479,9 @@ export function laneStrength(model: string, url?: string): number {
   // health/quality record demotes it automatically after a 429, so preferring
   // it here does not put a rate-limited lane ahead of a working smaller one.
   else if (/claude-opus-5\.5|gpt-6-astra/.test(id)) base = 98
+  // NVIDIA serves Kimi K3 free to Developer Program keys; prefer that lane
+  // over the paid OpenRouter copy of the same model.
+  else if (/kimi-k3/.test(id)) base = /integrate\.api\.nvidia\.com/.test(host) ? 99 : 98
   else if (/step-5/.test(id)) base = 98
   else if (/ling-3\.2/.test(id)) base = 96
   else if (/ernie-5\.5|particle-1/.test(id)) base = 95
@@ -696,6 +700,7 @@ export function publicLanes(env: Env): PublicLane[] {
         model,
         label: `${labelFor(model)} (NVIDIA)`,
         description: 'Free with NVIDIA NIM',
+        billing: 'free',
         key: env.NVIDIA_API_KEY,
       })
     }

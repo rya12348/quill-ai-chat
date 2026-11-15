@@ -129,6 +129,7 @@ account.get('/models', async (c) => {
   const retiredLanes = /nemotron-3-ultra-550b|deepseek-v4\.1-flash/i
   const frontierDescriptions: Record<string, string> = {
     'stepfun-ai/step-5-preview': 'Frontier reasoning for long, hard tasks.',
+    'moonshotai/kimi-k3': 'Frontier reasoning, coding and agentic work.',
     'inclusionai/ling-3.2-flash:free': 'Long-context multimodal reasoning and documents.',
     'baidu/ernie-5.5-flash-preview:free': 'Strong tool use and browsing for agent work.',
     'particle-ai/particle-1:free': 'Token-efficient coding and page edits.',
@@ -164,10 +165,10 @@ account.get('/models', async (c) => {
       .map(({ family, lane }, index) => {
         // The two free frontier lanes are new enough that a borrowed alias
         // hides what they are. Show their real names and descriptions.
-        const actual = /ernie-5\.5|particle-1|ling-3\.2|step-5/i.test(lane.model)
+        const actual = /ernie-5\.5|particle-1|ling-3\.2|step-5|kimi-k3/i.test(lane.model)
         return {
           id: lane.model,
-          name: actual ? lane.label : pickerModelName(index),
+          name: actual ? lane.label.replace(/\s*\([^)]*\)\s*$/, '') : pickerModelName(index),
           description: actual ? frontierDescriptions[lane.model] ?? lane.description : pickerModelDescription(index),
           available: true,
           family,
