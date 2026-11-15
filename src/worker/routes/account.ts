@@ -77,10 +77,11 @@ account.get('/models', async (c) => {
     c.header('Cache-Control', 'private, max-age=60')
     return c.json({ items })
   }
-  // No key: five rows, one per model family, each with a short display name.
-  // Each family is represented by its best currently working lane —
-  // healthy before merely strong — so the picker stays short and the site
-  // chooses the variant instead of making people compare provider suffixes.
+  // No key: a short list of brand rows plus one row per hosted family, each
+  // with a short display name. Each family is represented by its best
+  // currently working lane — healthy before merely strong — so the picker stays
+  // short and the site chooses the variant instead of making people compare
+  // provider suffixes.
   let statuses = new Map<string, string>()
   try {
     statuses = new Map((await healthRows(c.get('db'), c.get('user').sub)).map((row) => [row.provider_id, row.status]))
@@ -90,10 +91,10 @@ account.get('/models', async (c) => {
   const lanes = publicLanes(c.env).filter(
     (lane) => isLocalBridgeRequest(c.req.raw) || !lane.model.startsWith('buffy'),
   )
-  // Buffy is an extra row: keep the five hosted families intact rather than
-  // letting it displace one of them. The local bridge supplies Buffy Agent and
-  // Buffy; a deployment without one still advertises Buffy, which the Worker
-  // runs on the hosted free lanes.
+  // Buffy is an extra row: keep the hosted families intact rather than letting
+  // it displace one of them. The local bridge supplies Buffy Agent and Buffy;
+  // a deployment without one still advertises Buffy, which the Worker runs on
+  // the hosted free lanes.
   const bridgeBuffyRows = lanes
     .filter((lane) => lane.model === 'buffy' || lane.model === 'buffy-lite')
     .map((lane) => ({
@@ -122,13 +123,13 @@ account.get('/models', async (c) => {
       : []
   // Stride and Prism spent the most time degraded and add little over the
   // stronger families. Retire those two rows and give their space to the
-  // no-key Claude Haiku lane the Buffy page uses. The Step and GLM names are
-  // kept for older lane aliases of the same models.
-  const retiredFamilies = new Set(['GLM'])
+  // no-key Claude and ChatGPT lanes the Buffy page uses. The Step and GLM names
+  // are kept for older lane aliases of the same models.
+  const retiredFamilies = new Set(['Step', 'GLM'])
   const retiredLanes = /nemotron-3-ultra-550b|deepseek-v4\.1-flash/i
   const frontierDescriptions: Record<string, string> = {
     'stepfun-ai/step-5-preview': 'Frontier reasoning for long, hard tasks.',
-    'thinkingmachines/inkling-2-small:free': 'Broad agentic knowledge, vision and research.',
+    'inclusionai/ling-3.2-flash:free': 'Long-context multimodal reasoning and documents.',
     'baidu/ernie-5.5-flash-preview:free': 'Strong tool use and browsing for agent work.',
     'particle-ai/particle-1:free': 'Token-efficient coding and page edits.',
   }
@@ -143,6 +144,15 @@ account.get('/models', async (c) => {
       billing: 'free',
       strength: laneStrength('claude-haiku-5-5'),
     },
+    {
+      id: 'gpt-5.4-mini',
+      name: 'ChatGPT',
+      description: 'Free ChatGPT, no key or setup.',
+      available: true,
+      family: 'ChatGPT',
+      billing: 'free',
+      strength: laneStrength('gpt-5.4-mini'),
+    },
     ...pickPickerFamilies(
       lanes.filter((lane) => !lane.model.startsWith('buffy')),
       statuses,
@@ -154,7 +164,7 @@ account.get('/models', async (c) => {
       .map(({ family, lane }, index) => {
         // The two free frontier lanes are new enough that a borrowed alias
         // hides what they are. Show their real names and descriptions.
-        const actual = /ernie-5\.5|particle-1|inkling-2-small|step-5/i.test(lane.model)
+        const actual = /ernie-5\.5|particle-1|ling-3\.2|step-5/i.test(lane.model)
         return {
           id: lane.model,
           name: actual ? lane.label : pickerModelName(index),

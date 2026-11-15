@@ -40,9 +40,9 @@ const SAMBANOVA_URL = 'https://api.sambanova.ai/v1/chat/completions'
 // Verified free variants, checked against the live catalogs. Free model IDs
 // rotate, so a 404/429 lane cools down and the next one takes over.
 const OPENROUTER_FREE_MODELS = [
-  // The two strongest zero-cost models currently in the OpenRouter catalog,
-  // both above Step 5 Preview and Nemotron 3 Ultra on agentic/tool benchmarks.
-  'thinkingmachines/inkling-2-small:free',
+  // The strongest zero-cost models currently in the OpenRouter catalog, all
+  // above Step 5 Preview and Nemotron 3 Ultra on agentic/tool benchmarks.
+  'inclusionai/ling-3.2-flash:free',
   'baidu/ernie-5.5-flash-preview:free',
   'particle-ai/particle-1:free',
   'nvidia/nemotron-3-ultra-550b-a55b:free',
@@ -328,7 +328,7 @@ function labelFor(id: string): string {
   if (lower.includes('ultra')) return 'Nemotron 3 Ultra 550B'
   if (lower.includes('nemotron')) return 'Nemotron 3 Nano 30B'
   if (lower.includes('step-5')) return 'Step 5 Preview'
-  if (lower.includes('inkling-2-small')) return 'Inkling 2 Small'
+  if (lower.includes('ling-3.2')) return 'Ling 3.2 Flash'
   if (lower.includes('ernie-5.5')) return 'ERNIE 5.5 Flash'
   if (lower.includes('particle-1')) return 'Particle-1'
   if (lower.includes('muse-glimmer')) return 'Muse Glimmer 30B'
@@ -392,7 +392,7 @@ const FAMILY_RULES: [RegExp, string][] = [
   [/muse/i, 'Muse'],
   [/ernie/i, 'ERNIE'],
   [/particle/i, 'Particle'],
-  [/inkling/i, 'Inkling'],
+  [/ling-3\.2/i, 'Ling'],
   [/laguna/i, 'Laguna'],
   [/dots/i, 'Dots'],
   [/liquid/i, 'Liquid'],
@@ -479,7 +479,7 @@ export function laneStrength(model: string, url?: string): number {
   // it here does not put a rate-limited lane ahead of a working smaller one.
   else if (/claude-opus-5\.5|gpt-6-astra/.test(id)) base = 98
   else if (/step-5/.test(id)) base = 98
-  else if (/inkling-2-small/.test(id)) base = 97
+  else if (/ling-3\.2/.test(id)) base = 96
   else if (/ernie-5\.5|particle-1/.test(id)) base = 95
   else if (/nemotron-3-ultra/.test(id) && /openrouter\.ai|integrate\.api\.nvidia\.com/.test(host)) base = 93
   else if (/gpt-6|claude-opus|claude-sonnet-5|gemini-4|deepseek-v4-pro|kimi-k3|glm-5\.3(?!-flash)|qwen3\.8-max|qwen3\.8-2\.4t|step-5/.test(id)) base = 92
@@ -673,7 +673,7 @@ export function publicLanes(env: Env): PublicLane[] {
     // a shorter list. ERNIE leads DeepSeek Flash on tool and terminal work;
     // Particle-1 is the strongest free coding agent model in the catalog.
     for (const model of [
-      'thinkingmachines/inkling-2-small:free',
+      'inclusionai/ling-3.2-flash:free',
       'baidu/ernie-5.5-flash-preview:free',
       'particle-ai/particle-1:free',
     ]) {

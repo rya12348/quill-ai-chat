@@ -883,9 +883,9 @@ function browserDeepScore(lane: PublicLane): number {
   if (/claude-opus-5\.5|gpt-6-astra/.test(id)) score += 150
   // ERNIE is the strongest fast tool-use model, so it leads hard planning.
   else if (/ernie-5\.5/.test(id)) score += 135
-  // Inkling is stronger overall but slow to first token; keep it just behind
-  // ERNIE in the live loop and ahead of the 550B.
-  else if (/inkling-2-small/.test(id)) score += 130
+  // Ling is strong but slow; keep it just behind ERNIE in the live loop and
+  // ahead of the 550B.
+  else if (/ling-3\.2/.test(id)) score += 130
   else if (/nemotron-3-ultra|550b/.test(id)) score += 100
   // Particle-1 is a coding model: keep it out of click planning.
   else if (/particle-1/.test(id)) score += 85
@@ -2531,7 +2531,7 @@ async function writePageCode(
   // deep ranking stays in charge for every other lane.
   const codeScore = (lane: PublicLane) => {
     if (/particle-1/i.test(lane.model)) return 1_000
-    if (/inkling-2-small/i.test(lane.model)) return 950
+    if (/ling-3\.2/i.test(lane.model)) return 950
     if (/ernie-5\.5/i.test(lane.model)) return 900
     return browserDeepScore(lane) + (/deepseek|step-5|qwen3\.8-max|gpt-6|claude-opus|kimi-k3/i.test(lane.model) ? 6 : 0)
   }

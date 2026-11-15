@@ -63,7 +63,7 @@ test('the two strongest free models are lanes ranked above the 550B', () => {
   const env = { OPENROUTER_API_KEY: 'openrouter-key' } as unknown as Env
   const lanes = publicLanes(env)
   for (const model of [
-    'thinkingmachines/inkling-2-small:free',
+    'inclusionai/ling-3.2-flash:free',
     'baidu/ernie-5.5-flash-preview:free',
     'particle-ai/particle-1:free',
   ]) {
