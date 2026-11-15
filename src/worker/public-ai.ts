@@ -879,11 +879,12 @@ function anonymousLanes(): PublicLane[] {
     },
     {
       url: POLLINATIONS_KEYLESS_URL,
-      // Pollinations maps this keyless alias to OpenAI's gpt-5-nano. The public
-      // id stays "chatgpt" so the picker and Buffy can prefer it by name.
-      model: 'chatgpt',
+      // The keyless `openai-fast` alias reports gpt-oss-20b, not a ChatGPT
+      // model. Keep the real model name visible; the actual ChatGPT lane is
+      // the DuckDuckGo browser proof in routes/buffy.ts.
+      model: 'pollinations-gpt-oss',
       requestModel: 'openai-fast',
-      label: 'ChatGPT (GPT-5 Nano)',
+      label: 'GPT-OSS 20B (Pollinations)',
       description: 'Free, no key, via Pollinations; falls back when rate-limited',
       billing: 'free',
     },
@@ -1015,7 +1016,7 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
             return
           }
           cool(lane, COOLDOWN_ERROR)
-          const failure = new AiError('refused', `${lane.label} refused this task.`, 502)
+          const failure = new AiError('refused', `${lane.label} did not produce a usable answer.`, 502)
           input.onLaneResult?.(failureResult(lane, failure, startedAt))
           throw failure
         }
@@ -1042,7 +1043,7 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
         return
       }
       cool(lane, COOLDOWN_ERROR)
-      const failure = new AiError('refused', `${lane.label} refused this task.`, 502)
+      const failure = new AiError('refused', `${lane.label} did not produce a usable answer.`, 502)
       input.onLaneResult?.(failureResult(lane, failure, startedAt))
       throw failure
     }
@@ -1204,7 +1205,7 @@ export async function laneText(lane: PublicLane, input: LaneInput): Promise<stri
       })
     }
     cool(lane, COOLDOWN_ERROR)
-    const failure = new AiError('refused', `${lane.label} refused this task.`, 502)
+    const failure = new AiError('refused', `${lane.label} did not produce a usable answer.`, 502)
     input.onLaneResult?.(failureResult(lane, failure, startedAt))
     throw failure
   }

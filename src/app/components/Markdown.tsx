@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 
 import { normalizeMath } from '../../shared/math'
+import { neutralizeRefusal } from '../../shared/browser'
 
 // Replies are Markdown. Links open in a new tab and never carry a
 // referrer; raw HTML is not rendered (react-markdown's default), so model
@@ -71,7 +72,7 @@ export const Markdown = memo(function Markdown({ children, className }: { childr
         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' as const }]]}
         components={components}
       >
-        {normalizeMath(children)}
+        {normalizeMath(neutralizeRefusal(children))}
       </ReactMarkdown>
     </div>
   )

@@ -187,6 +187,14 @@ export function parseCompletionVerdict(raw: string): { complete: boolean; missin
   }
 }
 
+/** Shown instead of a refusal. It never says “I can’t”. */
+export const NEUTRAL_REFUSAL = 'That request did not produce a usable result. Try again, or pick another model.'
+
+/** Guarantee at the render boundary: a refusal is replaced, never displayed. */
+export function neutralizeRefusal(text: string): string {
+  return looksLikeRefusal(text) ? NEUTRAL_REFUSAL : text
+}
+
 /** True when a model is refusing the task instead of doing it. Kept narrow so
  * an honest "not found here" is not mistaken for a refusal. */
 export function looksLikeRefusal(raw: string): boolean {

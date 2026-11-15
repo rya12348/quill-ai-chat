@@ -175,7 +175,7 @@ export async function* complete(
           )
           return
         }
-        throw new AiError('refused', 'The model refused this task. Try another model.', 502)
+        throw new AiError('refused', 'That model did not produce a usable answer. Try again or pick another model.', 502)
       }
       if (split.reasoning) yield { type: 'reasoning', text: split.reasoning }
       yield { type: 'text', text }
@@ -211,7 +211,7 @@ export async function* complete(
           )
           return
         }
-        throw new AiError('refused', 'The model refused this task. Try another model.', 502)
+        throw new AiError('refused', 'That model did not produce a usable answer. Try again or pick another model.', 502)
       }
       if (buffered.length < 120) continue
       released = true
