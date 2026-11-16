@@ -2,7 +2,34 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import test from 'node:test'
 
-import { dentComplete, exactDentAnswer, isDentHardTask, normalizeDentAnswer } from '../src/worker/dent'
+import {
+  dentComplete,
+  dentPageImprovement,
+  dentPageRepairPrompt,
+  exactDentAnswer,
+  isDentHardTask,
+  normalizeDentAnswer,
+} from '../src/worker/dent'
+
+test('Dent repair prompt carries the exact checks and complete page data', () => {
+  const prompt = dentPageRepairPrompt(
+    'Build a tip calculator',
+    [{ name: 'index.html', html: '<!doctype html><html><body><h1>Tip</h1></body></html>' }],
+    ['No viewport meta tag', 'Every button needs a working action'],
+  )
+  assert.match(prompt, /No viewport meta tag/)
+  assert.match(prompt, /Every button needs a working action/)
+  assert.match(prompt, /<!doctype html>/)
+  assert.match(prompt, /<!-- page: index.html -->/)
+  assert.match(prompt, /Preserve every working control/)
+})
+
+test('Dent only accepts a repair that removes a failed check', () => {
+  assert.equal(dentPageImprovement({ failures: ['a', 'b'] }, { failures: ['a'] }), true)
+  assert.equal(dentPageImprovement({ failures: ['a', 'b'] }, { failures: [] }), true)
+  assert.equal(dentPageImprovement({ failures: ['a'] }, { failures: ['b'] }), false)
+  assert.equal(dentPageImprovement({ failures: ['a'] }, { failures: ['a'] }), false)
+})
 
 test('Dent keeps greetings and simple chat on the fast path', () => {
   assert.equal(isDentHardTask('hi'), false)

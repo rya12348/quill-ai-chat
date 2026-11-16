@@ -7,7 +7,7 @@ import { AiError, type ChatMessage } from '../ai'
 import { allowsMutation, buildEnabledFor, isGuestUser, isLoopback, isOwner, privateJson } from '../auth'
 import { buildComplete, DESIGN_CONTRACT, extractPages, isInteractiveRequest, verifyPages } from '../build'
 import { laneKey, orderLanes, publicComplete, publicLanes, type LaneResult, type PublicLane } from '../public-ai'
-import { dentComplete } from '../dent'
+import { DENT_PAGE_MAX_TOKENS, dentComplete, dentPageImprovement, dentPageRepairPrompt } from '../dent'
 import { recordProviderResult } from '../provider-health'
 import { guestUsageKey, RATE_WINDOWS, rateLimit } from '../rate-limit'
 import type { AppContext } from '../env'
@@ -79,7 +79,12 @@ function pageTitle(html: string): string {
   return text.slice(0, 120) || 'Buffy project'
 }
 
-function buildFromPages(pages: BuildPage[], interactive: boolean, label: string): { text: string; build: BuildInfo } {
+function buildFromPages(
+  pages: BuildPage[],
+  interactive: boolean,
+  label: string,
+  repaired = false,
+): { text: string; build: BuildInfo } {
   const verification = verifyPages(pages, { interactive })
   return {
     text: 'The project is ready. Preview it below, then ask for a change if you want one.',
@@ -95,7 +100,7 @@ function buildFromPages(pages: BuildPage[], interactive: boolean, label: string)
       verification: {
         status: verification.failures.length ? 'warning' : 'verified',
         checks: verification.checks,
-        repaired: false,
+        repaired,
         spec: false,
         score: verification.score,
         asOf: Date.now(),
@@ -613,6 +618,10 @@ buffy.post('/code', async (c) => {
         } else {
           await send('status', { text: 'Dent (deep mode) is writing the project…' })
           let usedLabel = 'Dent'
+          const onDentLaneResult = (laneResult: LaneResult) => {
+            void recordProviderResult(db, user.sub, laneKey(laneResult.lane), laneResult).catch(() => {})
+            if (laneResult.ok) usedLabel = laneResult.lane.label
+          }
           try {
             let raw = ''
             for await (const piece of publicComplete(dentLanes, {
@@ -622,10 +631,13 @@ buffy.post('/code', async (c) => {
               ] satisfies ChatMessage[],
               signal: controller.signal,
               temperature: 0.35,
-              onLaneResult: (laneResult) => {
-                void recordProviderResult(db, user.sub, laneKey(laneResult.lane), laneResult).catch(() => {})
-                if (laneResult.ok) usedLabel = laneResult.lane.label
-              },
+              // The default chat budget is 4K. A complete page plus Dent's
+              // reasoning routinely needs more, and a truncated page used to
+              // look like a model failure rather than a budget failure.
+              maxTokens: DENT_PAGE_MAX_TOKENS,
+              idleMs: 30_000,
+              timeoutMs: 120_000,
+              onLaneResult: onDentLaneResult,
             })) {
               if (piece.type === 'text') raw += piece.text
             }
@@ -634,7 +646,69 @@ buffy.post('/code', async (c) => {
               console.log('buffy.code.dent_invalid', { label: usedLabel, chars: raw.length })
               await send('status', { text: 'Dent returned an incomplete page — using the page builder…' })
             } else {
-              result = buildFromPages(mergePages(previous, generated), interactive, usedLabel)
+              let pages = mergePages(previous, generated)
+              let verification = verifyPages(pages, { interactive })
+              let repaired = false
+              // A page is a program with checks, so spend one extra Dent turn
+              // only when a check failed. The candidate replaces the draft
+              // only if it removes a failure; a confident rewrite is not enough.
+              if (verification.failures.length) {
+                const count = verification.failures.length
+                await send('status', {
+                  text: `Dent is repairing ${count} page check${count === 1 ? '' : 's'}…`,
+                })
+                try {
+                  let repairRaw = ''
+                  for await (const piece of publicComplete(dentLanes, {
+                    messages: [
+                      { role: 'system', content: CODE_SYSTEM },
+                      { role: 'user', content: dentPageRepairPrompt(prompt, pages, verification.failures) },
+                    ] satisfies ChatMessage[],
+                    signal: controller.signal,
+                    temperature: 0.15,
+                    maxTokens: DENT_PAGE_MAX_TOKENS,
+                    idleMs: 30_000,
+                    timeoutMs: 75_000,
+                    onLaneResult: onDentLaneResult,
+                  })) {
+                    if (piece.type === 'text') repairRaw += piece.text
+                  }
+                  const repairPages = extractPages(repairRaw, { requireInteractive })
+                  if (repairPages.length) {
+                    const base: BuildInfo = previous ?? {
+                      status: 'warning',
+                      kind: 'page',
+                      title: pageTitle(pages[0]!.html),
+                      html: pages[0]!.html,
+                      pages,
+                      models: [usedLabel],
+                      asOf: Date.now(),
+                    }
+                    const nextPages = mergePages(base, repairPages)
+                    const nextVerification = verifyPages(nextPages, { interactive })
+                    if (dentPageImprovement(verification, nextVerification)) {
+                      console.log('buffy.code.dent_repaired', {
+                        before: count,
+                        after: nextVerification.failures.length,
+                      })
+                      pages = nextPages
+                      verification = nextVerification
+                      repaired = true
+                    } else {
+                      console.log('buffy.code.dent_repair_rejected', {
+                        before: count,
+                        after: nextVerification.failures.length,
+                      })
+                    }
+                  }
+                } catch (error) {
+                  if (controller.signal.aborted) return
+                  console.log('buffy.code.dent_repair_failed', {
+                    error: error instanceof Error ? error.message : String(error),
+                  })
+                }
+              }
+              result = buildFromPages(pages, interactive, usedLabel, repaired)
             }
           } catch (error) {
             if (controller.signal.aborted) return
