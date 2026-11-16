@@ -25,10 +25,21 @@ test('Dent repair prompt carries the exact checks and complete page data', () =>
 })
 
 test('Dent only accepts a repair that removes a failed check', () => {
-  assert.equal(dentPageImprovement({ failures: ['a', 'b'] }, { failures: ['a'] }), true)
-  assert.equal(dentPageImprovement({ failures: ['a', 'b'] }, { failures: [] }), true)
-  assert.equal(dentPageImprovement({ failures: ['a'] }, { failures: ['b'] }), false)
-  assert.equal(dentPageImprovement({ failures: ['a'] }, { failures: ['a'] }), false)
+  const before = { failures: ['a', 'b'], score: 80 }
+  assert.equal(dentPageImprovement(before, { failures: ['a'], score: 80 }), true)
+  assert.equal(dentPageImprovement(before, { failures: [], score: 90 }), true)
+  assert.equal(dentPageImprovement({ failures: ['a'], score: 80 }, { failures: ['a'], score: 90 }), false)
+})
+
+test('Dent rejects a repair that trades several failures for one worse failure', () => {
+  const before = { failures: ['No viewport meta tag', 'Every button needs a working action'], score: 70 }
+  const after = { failures: ['Page has no accessible heading'], score: 90 }
+  assert.equal(dentPageImprovement(before, after), false)
+})
+
+test('Dent rejects a repair that lowers the page score', () => {
+  const before = { failures: ['a', 'b'], score: 80 }
+  assert.equal(dentPageImprovement(before, { failures: ['a'], score: 70 }), false)
 })
 
 test('Dent keeps greetings and simple chat on the fast path', () => {

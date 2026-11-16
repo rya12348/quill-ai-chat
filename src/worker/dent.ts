@@ -43,12 +43,18 @@ ${current}
 </current-project>`
 }
 
-/** Keep the original page unless the repair removes at least one failed check. */
+/**
+ * Keep the original page unless the repair removes at least one failed check,
+ * introduces no new failure type, and does not lower the page score. Counting
+ * failures alone can accept one new, worse failure in place of several old ones.
+ */
 export function dentPageImprovement(
-  before: { failures: string[] },
-  after: { failures: string[] },
+  before: { failures: string[]; score: number },
+  after: { failures: string[]; score: number },
 ): boolean {
-  return after.failures.length < before.failures.length
+  const known = new Set(before.failures)
+  const noNewFailures = after.failures.every((failure) => known.has(failure))
+  return noNewFailures && after.failures.length < before.failures.length && after.score >= before.score
 }
 
 export const DENT_DRAFT = `You are Dent, Ink's frontier free model. Work to a frontier standard, not a first-draft standard.
