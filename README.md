@@ -650,7 +650,9 @@ request. Same-repository PRs get a Pages preview deployment and smoke test.
 Pushes to `main` first deploy and smoke-test `deploy-check-<run-id>` on the
 preview database, then deploy production. Set `CLOUDFLARE_API_TOKEN` and
 `CLOUDFLARE_ACCOUNT_ID` as repository or environment secrets; use a token scoped
-to the `ink-jo3` Pages project and the `ink-live` D1 database.
+to the `ink-jo3` Pages project and the `ink-live` D1 database. Until those
+secrets exist, the workflow still runs typecheck, tests and the build, warns,
+and skips only the Pages deploy steps.
 
 ### Backups, restore and schema changes
 

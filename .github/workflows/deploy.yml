@@ -44,7 +44,20 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run deploy:pages
+      - name: Check Cloudflare credentials
+        id: cloudflare
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$TOKEN" ] && [ -n "$ACCOUNT" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set; skipping the Pages preview deploy."
+          fi
+      - if: steps.cloudflare.outputs.configured == 'true'
+        run: npm run deploy:pages
 
   production:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -62,15 +75,29 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Check Cloudflare credentials
+        id: cloudflare
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$TOKEN" ] && [ -n "$ACCOUNT" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set; skipping the Pages production deploy."
+          fi
       # Deploy the exact build to the isolated preview database first. The
       # deploy script refuses to continue unless health, readiness, guest
       # sign-in and a real chat turn pass.
       - name: Preview gate
+        if: steps.cloudflare.outputs.configured == 'true'
         env:
           PAGES_BRANCH: deploy-check-${{ github.run_id }}
         run: npm run deploy:pages
       # Only promote after the preview gate passes.
       - name: Production
+        if: steps.cloudflare.outputs.configured == 'true'
         env:
           PAGES_BRANCH: main
         run: npm run deploy:pages
