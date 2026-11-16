@@ -436,6 +436,28 @@ export function isResearchIntent(question: string): boolean {
   return /\b(?:research|sources?|latest|current|news|compare|according\s+to|find\s+out)\b/i.test(text)
 }
 
+// Buffy's full agent is expensive: it assembles the workspace tools before it
+// writes a sentence. Only an explicit request to operate on the workspace, a
+// file, a command, a test run, or a tool surface belongs on that path. A bare
+// mention of "search", "test" or "code" is ordinary conversation.
+const BUFFY_TOOL_WORK = [
+  /\b(?:read|open|inspect|edit|change|modify|update|delete|rename|move|copy)\s+(?:the\s+|my\s+|this\s+|a\s+)?(?:[\w-]+\s+){0,2}(?:files?|folders?|director(?:y|ies)|repos?(?:itory)?|projects?|workspaces?|codebase)\b/i,
+  /\b(?:write|create)\s+(?:the\s+|my\s+|this\s+|a\s+)?(?:[\w-]+\s+){0,2}(?:files?|folders?|director(?:y|ies)|repos?(?:itory)?|workspaces?|codebase)\b/i,
+  /\b(?:read|open|inspect|edit|write|update|fix|run|test|debug|refactor|check|review)\s+(?:the\s+|my\s+|this\s+)?[`"']?(?:[\w.-]+\/)*[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|json|md|css|html|yml|yaml|toml|sh|rs|go|java|rb|php)\b/i,
+  /\b(?:run|execute|test|debug|fix|refactor|check|review|verify)\s+(?:the\s+|my\s+|this\s+|a\s+)?(?:[\w-]+\s+){0,2}(?:code|codebase|repos?(?:itory)?|projects?|files?|tests?|test\s+suite|bugs?|scripts?|commands?|programs?|builds?)\b/i,
+  /\b(?:use|open|launch|search|browse|look\s+up|find|read)\s+(?:the\s+|my\s+|this\s+|a\s+)?(?:[\w-]+\s+){0,2}(?:terminal|shell|browser|workspace|web|internet|online|docs?|documentation|google|site|page|files?|repos?(?:itory)?|codebase|code)\b/i,
+  /(?:^\s*|\b(?:run|execute)\s+)(?:the\s+)?[`"']?(?:git|npm|pnpm|yarn|bun|npx)\s+(?:run|test|install|build|status|add|commit|push|pull|checkout|branch|diff|log|init|exec)\b/i,
+  /\b(?:run|execute)\s+[`"']?(?:node|python|python3|pip|uv|cargo|go|make)\s+[`"']?[\w./-]+/i,
+  /\b(?:install|update|remove)\s+(?:the\s+|my\s+|this\s+|a\s+)?(?:dependencies|packages?|node_modules)\b/i,
+  /\b(?:commit|push|deploy)\s+(?:the\s+|my\s+|this\s+)?(?:changes?|code|branch|app|site|project)\b/i,
+]
+
+/** True only when Buffy is explicitly being asked to use its tools. */
+export function needsBuffyTools(question: string): boolean {
+  const text = question.replace(/\s+/g, ' ').trim()
+  return BUFFY_TOOL_WORK.some((pattern) => pattern.test(text))
+}
+
 /** Analyze only runs when the message actually asks for data work. */
 export function isAnalyzeIntent(question: string): boolean {
   const text = normalizedQuestion(question)

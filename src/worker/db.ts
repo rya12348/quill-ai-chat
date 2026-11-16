@@ -388,6 +388,15 @@ const SCHEMA = [
     PRIMARY KEY (ip_hash, day_start)
   )`,
   `CREATE INDEX IF NOT EXISTS guest_daily_usage_day ON guest_daily_usage(day_start)`,
+  // Aggregate 5xx observations for the external monitor. Rows contain only the
+  // route and status, never a user, query string or request body.
+  `CREATE TABLE IF NOT EXISTS http_errors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS http_errors_created ON http_errors(created_at)`,
 ]
 
 let ready: Promise<void> | undefined

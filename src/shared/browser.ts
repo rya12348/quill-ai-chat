@@ -4,15 +4,129 @@ import type { BrowserAction, BrowserElement } from './types'
  * real account: “make it look like…”, “pretend…”, “fake…”, “for fun”. That is
  * a DOM/cosmetic edit, never a purchase, redemption or other account action. */
 export function isSimulationTask(task: string): boolean {
-  const explicit = /\b(?:make (?:it|this|the page|my (?:account|profile|page)) (?:look|seem|appear)|pretend|fake|mock(?:ed|up)?|simulat(?:e|ion)|cosmetic|visual(?:ly)?|as if|without (?:actually |really )?(?:buying|purchasing|spending|unlocking)|(?:do not|don't) (?:buy|purchase|spend|unlock))\b/i.test(
-    task,
-  )
+  // “A mock lesson/test/video” is a practice item, not a request to fake
+  // account state. Only the cosmetic senses of “mock” should enter the
+  // simulation guard; otherwise a real lesson is treated as a DOM edit.
+  const mockAsPractice = /\bmock(?:ed|up)?\s+(?:video|lesson|quiz|test|exam|assignment|course|class)\b/i.test(task)
+  const explicit =
+    /\b(?:make (?:it|this|the page|my (?:account|profile|page)) (?:look|seem|appear)|pretend|fake|simulat(?:e|ion)|cosmetic|visual(?:ly)?|as if|without (?:actually |really )?(?:buying|purchasing|spending|unlocking)|(?:do not|don't) (?:buy|purchase|spend|unlock))\b/i.test(
+      task,
+    ) ||
+    (!mockAsPractice && /\bmock(?:ed|up)?\b/i.test(task))
   // “For fun” alone is not an edit (“play this game for fun”). It only marks a
   // simulation when paired with an appearance verb.
   const forFun =
     /\b(?:just )?for fun\b/i.test(task) &&
     /\b(?:look|seem|appear|pretend|fake|mock|simulat|cosmetic|visual)\b/i.test(task)
   return explicit || forFun
+}
+
+/** One page-side loop for video questions: wait for each pause, read the
+ * visible question, choose the mapped option, continue, and repeat. Keeping
+ * this in the page removes a planner round trip per question and lets the
+ * whole wait/act sequence happen in one request. */
+export function questionLoopExpression(answers: { question: string; answer: string }[] = [], timeoutMs = 600_000): string {
+  return `(async () => {
+  const answers = ${JSON.stringify(answers)};
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const visible = (element) => {
+    if (!element) return false;
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return rect.width > 1 && rect.height > 1 && style.visibility !== 'hidden' && style.display !== 'none' && rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth;
+  };
+  const normalize = (value) => String(value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+  const buttonsIn = (root, selector) => Array.from(root.querySelectorAll(selector)).filter((button) => visible(button));
+  const allButtonsIn = (root) => Array.from(root.querySelectorAll('button,[role="button"],label'));
+  const control = (buttons) => buttons.find((button) => /^(?:continue|submit|next|check|done|confirm)$/i.test((button.innerText || button.textContent || '').trim()));
+  const questionCandidates = () => Array.from(document.querySelectorAll('dialog,[role="dialog"],[class*="question"],[class*="Question"],[class*="quiz"],[class*="Quiz"],[class*="modal"],[class*="Modal"],[data-question]'))
+    .filter((element) => /(?:question|answer|choose|select|submit)/i.test(element.innerText || ''))
+    .filter((element) => allButtonsIn(element).some((button) => !/^(?:continue|submit|next|check|done|confirm)$/i.test((button.innerText || button.textContent || '').trim())));
+  // The same question often matches both the dialog and its inner question
+  // box. Keep only the outer container so answer tracking and planner requests
+  // do not see duplicates.
+  const topLevelQuestions = () => {
+    const all = questionCandidates();
+    return all.filter((element) => !all.some((other) => other !== element && other.contains(element)));
+  };
+  const questionRoot = () => topLevelQuestions().find((element) => visible(element));
+  // Hidden future questions often already exist in the DOM. Returning them lets
+  // the planner answer several questions in the next script call instead of
+  // paying one model round trip per pause.
+  const collectQuestions = () => {
+    const seen = new Set();
+    return topLevelQuestions().slice(0, 12).flatMap((element) => {
+      if (answeredRoots.has(element)) return [];
+      const question = (element.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 1_500);
+      const options = allButtonsIn(element)
+        .map((option) => (option.innerText || option.textContent || '').trim())
+        .filter((option) => option && !/^(?:continue|submit|next|check|done|confirm)$/i.test(option))
+        .slice(0, 12);
+      const key = normalize(question);
+      if (!question || seen.has(key)) return [];
+      if ([...answered].some((done) => key.includes(done) || done.includes(key))) return [];
+      seen.add(key);
+      return [{ question, options, visible: visible(element) }];
+    });
+  };
+  const video = document.querySelector('video');
+  const started = Date.now();
+  const end = started + ${Math.max(1_000, Math.round(timeoutMs))};
+  const report = [];
+  const answered = new Set();
+  const answeredRoots = new Set();
+  let pausedSince = 0;
+  let handled = 0;
+  while (Date.now() < end) {
+    const root = questionRoot();
+    if (!root) {
+      if (video && video.ended) break;
+      if (!video) break;
+      if (video.paused) {
+        if (!pausedSince) pausedSince = Date.now();
+        if (Date.now() - pausedSince > 8_000) return { status: 'paused_without_question', handled, report, text: (document.body.innerText || '').slice(0, 1_200) };
+      } else {
+        pausedSince = 0;
+      }
+      await sleep(250);
+      continue;
+    }
+    pausedSince = 0;
+    const questionText = (root.innerText || '').replace(/\\s+/g, ' ').trim();
+    const buttons = buttonsIn(root, 'button,[role="button"],label');
+    const options = buttons.filter((button) => !/^(?:continue|submit|next|check|done|confirm)$/i.test((button.innerText || button.textContent || '').trim()));
+    const entry = answers.find((answer) => normalize(questionText).includes(normalize(answer.question)) || normalize(answer.question).includes(normalize(questionText).slice(0, 120)));
+    // Some practice pages expose the correct option in the DOM (data-correct,
+    // aria-checked or a correct class). Prefer that verified page evidence over
+    // a model-supplied answer, and allow it to work without an answer map.
+    const marked = options.find((option) => {
+      const value = (option.getAttribute('data-correct') || option.getAttribute('data-answer') || option.getAttribute('aria-checked') || '').toLowerCase();
+      return value === 'true' || value === '1' || value === 'correct' || option.classList.contains('correct');
+    });
+    if (!entry && !marked) {
+      return { status: 'needs_answer', handled, question: questionText.slice(0, 1_500), options: options.map((option) => (option.innerText || option.textContent || '').trim()).filter(Boolean).slice(0, 12), questions: collectQuestions(), report };
+    }
+    const choice = marked ?? (entry ? options.find((option) => normalize(option.innerText || option.textContent) === normalize(entry.answer)) || options.find((option) => normalize(option.innerText || option.textContent).includes(normalize(entry.answer))) : undefined);
+    if (!choice) {
+      return { status: 'answer_not_found', handled, question: questionText.slice(0, 1_500), answer: entry?.answer || '', options: options.map((option) => (option.innerText || option.textContent || '').trim()).filter(Boolean).slice(0, 12), questions: collectQuestions(), report };
+    }
+    choice.click();
+    await sleep(150);
+    let next = control(buttonsIn(root, 'button,[role="button"]'));
+    for (let wait = 0; wait < 8 && (!next || next.disabled); wait += 1) {
+      await sleep(150);
+      next = control(buttonsIn(root, 'button,[role="button"]'));
+    }
+    if (next && !next.disabled) next.click();
+    const hideBy = Date.now() + 10_000;
+    while (Date.now() < hideBy && visible(root)) await sleep(200);
+    report.push({ question: questionText.slice(0, 300), answer: (choice.innerText || choice.textContent || '').trim().slice(0, 120), source: marked ? 'page' : 'answer' });
+    answered.add(normalize(questionText));
+    answeredRoots.add(root);
+    handled += 1;
+  }
+  return { status: video && !video.ended ? 'timeout' : 'complete', handled, report, text: (document.body.innerText || '').slice(0, 1_200) };
+})()`
 }
 
 export function isPageEditingTask(task: string): boolean {
@@ -106,6 +220,23 @@ export function directPageEdit(task: string, elements: BrowserElement[]): Browse
       return evaluate(
         `const el=document.querySelector(${JSON.stringify(`[data-stet-id="${target.id}"]`)});if(!el)throw new Error('target not found');el.textContent=${JSON.stringify(
           replace[2],
+        )};return el.textContent`,
+      )
+    }
+  }
+
+  const heading = instruction.match(
+    /\b(?:change|set|edit|update|replace|rewrite)\b[\s\S]*?\b(?:main\s+)?(?:heading|headline)\b[\s\S]*?\bto\s+(.+)$/i,
+  )
+  if (heading) {
+    const value = heading[1]
+      .split(/\s+(?:and|then)\s+(?:tell|let|confirm|report|say)\b/i)[0]
+      .replace(/[.!?]+$/, '')
+      .trim()
+    if (value) {
+      return evaluate(
+        `const el=document.querySelector('h1,[role="heading"],h2');if(!el)throw new Error('heading not found');el.textContent=${JSON.stringify(
+          value,
         )};return el.textContent`,
       )
     }
@@ -488,6 +619,32 @@ const DIRECT_SITES: Record<string, string> = {
   coursehero: 'https://www.coursehero.com/',
 }
 
+/**
+ * Resolve a plain site name without a per-site allowlist. Brands usually
+ * publish on their name's .com address, so "blooket" and "khan academy" can
+ * start navigating immediately; if the guess is wrong the caller falls back to
+ * the normal planner/search path instead of getting stuck.
+ */
+export function genericSiteUrl(target: string): string | null {
+  const cleaned = target
+    .trim()
+    .replace(/^["'“”]+|["'“”]+$/g, '')
+    .replace(/[.!?]+$/, '')
+    .replace(/^(?:the)\s+/i, '')
+    .replace(/\s+(?:website|site|webpage|web page|page)$/i, '')
+  if (!cleaned || /[\/\\]/.test(cleaned)) return null
+  // The caller may have captured a whole compound instruction. Only a bare
+  // site name may be guessed; a clause with another action belongs to the
+  // planner rather than becoming “googleandsearchforcats.com”.
+  if (/\b(?:and|then|after|search|click|tap|type|press|scroll|open|visit|launch|find|read|tell|show)\b/i.test(cleaned)) return null
+  const host = cleaned
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '')
+  if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(host)) return null
+  return `https://${host}.com/`
+}
+
 function publicUrl(raw: string): string | null {
   // A browser URL cannot contain literal whitespace. Without this guard a
   // compound task such as “go to example.com and click X” is mistaken for a
@@ -557,7 +714,8 @@ export function directBrowserTarget(task: string): { target: string; url: string
   const url =
     DIRECT_SITES[key] ??
     publicUrl(target) ??
-    (/^[\w.-]+\.[a-z]{2,}(?:\/.*)?$/i.test(target) ? publicUrl(`https://${target}`) : null)
+    (/^[\w.-]+\.[a-z]{2,}(?:\/.*)?$/i.test(target) ? publicUrl(`https://${target}`) : null) ??
+    genericSiteUrl(target)
   return url ? { target, url } : null
 }
 
@@ -690,7 +848,8 @@ export function directBrowserLead(task: string): DirectBrowserLead | null {
   const url =
     DIRECT_SITES[key] ??
     publicUrl(target) ??
-    (/^[\w.-]+\.[a-z]{2,}(?:\/.*)?$/i.test(target) ? publicUrl(`https://${target}`) : null)
+    (/^[\w.-]+\.[a-z]{2,}(?:\/.*)?$/i.test(target) ? publicUrl(`https://${target}`) : null) ??
+    genericSiteUrl(target)
   return url ? { target, url, rest } : null
 }
 
@@ -895,6 +1054,18 @@ function findElement(
   const wanted = cleanElementTarget(target)
   if (!wanted) return null
   const candidates = elements.filter((element) => !element.disabled && accepts(element))
+  // Keep the full target as a first-class label too. “Text input” is a real
+  // label, but the generic-suffix cleanup would reduce it to “text” and match
+  // both a textbox and a textarea, sending an otherwise simple form to the
+  // planner. Prefer the exact full label when it exists.
+  const raw = cleanIntentValue(target)
+    .replace(/^(?:the|a|an)\s+/i, '')
+    .trim()
+    .toLowerCase()
+  if (raw && raw !== wanted) {
+    const exactFull = candidates.filter((element) => elementText(element) === raw)
+    if (exactFull.length === 1) return exactFull[0]
+  }
   const exact = candidates.filter((element) => elementText(element) === wanted)
   if (exact.length === 1) return exact[0]
   if (exact.length > 1) return null
@@ -1295,10 +1466,18 @@ export function directElementAction(task: string, elements: BrowserElement[]): B
   const check = /^(check|tick|uncheck|untick)\s+(?:the\s+)?(.+)$/i.exec(body)
   if (check?.[1] && check[2]) {
     const accepts = (item: BrowserElement) => item.tag === 'input' && (item.inputType === 'checkbox' || item.inputType === 'radio')
+    const wantsChecked = /^(?:check|tick)$/i.test(check[1])
+    // “Check the checkbox” on a form with a checked and an unchecked box
+    // means the one that still needs changing. Matching both labels made the
+    // resolver give up and spend a planner round trip on one native click.
+    const generic = /^(?:checkbox|check\s*box|box)$/i.test(check[2].trim())
+    const boxes = elements.filter((item) => !item.disabled && item.tag === 'input' && item.inputType === 'checkbox')
     // “Cheese” must not become “Extra Cheese” when the exact box exists.
-    const element = exactElement(elements, check[2], accepts) ?? resolve(check[2], accepts)
+    const element = generic
+      ? boxes.find((item) => item.checked !== wantsChecked) ?? (boxes.length === 1 ? boxes[0] : null)
+      : exactElement(elements, check[2], accepts) ?? resolve(check[2], accepts)
     return element
-      ? { type: 'check', selector: `[data-stet-id="${element.id}"]`, checked: /^(?:check|tick)$/i.test(check[1]) }
+      ? { type: 'check', selector: `[data-stet-id="${element.id}"]`, checked: wantsChecked }
       : null
   }
 

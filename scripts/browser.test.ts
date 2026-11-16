@@ -81,6 +81,13 @@ test('known destinations still use the direct-open path', () => {
   assert.equal(task?.url, 'https://www.google.com/')
 })
 
+test('an unknown site name resolves without a per-site allowlist', () => {
+  const lead = directBrowserLead('go to blooket and create a mock account')
+  assert.equal(lead?.url, 'https://blooket.com/')
+  assert.equal(lead?.rest, 'create a mock account')
+  assert.equal(directBrowserTask('open acme widgets')?.url, 'https://acmewidgets.com/')
+})
+
 test('classroom and edpuzzle open directly when they are the destination', () => {
   const classroom = directBrowserTask('open google classroom')
   assert.equal(classroom?.kind, 'open')
@@ -193,6 +200,23 @@ test('an exact checkbox label beats a longer superset', () => {
     { id: 'q2', tag: 'input', role: '', label: 'Cheese', inputType: 'checkbox', rect: { x: 0, y: 0, width: 16, height: 16 } },
   ]
   assert.deepEqual(directElementAction('check Cheese', toppings), { type: 'check', selector: '[data-stet-id="q2"]', checked: true })
+})
+
+test('generic form labels resolve without a planner', () => {
+  const form: BrowserElement[] = [
+    { id: 'q0', tag: 'input', role: '', label: 'Text input', inputType: 'text', rect: { x: 0, y: 0, width: 200, height: 32 } },
+    { id: 'q2', tag: 'textarea', role: '', label: 'Textarea', rect: { x: 0, y: 60, width: 200, height: 80 } },
+    { id: 'q6', tag: 'select', role: '', label: 'Dropdown (select) Open this select menu One Two Three', options: [{ label: 'One', value: '1' }, { label: 'Two', value: '2' }, { label: 'Three', value: '3' }], rect: { x: 0, y: 160, width: 200, height: 32 } },
+    { id: 'q9', tag: 'input', role: '', label: 'Checked checkbox', inputType: 'checkbox', checked: true, rect: { x: 0, y: 200, width: 16, height: 16 } },
+    { id: 'q10', tag: 'input', role: '', label: 'Default checkbox', inputType: 'checkbox', checked: false, rect: { x: 0, y: 224, width: 16, height: 16 } },
+    { id: 'q13', tag: 'button', role: '', label: 'Submit', rect: { x: 0, y: 260, width: 80, height: 32 } },
+  ]
+  assert.deepEqual(directActionLead('fill the text input with Buffy, choose Two from the dropdown, check the checkbox, submit the form, and tell me the result', form), {
+    action: { type: 'type', selector: '[data-stet-id="q0"]', text: 'Buffy' },
+    rest: 'choose Two from the dropdown, check the checkbox, submit the form, and tell me the result',
+  })
+  assert.deepEqual(directElementAction('check the checkbox', form), { type: 'check', selector: '[data-stet-id="q10"]', checked: true })
+  assert.deepEqual(directElementAction('submit the form', form), { type: 'click', selector: '[data-stet-id="q13"]' })
 })
 
 test('a form list keeps bare field clauses and its trailing submit native', () => {
@@ -423,6 +447,8 @@ test('a for-fun visual request is a simulation, not a purchase', () => {
   assert.equal(isSimulationTask('fake the collection screen'), true)
   assert.equal(isSimulationTask('play this game for fun'), false)
   assert.equal(isSimulationTask('make a quiz for fun'), false)
+  assert.equal(isSimulationTask('watch this mock lesson and answer every question'), false)
+  assert.equal(isSimulationTask('do the mock test in this course'), false)
   assert.equal(isSimulationTask('compare the prices of two blook packs'), false)
 })
 
@@ -447,6 +473,11 @@ test('common page edits are produced without a model', () => {
   assert.equal(hide?.type, 'evaluate')
   assert.match(hide?.type === 'evaluate' ? hide.expression : '', /data-stet-id/)
   assert.match(hide?.type === 'evaluate' ? hide.expression : '', /q1/)
+
+  const heading = directPageEdit("Use JavaScript to change the page's main heading to Testing Ink and tell me when it's done.", [])
+  assert.equal(heading?.type, 'evaluate')
+  assert.match(heading?.type === 'evaluate' ? heading.expression : '', /Testing Ink/)
+  assert.doesNotMatch(heading?.type === 'evaluate' ? heading.expression : '', /tell me/)
 
   assert.equal(directPageEdit('what is the page title?', []), null)
 })

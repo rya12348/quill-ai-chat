@@ -6,6 +6,7 @@ import type { ModelInfo, ProviderStatus, ReasoningEffort } from '../../shared/ty
 import { useModels, useProviders } from '../lib/api'
 import { cx } from '../lib/cx'
 import { MODEL_PRESET_OPTIONS, type ModelChoice, type ModelPreset } from '../lib/model-presets'
+import { modelSpeed } from '../lib/model-speed'
 
 const EFFORT_OPTIONS: { value: ReasoningEffort; label: string; title: string }[] = [
   { value: 'low', label: 'Low', title: 'Fastest: one strong model, minimal extra work' },
@@ -64,7 +65,7 @@ export function ModelPicker({
     {
       id: 'gemini-web',
       name: 'Gemini',
-      description: 'Free Gemini, no key or setup.',
+      description: 'Free Gemini 4, no key or setup.',
       available: true,
       family: 'Gemini',
       billing: 'free',
@@ -91,11 +92,15 @@ export function ModelPicker({
           (model.id !== 'buffy-lite' || !all.some((candidate) => candidate.id === 'buffy')),
       )
     : brandRows
-  // Free lanes report their own health; the keyed API is one provider behind
-  // every model, so its status applies to all of them. The list is one row per
-  // family, and any working lane of that family makes the family usable.
-  const lanesFor = (model: { id: string; family?: string }) =>
-    health?.items.filter((item) => (model.family ? item.family === model.family : item.model === model.id)) ?? []
+  // Free lanes report their own health. A picker row can be an exact model id
+  // or a brand/family row. Prefer exact lane matches: a family can have one
+  // healthy fallback (for example DeepSeek R1) while the row's actual model
+  // (DeepSeek V4.1) is down, and the composer sends the row's exact id.
+  const lanesFor = (model: { id: string; family?: string }) => {
+    const exact = health?.items.filter((item) => item.model === model.id) ?? []
+    if (exact.length) return exact
+    return model.family ? health?.items.filter((item) => item.family === model.family) ?? [] : []
+  }
   const statusFor = (model: { id: string; family?: string }): ProviderStatus => {
     const lanes = lanesFor(model)
     if (lanes.length) {
@@ -117,6 +122,7 @@ export function ModelPicker({
         lane.status === 'down' ||
         lane.lastErrorCode === 'invalid_key' ||
         lane.lastErrorCode === 'unavailable' ||
+        lane.lastErrorCode === 'empty' ||
         lane.lastErrorCode === 'quota',
     )
   }
@@ -126,7 +132,10 @@ export function ModelPicker({
     : models
   const current = options.find((m) => m.id === value) ?? options[0]
   const unavailable = (model: (typeof options)[number]) =>
-    !model.available || unusable(model) || statusFor(model) === 'down'
+    !model.available || (!model.fallback && (unusable(model) || statusFor(model) === 'down'))
+  const unavailableReason = (model: (typeof options)[number]) =>
+    lanesFor(model).find((lane) => lane.lastError && (lane.status === 'down' || lane.lastErrorCode !== 'busy'))?.lastError ??
+    'Unavailable right now'
   const presets = onPreset ? MODEL_PRESET_OPTIONS : []
   const presetLabel = preset === 'auto' ? 'Auto' : preset === 'fast' ? 'Fast' : preset === 'best' ? 'Best' : null
   const selectedEffort = EFFORT_OPTIONS.find((option) => option.value === effort) ?? EFFORT_OPTIONS[1]!
@@ -136,10 +145,22 @@ export function ModelPicker({
   // Chat, so correcting them here would silently turn Auto into Manual.
   const canCorrect = preset === undefined || preset === 'manual'
   useEffect(() => {
-    if (!canCorrect || !data?.items || !health || !current || current.id === value || correctedFor.current === value) return
+    if (!canCorrect || !data?.items || !health || !current || correctedFor.current === value) return
+    // A model can disappear from the catalogue, or stay in it while its last
+    // health check says it cannot answer. Correct both cases to the strongest
+    // selectable row instead of leaving the composer pinned to a dead lane.
+    if (current.id === value && !unavailable(current)) return
+    // Prefer a model whose last check succeeded over a merely selectable
+    // degraded row, then keep the catalogue's strength order as the tie-break.
+    const healthRank = (model: (typeof options)[number]) =>
+      statusFor(model) === 'healthy' ? 0 : statusFor(model) === 'degraded' ? 1 : statusFor(model) === 'unknown' ? 2 : 3
+    const replacement = [...options]
+      .filter((model) => model.id !== value && !unavailable(model))
+      .sort((a, b) => healthRank(a) - healthRank(b) || (b.strength ?? 0) - (a.strength ?? 0))[0]
+    if (!replacement) return
     correctedFor.current = value
-    onChange(current.id)
-  }, [canCorrect, current, data?.items, health, onChange, value])
+    onChange(replacement.id)
+  }, [canCorrect, current, data?.items, health, onChange, options, unavailable, value])
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false)
@@ -233,6 +254,7 @@ export function ModelPicker({
             )}
             {options.map((model) => {
               const off = unavailable(model)
+              const speed = modelSpeed(model.id, model.name)
               return (
                 <li key={model.id}>
                   <button
@@ -240,8 +262,8 @@ export function ModelPicker({
                     role="option"
                     aria-selected={model.id === value && (preset === undefined || preset === 'manual')}
                     aria-disabled={off || undefined}
-                    aria-label={`${model.name}${off ? ' — unavailable' : ''}. ${model.description}`}
-                    title={`${model.name}${off ? ' — unavailable right now' : ''} — ${model.description}`}
+                    aria-label={`${model.name}${speed ? ` — ${speed.label}` : ''}${model.fallback ? ` — temporarily using ${model.fallback}` : off ? ` — ${unavailableReason(model)}` : ''}. ${model.description}`}
+                    title={`${model.name}${speed ? ` — ${speed.label}` : ''}${model.fallback ? ` — temporarily using ${model.fallback}` : off ? ` — ${unavailableReason(model)}` : ''} — ${model.description}`}
                     disabled={off}
                     onClick={() => {
                       onChange(model.id)
@@ -252,9 +274,26 @@ export function ModelPicker({
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2">
                         <span className="truncate text-[13px] font-medium">{model.name}</span>
+                        {speed ? (
+                          <span
+                            title={speed.title}
+                            className={`shrink-0 rounded-full border border-line px-1.5 py-0.5 text-[9.5px] font-medium ${speed.label === 'Fast' ? 'text-emerald-600 dark:text-emerald-400' : 'text-warning'}`}
+                          >
+                            {speed.label}
+                          </span>
+                        ) : null}
                         {off ? <span className="shrink-0 text-[10.5px] font-medium text-warning">Unavailable</span> : null}
                       </span>
                       <span className="mt-0.5 line-clamp-2 block text-[11.5px] leading-snug text-faint">{model.description}</span>
+                      {model.fallback ? (
+                        <span className="mt-0.5 line-clamp-2 block text-[11px] leading-snug text-warning">
+                          Temporarily using {model.fallback}
+                        </span>
+                      ) : off ? (
+                        <span className="mt-0.5 line-clamp-2 block text-[11px] leading-snug text-warning">
+                          {unavailableReason(model)}
+                        </span>
+                      ) : null}
                     </span>
                     {model.id === value && !off && (preset === undefined || preset === 'manual') && <Check className="size-4 shrink-0 text-fg" />}
                   </button>

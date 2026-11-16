@@ -1,6 +1,7 @@
 import { motion } from 'motion/react'
 import { ArrowRight, Database, Loader2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
+import { Link } from 'react-router'
 
 import { BRAND, TAGLINE } from '../../shared/config'
 import { BrandArt } from '../components/BrandArt'
@@ -122,6 +123,11 @@ export function SignIn() {
             </button>
           </form>
           <p className="mt-3 text-[14px] text-faint">No account. Your chats stay in this browser.</p>
+          <p className="mt-5 text-[12.5px] text-faint">
+            By continuing, you agree to the{' '}
+            <Link to="/terms" className="underline decoration-line-strong underline-offset-2 hover:text-fg">Terms</Link> and{' '}
+            <Link to="/privacy" className="underline decoration-line-strong underline-offset-2 hover:text-fg">Privacy Policy</Link>.
+          </p>
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.15, ease: [0.22, 1, 0.36, 1] }} className="hidden lg:block">

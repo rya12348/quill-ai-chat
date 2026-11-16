@@ -11,9 +11,12 @@ import { ApiError, useMe } from './lib/api'
 import { usePageTraffic } from './lib/traffic'
 import { Analytics } from './pages/Analytics'
 import { Browser } from './pages/Browser'
+import { BrowserAgent } from './pages/BrowserAgent'
 import { Buffy } from './pages/Buffy'
+import { BuffyCode } from './pages/BuffyCode'
 import { Chat } from './pages/Chat'
 import { Humanizer } from './pages/Humanizer'
+import { Privacy, Terms } from './pages/Legal'
 import { Library } from './pages/Library'
 import { ProxyPage } from './pages/Proxy'
 import { Review } from './pages/Review'
@@ -100,11 +103,13 @@ function Gate() {
   return (
     <Routes>
       <Route path="browser" element={<Browser />} />
+      <Route path="browser/agent" element={<BrowserAgent />} />
       <Route path="live" element={<Navigate to="/browser" replace />} />
       <Route element={<Shell />}>
         <Route index element={<Chat />} />
         <Route path="c/:id" element={<Chat />} />
         <Route path="buffy" element={<Buffy />} />
+        <Route path="buffy/code" element={<BuffyCode />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="library" element={<Library />} />
         <Route path="humanizer" element={<Humanizer />} />
@@ -141,6 +146,8 @@ export function App() {
               {/* Direct auth entry lets a guest create or sign into an account. */}
               <Route path="/auth" element={<SignIn />} />
               <Route path="/signin" element={<Navigate to="/auth" replace />} />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/terms" element={<Terms />} />
               <Route path="*" element={<Gate />} />
             </Routes>
           </BrowserRouter>

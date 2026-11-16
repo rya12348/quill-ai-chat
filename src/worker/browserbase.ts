@@ -1,3 +1,4 @@
+import { questionLoopExpression } from '../shared/browser'
 import type { BrowserAction, BrowserInspectResult, BrowserScreen, BrowserSnapshot, BrowserTab, BrowserViewState } from '../shared/types'
 import type { Env } from './env'
 
@@ -577,13 +578,13 @@ class Cdp {
     socket.addEventListener('error', fail)
   }
 
-  send<T>(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<T> {
+  send<T>(method: string, params: Record<string, unknown> = {}, sessionId?: string, timeoutMs = 25_000): Promise<T> {
     const id = ++this.next
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new Error(`The cloud browser did not answer ${method}.`))
-      }, 25_000)
+      }, Math.max(1_000, timeoutMs))
       this.pending.set(id, {
         resolve: (value) => resolve(value as T),
         reject,
@@ -869,7 +870,7 @@ const SNAPSHOT_EXPRESSION = `(() => {
   };
 })()`
 
-async function evaluate(cdp: Cdp, sessionId: string, expression: string): Promise<unknown> {
+async function evaluate(cdp: Cdp, sessionId: string, expression: string, timeoutMs = 25_000): Promise<unknown> {
   const result = await cdp.send<{
     result?: { value?: unknown }
     exceptionDetails?: { text?: string; exception?: { description?: string } }
@@ -882,6 +883,7 @@ async function evaluate(cdp: Cdp, sessionId: string, expression: string): Promis
       userGesture: true,
     },
     sessionId,
+    timeoutMs,
   )
   if (result.exceptionDetails) {
     const detail = result.exceptionDetails.exception?.description?.split('\n')[0].trim()
@@ -1754,6 +1756,24 @@ function waitForExpression(action: Extract<BrowserAction, { type: 'waitFor' }>):
       return Number.isFinite(duration) && duration > 0 && element.currentTime >= duration - 0.25;
     })()`
   }
+  if (state === 'attention') {
+    return `(() => {
+      const visible = (element) => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 1 && rect.height > 1 && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+      };
+      const media = [...document.querySelectorAll('video,audio')];
+      const ended = media.some((item) => item.ended || (Number.isFinite(item.duration) && item.duration > 0 && item.currentTime >= item.duration - 0.25));
+      const paused = media.some((item) => item.paused && item.currentTime > 0.5 && !item.ended);
+      const question = [...document.querySelectorAll('[role="dialog"], dialog, [class*="question" i], [class*="quiz" i], [class*="modal" i]')].some((item) => {
+        if (!visible(item) || !/\b(?:question|quiz|answer|select|choose|check)\b/i.test(item.textContent || '')) return false;
+        return Boolean(item.querySelector('button, [role="button"], input, textarea, select'));
+      });
+      return ended || paused || question;
+    })()`
+  }
   if (action.text) {
     const text = JSON.stringify(action.text)
     return `(() => {
@@ -1814,10 +1834,10 @@ async function styleAction(cdp: Cdp, page: string, css: string): Promise<void> {
   )
 }
 
-async function evaluateAction(cdp: Cdp, page: string, expression: string): Promise<string> {
+async function evaluateAction(cdp: Cdp, page: string, expression: string, timeoutMs = 25_000): Promise<string> {
   // The planner gets general DOM access, not a handful of fixed edits. Wrap the
   // source in an async function so it can use return and await normally.
-  const result = await evaluate(cdp, page, `(async () => {\n${expression}\n})()`)
+  const result = await evaluate(cdp, page, `(async () => {\n${expression}\n})()`, timeoutMs)
   if (result === undefined || result === null) return 'The page code ran and returned no value.'
   let rendered = ''
   try {
@@ -2139,6 +2159,10 @@ export async function performAction(env: Env, sessionId: string, action: Browser
         observation = await evaluateAction(cdp, page, action.expression)
         await sleep(100)
         break
+      case 'questionLoop':
+        observation = await evaluateAction(cdp, page, questionLoopExpression(action.answers, action.timeoutMs), Math.min(600_000, (action.timeoutMs ?? 600_000) + 10_000))
+        await sleep(100)
+        break
       case 'ask':
       case 'done':
         break
@@ -2170,4 +2194,83 @@ export async function performAction(env: Env, sessionId: string, action: Browser
       ...(capturedScreenshot ? { screenshot: capturedScreenshot } : {}),
     }
   })
+}
+
+/**
+ * Run one same-origin POST from inside a real cloud browser. Gemini's web
+ * endpoint rejects some datacenter ranges with a 429 even when the same
+ * request succeeds from another network; a browser session gives that lane a
+ * normal residential egress and a real page origin without exposing a key.
+ * Only the Gemini lane uses this, and only after its direct request fails.
+ */
+async function browserPostOnce(
+  env: Env,
+  url: string,
+  body: string,
+  headers: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<{ status: number; text: string }> {
+  if (signal?.aborted) throw new BrowserServiceError('aborted', 'The reply was stopped.', 499)
+  const contextId = provider(env) === 'browserbase' ? await createContext(env) : 'default'
+  const session = await createSession(env, contextId)
+  try {
+    const live = await getLiveView(env, session.id)
+    const cdp = await openCdp(env, live.wsUrl)
+    try {
+      const page = await attachPage(cdp)
+      await navigate(cdp, page, 'https://gemini.google.com/app')
+      if (signal?.aborted) throw new BrowserServiceError('aborted', 'The reply was stopped.', 499)
+      const expression = `(async () => {
+        const response = await fetch(${JSON.stringify(url)}, {
+          method: 'POST',
+          headers: ${JSON.stringify(headers)},
+          body: ${JSON.stringify(body)},
+        });
+        return { status: response.status, text: await response.text() };
+      })()`
+      const result = (await evaluate(cdp, page, expression, 90_000)) as
+        | { status?: unknown; text?: unknown }
+        | null
+      if (!result || typeof result.status !== 'number' || typeof result.text !== 'string') {
+        throw new BrowserServiceError('browser_post', 'The cloud browser returned no Gemini response.', 502)
+      }
+      return { status: result.status, text: result.text }
+    } finally {
+      cdp.close()
+    }
+  } finally {
+    await releaseSession(env, session.id)
+  }
+}
+
+/**
+ * Try the configured browser first, then the other providers with keys. A
+ * Gemini fallback must not disappear because the primary browser account is
+ * out of minutes while another account still has capacity.
+ */
+export async function browserPostFromGemini(
+  env: Env,
+  url: string,
+  body: string,
+  headers: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<{ status: number; text: string }> {
+  const order: BrowserProvider[] = [provider(env)]
+  for (const kind of ['steel', 'browserbase', 'hyperbrowser'] as const) {
+    if (!order.includes(kind)) order.push(kind)
+  }
+  let lastError: unknown
+  for (const kind of order) {
+    const key = kind === 'steel' ? env.STEEL_API_KEY : kind === 'browserbase' ? env.BROWSERBASE_API_KEY : env.HYPERBROWSER_API_KEY
+    if (!key?.trim()) continue
+    try {
+      return await browserPostOnce({ ...env, BROWSER_PROVIDER: kind }, url, body, headers, signal)
+    } catch (error) {
+      if (signal?.aborted) throw error
+      lastError = error
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new BrowserServiceError('browser_not_configured', 'The cloud browser is not available right now.', 503)
 }

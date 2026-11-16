@@ -263,17 +263,28 @@ async function planQueries(input: ResearchIntent): Promise<string[]> {
       })
       const parsed = parseQueries(text, MAX_QUERIES)
       const queries = parsed.length ? parsed : parseLineQueries(text, MAX_QUERIES)
-      if (queries.some((query) => REQUEST_PREFIX.test(query))) return fallbackQueries(input.question)
+      // Free planning models sometimes pour their chain-of-thought into the
+      // response. Those lines are not search queries, and the old check let
+      // them through as long as one line mentioned the subject.
+      const clean = queries.filter(
+        (query) =>
+          query.length <= 120 &&
+          !/^(?:thinking|analysis|task|goal|we\b|the user\b|i (?:need|want)\b|since\b|because\b)/i.test(query) &&
+          !/\*\*|```|\b(?:i should|makes sense|release notes\?|queries? (?:where|that|would))\b/i.test(query),
+      )
+      if (clean.some((query) => REQUEST_PREFIX.test(query))) return fallbackQueries(input.question)
       // Weak free lanes sometimes turn a topic into a one-word query such as
-      // "causes", which returns health or climate pages. A planned query must
-      // still contain the subject before it can replace the deterministic one.
+      // "causes", which returns health or climate pages. Every planned query
+      // must still contain the subject before it can replace the deterministic
+      // one.
       const terms = topicTerms(input.question)
-      if (terms.length >= 2 && !queries.some((query) => relevanceScore(query, terms) >= Math.min(2, terms.length))) {
-        return fallbackQueries(input.question)
-      }
-      if (queries.length) {
+      const relevant = clean.filter(
+        (query) => terms.length < 2 || relevanceScore(query, terms) >= Math.min(2, terms.length),
+      )
+      if (terms.length >= 2 && !relevant.length) return fallbackQueries(input.question)
+      if (relevant.length) {
         const fallback = fallbackQueries(input.question)
-        return [...new Set([...(fallback.slice(0, 1)), ...queries])].slice(0, MAX_QUERIES)
+        return [...new Set([...(fallback.slice(0, 1)), ...relevant])].slice(0, MAX_QUERIES)
       }
     } catch {
       // Try the next lane.
@@ -407,9 +418,9 @@ Aim for 500-900 words. Prefer plain language. Never cite a source number that do
     },
   ]
   const sourceList = evidence.map(sourceOf)
-  for (const lane of ranked.slice(0, 4)) {
+  for (const lane of ranked.slice(0, 2)) {
     try {
-      const writerSignal = AbortSignal.any([input.signal, AbortSignal.timeout(45_000)])
+      const writerSignal = AbortSignal.any([input.signal, AbortSignal.timeout(20_000)])
       const text = await laneText(lane, {
         messages,
         signal: writerSignal,
@@ -450,9 +461,9 @@ async function writeReportFallback(
     },
   ]
   const sourceList = evidence.map(sourceOf)
-  for (const lane of ranked.slice(0, 4)) {
+  for (const lane of ranked.slice(0, 2)) {
     try {
-      const signal = AbortSignal.any([input.signal, AbortSignal.timeout(45_000)])
+      const signal = AbortSignal.any([input.signal, AbortSignal.timeout(20_000)])
       const text = await laneText(lane, {
         messages,
         signal,
@@ -1195,17 +1206,26 @@ export async function researchComplete(input: ResearchIntent): Promise<ResearchO
   }
 
   await say('Writing the report…')
-  let written = await writeReport(intent, evidence)
-  if (!written) written = await writeReportFallback(intent, evidence)
+  // Build the deterministic cited brief before calling a model. The writer
+  // used to consume the whole 90-second budget, then the abort check threw
+  // away the evidence and the brief that could have answered. The brief is a
+  // fallback, not a replacement for a clean model report.
+  const brief = sourceBrief(evidence, input.question)
+  const briefLane = candidateLanes(input.lanes)[0]
+  let written = signal.aborted ? undefined : await writeReport(intent, evidence)
+  if (!written && !signal.aborted) written = await writeReportFallback(intent, evidence)
+  if (!written && brief && briefLane) written = { text: brief, lane: briefLane, model: 'source excerpts' }
   if (!written) {
-    const brief = sourceBrief(evidence, input.question)
-    const lane = candidateLanes(input.lanes)[0]
-    if (brief && lane) written = { text: brief, lane, model: 'source excerpts' }
-  }
-  if (signal.aborted) {
-    throw new AiError(input.signal.aborted ? 'aborted' : 'timeout', input.signal.aborted ? 'The reply was stopped.' : 'Research took longer than 90 seconds. Try a narrower question.', input.signal.aborted ? 499 : 504)
-  }
-  if (!written) {
+    if (signal.aborted) {
+      return outcome(
+        'Research ran out of time before it could write a report from the sources it opened. Try a narrower question.',
+        sources,
+        input.question,
+        queries,
+        'failed',
+        'the report deadline expired before a draft was available',
+      )
+    }
     return outcome(
       'Research gathered sources but the models could not write the report. Try again in a moment.',
       sources,
@@ -1213,6 +1233,17 @@ export async function researchComplete(input: ResearchIntent): Promise<ResearchO
       queries,
       'failed',
       'the writer produced no report',
+    )
+  }
+  if (signal.aborted) {
+    return outcome(
+      written.text,
+      sources,
+      input.question,
+      queries,
+      'unverified',
+      'the report was returned at the deadline; verification was skipped',
+      [written.model],
     )
   }
 
@@ -1224,7 +1255,15 @@ export async function researchComplete(input: ResearchIntent): Promise<ResearchO
     await say('Repairing unsupported claims…')
     const repaired = await repairReport(intent, evidence, written, claims, sources)
     if (signal.aborted) {
-      throw new AiError(input.signal.aborted ? 'aborted' : 'timeout', input.signal.aborted ? 'The reply was stopped.' : 'Research took longer than 90 seconds. Try a narrower question.', input.signal.aborted ? 499 : 504)
+      return outcome(
+        written.text,
+        sources,
+        input.question,
+        queries,
+        'unverified',
+        'the report was returned at the deadline; the repair check was skipped',
+        [written.model],
+      )
     }
     if (repaired) {
       const next = extractClaims(repaired, sources)
@@ -1240,7 +1279,15 @@ export async function researchComplete(input: ResearchIntent): Promise<ResearchO
   await say('Checking citations…')
   const independent = await checkClaimsWithLane(intent, evidence, claims, written.lane)
   if (signal.aborted) {
-    throw new AiError(input.signal.aborted ? 'aborted' : 'timeout', input.signal.aborted ? 'The reply was stopped.' : 'Research took longer than 90 seconds. Try a narrower question.', input.signal.aborted ? 499 : 504)
+    return outcome(
+      written.text,
+      sources,
+      input.question,
+      queries,
+      'unverified',
+      'the report was returned at the deadline; the independent citation checker was skipped',
+      [written.model],
+    )
   }
   checked = checkClaims(input.question, claims, evidence, sources, invalid, independent.checked)
   const models = [written.model, ...(independent.model ? [independent.model] : [])]

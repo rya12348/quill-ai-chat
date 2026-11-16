@@ -1,5 +1,6 @@
 import type { AttachmentInput, ChatEvent, DatasetInput, ReasoningEffort } from '../../shared/types'
 import { readError } from './api'
+import { requestDuckTurn, type DuckTurn } from './duck'
 import { noteOffline } from './offline'
 
 export type ChatRequest = {
@@ -15,6 +16,8 @@ export type ChatRequest = {
   effort?: ReasoningEffort
   /** Stable id for this send, so an offline retry cannot create a duplicate. */
   clientMessageId?: string
+  /** Solved in the browser for the free Claude lane. */
+  duck?: DuckTurn
 }
 
 /**
@@ -23,6 +26,16 @@ export type ChatRequest = {
  * the request itself is refused (limit reached, no key, bad input).
  */
 export async function streamChat(body: ChatRequest, options: { signal: AbortSignal; onEvent: (event: ChatEvent) => void }): Promise<void> {
+  let payload = body
+  // The free Claude and ChatGPT rows use the same no-key DuckDuckGo lane as
+  // Buffy. Their proof must be solved in this browser and sent with this exact
+  // turn; fetching it here also covers retries and regenerations.
+  if (body.model === 'claude-haiku-5-5' || body.model === 'gpt-6-luna') {
+    const duck = await requestDuckTurn(body.model, options.signal)
+    const label = body.model === 'claude-haiku-5-5' ? 'Claude' : 'ChatGPT'
+    if (!duck) throw new Error(`The free ${label} lane is busy right now. Try again or pick another model.`)
+    payload = { ...body, duck }
+  }
   const response = await fetch('/api/chat', {
     method: 'POST',
     credentials: 'same-origin',
@@ -31,9 +44,9 @@ export async function streamChat(body: ChatRequest, options: { signal: AbortSign
       accept: 'text/event-stream',
       // The service worker may replay this request once after a handoff. The
       // client message id makes the replay idempotent on the server.
-      ...(body.clientMessageId ? { 'x-stet-idempotent': '1' } : {}),
+      ...(payload.clientMessageId ? { 'x-stet-idempotent': '1' } : {}),
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
     signal: options.signal,
   })
   noteOffline(response)

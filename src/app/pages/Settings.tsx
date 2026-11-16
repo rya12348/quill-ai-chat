@@ -6,7 +6,7 @@ import { MAX_INSTRUCTIONS_CHARS } from '../../shared/config'
 import { modelDisplayName } from '../../shared/model-display'
 import { isLocalTunnelHost } from '../../shared/traffic'
 import { Avatar, Badge, Button, ConfirmDialog, useToast } from '../components/ui'
-import { useDeleteAllConversations, useMe, useModels, useSettings, useUpdateSettings } from '../lib/api'
+import { useDeleteAccount, useDeleteAllConversations, useMe, useModels, useSettings, useUpdateSettings } from '../lib/api'
 import { untilLabel } from '../lib/format'
 import { openNewTab } from '../components/BacktickNewTab'
 
@@ -15,8 +15,10 @@ export function Settings() {
   const toast = useToast()
   const navigate = useNavigate()
   const [confirm, setConfirm] = useState(false)
+  const [confirmAccount, setConfirmAccount] = useState(false)
   const [instructions, setInstructions] = useState('')
   const clear = useDeleteAllConversations()
+  const remove = useDeleteAccount()
   const { data: models } = useModels()
   const { data: settings } = useSettings()
   const update = useUpdateSettings()
@@ -197,6 +199,21 @@ export function Settings() {
               Delete
             </Button>
           </div>
+          <div className="mt-3 flex items-center justify-between gap-4 rounded-card border border-danger/20 bg-surface p-4 shadow-card">
+            <div>
+              <p className="text-[13.5px] font-medium">{auth === 'guest' ? 'Delete my data' : 'Delete account and data'}</p>
+              <p className="mt-0.5 text-[12.5px] leading-relaxed text-faint">
+                Removes {auth === 'guest' ? 'this guest session, its chats and attachments' : 'the account, every chat, attachment and setting'}. This cannot be undone.
+              </p>
+            </div>
+            <Button variant="danger" onClick={() => setConfirmAccount(true)}>
+              Delete
+            </Button>
+          </div>
+          <p className="mt-2 text-[12px] leading-relaxed text-faint">
+            Read the <Link to="/privacy" className="underline decoration-line-strong underline-offset-2 hover:text-fg">Privacy Policy</Link> and{' '}
+            <Link to="/terms" className="underline decoration-line-strong underline-offset-2 hover:text-fg">Terms</Link>.
+          </p>
         </section>
       </div>
       <ConfirmDialog
@@ -214,6 +231,28 @@ export function Settings() {
               navigate('/')
             },
             onError: () => toast('Could not delete your chats', 'danger'),
+          })
+        }
+      />
+      <ConfirmDialog
+        open={confirmAccount}
+        onClose={() => setConfirmAccount(false)}
+        title={auth === 'guest' ? 'Delete this guest session?' : 'Delete your account?'}
+        description={
+          auth === 'guest'
+            ? 'This removes the guest session, chats, attachments and settings from Ink. It cannot be undone.'
+            : 'This removes your account, every chat, attachment and setting from Ink. It cannot be undone.'
+        }
+        confirmLabel={auth === 'guest' ? 'Delete my data' : 'Delete account'}
+        loading={remove.isPending}
+        onConfirm={() =>
+          remove.mutate(undefined, {
+            onSuccess: () => {
+              setConfirmAccount(false)
+              toast('Your data was deleted')
+              window.location.assign('/')
+            },
+            onError: () => toast('Could not delete your data', 'danger'),
           })
         }
       />

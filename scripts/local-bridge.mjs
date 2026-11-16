@@ -44,6 +44,7 @@ const APP_ORIGINS = new Set(
     'https://671a2877109835.app.lhr.life',
     'https://e628a74aaf5bc55c-73-159-248-190.serveousercontent.com',
     'https://s6lpo3-ip-73-159-248-190.tunnelmole.net',
+    'https://ink-live.cadoffryan.workers.dev',
     'http://127.0.0.1:5180',
     'http://localhost:5180',
     process.env.INK_APP_ORIGIN,

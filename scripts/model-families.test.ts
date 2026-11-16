@@ -78,7 +78,8 @@ test('the two strongest free models are lanes ranked above the 550B', () => {
 })
 
 test('the picker uses the five short model names in order', () => {
-  assert.deepEqual([...PICKER_MODEL_NAMES], ['Sable', 'Quill', 'Stride', 'Ink', 'Prism'])
+  assert.deepEqual([...PICKER_MODEL_NAMES], ['Sable', 'Quill', 'Stride', 'Ink', 'Dent'])
+  assert.equal(PICKER_MODEL_DESCRIPTIONS[4], 'Strong free coder; behind Opus 5.5 on long-horizon agent work.')
   assert.equal(new Set(PICKER_MODEL_DESCRIPTIONS).size, PICKER_MODEL_NAMES.length)
   assert.ok(PICKER_MODEL_DESCRIPTIONS.every((description) => description.endsWith('.')))
 })

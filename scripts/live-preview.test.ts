@@ -66,14 +66,23 @@ test('show google.com is detected as a live site', () => {
 })
 
 test('Google landing pages use a local preview instead of failing with 429', async () => {
-  const page = await fetchSitePage('https://www.google.com/')
-  assert.equal(page.title, 'Google')
-  assert.match(page.html, /action="https:\/\/www\.google\.com\/search"/)
-  assert.match(page.html, /name="q"/)
-  assert.match(page.html, /served locally/)
+  // Google's response from a Worker egress range varies by network. Pin the
+  // upstream status this fallback exists for instead of making CI depend on a
+  // live request to Google.
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response('', { status: 429 })) as typeof fetch
+  try {
+    const page = await fetchSitePage('https://www.google.com/')
+    assert.equal(page.title, 'Google')
+    assert.match(page.html, /action="https:\/\/www\.google\.com\/search"/)
+    assert.match(page.html, /name="q"/)
+    assert.match(page.html, /served locally/)
 
-  const country = await fetchSitePage('https://www.google.co.uk/webhp?igu=1')
-  assert.match(country.html, /action="https:\/\/www\.google\.co\.uk\/search"/)
+    const country = await fetchSitePage('https://www.google.co.uk/webhp?igu=1')
+    assert.match(country.html, /action="https:\/\/www\.google\.co\.uk\/search"/)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('proxy block diagnostics show the HTTP status, target and filter reason', () => {

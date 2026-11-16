@@ -12,8 +12,8 @@
 
 import { MAX_OUTPUT_TOKENS } from '../shared/config'
 import type { TeamInfo } from '../shared/types'
-import { textFromContent, type ChatMessage, type StreamPiece } from './ai'
-import { activeLanes, laneKey, laneStrength, laneText, publicComplete, type LaneResult, type PublicLane } from './public-ai'
+import { AiError, textFromContent, type ChatMessage, type StreamPiece } from './ai'
+import { activeLanes, familyForLane, laneKey, laneStrength, laneText, publicComplete, type LaneResult, type PublicLane } from './public-ai'
 import { routingScore, type LaneRecord, type LaneRoute } from './lane-routing'
 
 type Status = (text: string) => Promise<unknown> | unknown
@@ -31,6 +31,8 @@ type BlendInput = {
   onLaneResult?: (result: LaneResult) => void
   /** Provider ids the last health check marked degraded or down. */
   avoid?: ReadonlySet<string>
+  /** Last known status/latency, used to pick a fast lane for trivial prompts. */
+  health?: ReadonlyMap<string, { status: string; latencyMs: number | null }>
   /** Measured lane quality; absent means the static capability prior only. */
   quality?: ReadonlyMap<string, LaneRecord>
   /** A learned depth choice; absent means the regex prior decides. */
@@ -95,11 +97,44 @@ PASS
 FIX: <a short, precise description of what is wrong>
 Do not rewrite the answer and do not add any other commentary.`
 
-const FRONTIER_BAR = `Frontier standard: this answer is being held to Claude Opus 5.5 and Claude Fable 5 quality. Be exhaustive about constraints, exact about numbers, code and quotations, explicit about uncertainty, and never pad. A separate checker will reject a generic, partial or subtly wrong answer.`
+const FRONTIER_BAR = `Frontier standard: this answer is being held to Claude Opus 5.5 and Claude Fable 5 quality. Be exhaustive about constraints, exact about numbers, code and quotations, explicit about uncertainty, and never pad. A separate checker will reject a generic, partial or subtly wrong answer. For code that returns numbers, normalize JavaScript numeric edge cases: return 0 rather than -0, and reject non-finite results instead of returning Infinity or NaN.`
 
 const CHECKLIST = `Before anyone answers my last message, extract every explicit requirement, constraint, format rule, example, number and edge case into a numbered checklist. One line per requirement, no answers and no commentary. If the request is open-ended, include the qualities a demanding reviewer would require. Keep it under 20 lines.`
 
-const TRIVIAL = /^(?:hi|hello|hey|thanks|thank you|ok(?:ay)?|cool|nice|great|got it|bye|goodbye)[\s!.,?]*$/i
+const TRIVIAL = /^(?:hi|hello|hey|yo|thanks|thank you|ok(?:ay)?|cool|nice|great|got it|bye|goodbye|how are you(?: doing)?|what['’]?s up)(?:\s+(?:there|buffy|ink|again))?[\s!.,?]*$/i
+
+/** A greeting or acknowledgement never deserves a plan, a team or a long think. */
+export function isTrivialPrompt(text: string): boolean {
+  return TRIVIAL.test(text.trim())
+}
+
+// A pure calculation or an explicit exact-format request has no judgment to
+// stream: a fast lane is enough. Everything else that is short still deserves
+// the selected/strongest model and its reasoning budget.
+const MATH_EXPRESSION = /\d+(?:\.\d+)?\s*(?:[+\-*/×÷^]|plus|minus|times|divided by)\s*\d+(?:\.\d+)?/i
+const EXACT_REPLY = /^(?:reply|answer|say|return|output)\b[^\n]{0,60}\b(?:exactly|only|just)\b/i
+const MATH_FILLER = /\b(?:what(?:'s)?|is|reply|answer|say|return|output|with|just|the|number|only|and|calculate|compute|solve|exactly)\b/gi
+
+/** True only for arithmetic and exact-format prompts that need no deliberation. */
+export function isFastAnswerPrompt(text: string): boolean {
+  const trimmed = text.trim()
+  if (EXACT_REPLY.test(trimmed)) return true
+  if (trimmed.length > 120 || !MATH_EXPRESSION.test(trimmed)) return false
+  // “Write code that calculates 2+2” is not a calculator request.
+  return trimmed.replace(MATH_FILLER, '').replace(/[^a-z]/gi, '').length <= 2
+}
+
+/** A short, natural reply for a message that carries no task at all. */
+export function trivialReply(text: string): string {
+  const lowered = text.trim().toLowerCase()
+  if (/\b(?:thanks|thank you)\b/.test(lowered)) return "You're welcome."
+  if (/\b(?:bye|goodbye)\b/.test(lowered)) return 'See you!'
+  if (/\bhow are you\b/.test(lowered)) return "I'm here and ready. What can I help with?"
+  if (/\bwhat['’]?s up\b/.test(lowered)) return 'Not much — what can I help with?'
+  if (/\b(?:ok(?:ay)?|cool|nice|great|got it)\b/.test(lowered)) return 'Got it.'
+  return 'Hi! What can I help with?'
+}
+
 const HARD =
   /```|(?:^|\n)\s*(?:[-*]|\d+\.)\s|\b(?:step[- ]by[- ]step|why|compare|contrast|analy[sz]e|prove|derive|design|debug|refactor|optimi[sz]e|evaluate|trade-?offs?|architecture|algorithm|calculate|solve|plan|strategy|essay|critique)\b|[=∑∫√]/i
 const GENERATIVE =
@@ -400,12 +435,55 @@ async function reviseFinal(referee: PublicLane, candidate: string, issues: strin
   }
 }
 
+/**
+ * Runs the quick path as a race instead of a queue. A simple question should
+ * take the fastest working lane, not spend eight or fifteen seconds on each
+ * resting model in selected-model order.
+ */
+async function* quickRace(lanes: PublicLane[], input: BlendInput): AsyncGenerator<StreamPiece> {
+  const controllers = lanes.map(() => new AbortController())
+  const deadline = new AbortController()
+  const timer = setTimeout(() => deadline.abort(), 5_000)
+  const attempts = lanes.map((lane, index) => {
+    const controller = controllers[index]!
+    const signal = AbortSignal.any(input.signal ? [input.signal, controller.signal, deadline.signal] : [controller.signal, deadline.signal])
+    return laneText(lane, {
+      messages: input.messages,
+      signal,
+      reasoning: false,
+      reasoningEffort: 'low',
+      maxTokens: 1_000,
+      timeoutMs: 4_500,
+      allowCooling: true,
+      onLaneResult: input.onLaneResult,
+    }).then((text) => ({ lane, text }))
+  })
+  try {
+    const winner = await Promise.any(attempts)
+    for (const controller of controllers) controller.abort()
+    yield* chunks(winner.text, input.signal, 0)
+  } catch (error) {
+    for (const controller of controllers) controller.abort()
+    const first = error instanceof AggregateError ? error.errors[0] : error
+    throw first instanceof Error ? first : new AiError('busy', 'The models are busy right now. Try again in a minute.', 503)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export async function* blendComplete(lanes: PublicLane[], baseInput: BlendInput): AsyncGenerator<StreamPiece> {
-  // A frontier choice buys the full harness on every turn, not only when the
-  // heuristic notices a hard question. The model is the same; the extra
-  // planning, independent drafts, review, verification and repair are what
-  // close the gap to the stronger closed models on benchmark-shaped work.
-  const input: BlendInput = baseInput.frontier
+  // A frontier choice buys the stronger model, but the harness must match the
+  // question: a greeting needs none of it, while benchmark-shaped work gets the
+  // plan, independent drafts, review, verification and repair.
+  const question = textFromContent([...baseInput.messages].reverse().find((message) => message.role === 'user')?.content ?? '')
+  const trivial = isTrivialPrompt(question)
+  const heuristic = depthFor(question, activeLanes(lanes).length)
+  // A frontier selection still buys the better model, but only a genuinely hard
+  // prompt gets the frontier prompt, the high reasoning budget and the full
+  // plan/draft/review team. Forcing all of that onto "reply exactly OK" made a
+  // simple picker choice look hung behind a reasoning model.
+  const frontierDeep = baseInput.frontier === true && heuristic === 'deep'
+  const input: BlendInput = frontierDeep
     ? {
         ...baseInput,
         reasoning: true,
@@ -413,9 +491,20 @@ export async function* blendComplete(lanes: PublicLane[], baseInput: BlendInput)
         messages: withFrontierBar(baseInput.messages),
       }
     : baseInput
-  const question = textFromContent([...input.messages].reverse().find((message) => message.role === 'user')?.content ?? '')
-  const teamMode = (input.team === true || input.frontier === true) && !TRIVIAL.test(question.trim())
-  const depth = teamMode ? 'deep' : (input.depth ?? depthFor(question, activeLanes(lanes).length))
+  const teamMode = (input.team === true || frontierDeep) && !trivial
+  // A greeting needs no model at all. This is the fastest possible answer and
+  // avoids spending a provider request on a message that contains no task.
+  if (trivial && input.messages.every((message) => typeof message.content === 'string')) {
+    input.onRoute?.({ depth: 'quick', drafters: [] })
+    yield* chunks(trivialReply(question), input.signal, 0)
+    return
+  }
+  // A one-line question is quick even when the person left Deep mode or Max
+  // effort selected. A model that spends five minutes on "hi" or "2 + 2" is
+  // not being smart; it is ignoring the shape of the request. Choosing the
+  // explicit Team mode is different: that is a deliberate request for the full
+  // pass, so it stays deep. Long/hard prompts also keep their depth.
+  const depth = trivial ? 'quick' : input.team === true ? 'deep' : heuristic === 'quick' ? 'quick' : (input.depth ?? heuristic)
 
   if (depth === 'quick') {
     // The quick path still records its depth, so later ratings can teach the
@@ -425,7 +514,49 @@ export async function* blendComplete(lanes: PublicLane[], baseInput: BlendInput)
     // deadline. Try known-working lanes first, and cap each quick attempt so
     // publicComplete can fall through to the next lane quickly.
     const healthy = input.avoid ? lanes.filter((lane) => !input.avoid!.has(laneKey(lane))) : lanes
-    yield* publicComplete(healthy.length ? healthy : lanes, { ...input, timeoutMs: 20_000 })
+    // A one-line answer should not wait behind the selected model's slow or
+    // resting lane. When health is available, put the fastest known-working
+    // lane first on the quick path; hard questions still honor model order.
+    let pool = healthy.length ? healthy : lanes
+    const selected = lanes[0]
+    if (selected && !pool.some((lane) => laneKey(lane) === laneKey(selected))) {
+      // The exact selected endpoint is resting. Prefer a measured-healthy
+      // alternative from the same family; an unknown sibling can be slower
+      // than the strongest healthy fallback and turn a one-line question into
+      // a 20-second wait.
+      const sameFamily = pool.find((lane) => familyForLane(lane) === familyForLane(selected))
+      const sameFamilyHealth = sameFamily ? input.health?.get(laneKey(sameFamily)) : undefined
+      if (sameFamily && sameFamilyHealth?.status === 'healthy' && (sameFamilyHealth.latencyMs ?? Infinity) <= 4_000) {
+        pool = [sameFamily, ...pool.filter((lane) => lane !== sameFamily)]
+      }
+    }
+    // Keep a short reply short. A queue of slow reasoning models can leave the
+    // composer stuck for minutes; race a few known-working lanes instead.
+    const fastAnswer = isFastAnswerPrompt(question)
+    // Fast answers may use the lowest-latency lane. A reasoning question must
+    // keep the selected/strongest order, or a quick small model would win just
+    // because it answered first. Arithmetic can safely include a degraded
+    // lane as a last resort: a working answer beats an empty fast path.
+    const fastCandidates = input.health
+      ? [...lanes]
+          .sort((a, b) => {
+            const rank = (lane: PublicLane) => {
+              const row = input.health!.get(laneKey(lane))
+              const status = row?.status === 'healthy' ? 0 : row?.status === 'unknown' ? 1 : row?.status === 'degraded' ? 2 : 3
+              return status * 1_000_000_000 + (row?.latencyMs ?? 999_999_999)
+            }
+            return rank(a) - rank(b)
+          })
+          .slice(0, 5)
+      : lanes.slice(0, 5)
+    const candidates = (fastAnswer ? fastCandidates : pool).slice(0, 5)
+    if (!candidates.length) throw new AiError('busy', 'The models are busy right now. Try again in a minute.', 503)
+    // Race the pool even for ordinary short questions. Running lanes one at a
+    // time let one silent provider hold the composer for its full timeout
+    // before a healthy model was even attempted.
+    for await (const piece of quickRace(candidates, input)) {
+      yield piece
+    }
     return
   }
 

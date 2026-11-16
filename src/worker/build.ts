@@ -54,7 +54,7 @@ const PROMPT_ECHO =
  * contract for both the first draft and the polish pass. It deliberately
  * describes a finished product rather than a list of decorations.
  */
-const DESIGN_CONTRACT = `Design it like a senior product designer, not a template generator:
+export const DESIGN_CONTRACT = `Design it like a senior product designer, not a template generator:
 - Pick one clear visual direction and a restrained palette: near-black text, one accent and one or two supporting surfaces. Define CSS custom properties for colour, spacing and radius. Avoid the default blue-on-white admin look unless the brief calls for it.
 - Build a real hierarchy: a compact header, a main workspace and supporting detail. Use CSS grid or flex inside a sensible max-width (about 1100–1200px for a page, 1280–1400px for an app) and spacing on an 8px scale. Do not turn every control into a full-width stacked button.
 - Typography: a deliberate scale (roughly 12/14/16/20/28/40+), confident headings with tight tracking, readable body copy, and tabular numbers for data. Use a system font stack; for editorial, hospitality, craft or portfolio pages, pair Georgia (or another serif) headings with a system sans body. No external fonts.
@@ -130,7 +130,7 @@ export function isInteractiveRequest(question: string): boolean {
 
 /** Enough real script for a game to be playable instead of a static mock-up. */
 export function hasInteractiveCode(html: string): boolean {
-  const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]).join('\n')
+  const scripts = [...html.matchAll(/<script\b(?![^>]*\bdata-buffy-preview\b)[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]).join('\n')
   if (scripts.replace(/\s+/g, '').length < 180) return false
   const responds = /requestAnimationFrame|setInterval|addEventListener|on(?:click|keydown|keyup|pointerdown|touchstart|mousemove)\s*=/i.test(scripts)
   return responds && /<(?:canvas|button|input|select|textarea)\b/i.test(html)
@@ -141,7 +141,7 @@ export function hasInertButtons(html: string): boolean {
   const buttons = [...html.matchAll(/<button\b[^>]*>/gi)].map((match) => match[0])
   if (!buttons.length) return false
   if (buttons.some((tag) => /\bon(?:click|submit|change|input|keydown|keyup|pointerdown|mousedown|mouseover)\s*=/i.test(tag))) return false
-  const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]).join('\n')
+  const scripts = [...html.matchAll(/<script\b(?![^>]*\bdata-buffy-preview\b)[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]).join('\n')
   return !/\b(?:addEventListener|attachEvent|onclick|onsubmit|oninput|onchange|onkeydown|onkeyup|onpointerdown|onmousedown|function\s+|=>|new\s+Function)\b/i.test(scripts)
 }
 
@@ -157,7 +157,7 @@ export function hasProxyCode(html: string, proxyPath: string): boolean {
   })()
   if (!html.includes(proxyPath) && !html.includes(path)) return false
   if (!/<iframe\b/i.test(html) || !/<(?:form|input)\b/i.test(html)) return false
-  const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]).join('\n')
+  const scripts = [...html.matchAll(/<script\b(?![^>]*\bdata-buffy-preview\b)[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]).join('\n')
   if (scripts.replace(/\s+/g, '').length < 120) return false
   return (
     /(?:\.src\s*=|setAttribute\s*\(\s*['"]src|iframe)/i.test(scripts) &&
@@ -181,7 +181,7 @@ const cssOf = (html: string) =>
   [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((match) => match[1]).join('\n')
 
 const scriptOf = (html: string) =>
-  [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]).join('\n')
+  [...html.matchAll(/<script\b(?![^>]*\bdata-buffy-preview\b)[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]).join('\n')
 
 export type DesignAudit = {
   /** 0–100: a rough visual-quality signal, not a model-reported confidence. */
@@ -684,6 +684,62 @@ export function extractPages(
 // this only supplies the missing safety net.
 const BASE_STYLES = `<style data-stet-base>img{max-width:100%}.grid-2,.grid-3{display:grid;gap:24px}h1,h2{text-wrap:balance}.stet-cta{display:inline-block;background:var(--color-primary,#5b4636);color:#fff;border-radius:10px;padding:12px 20px;font-weight:600;line-height:1.2;text-decoration:none}.stet-cta:hover{filter:brightness(1.08)}@media (max-width:640px){header{flex-wrap:wrap;gap:8px 12px;padding:14px 16px}header strong{font-size:1.05rem;white-space:nowrap}nav{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}nav a{margin-left:0;font-size:.875rem}.hero{min-height:360px}}</style>`
 
+// The preview runs without allow-same-origin, so generated pages cannot read
+// the app's cookies. This tiny bridge gives them the things an ordinary page
+// expects anyway: an in-memory storage fallback, multi-page link navigation,
+// and runtime-error reporting to the workspace.
+const PREVIEW_RUNTIME = `<script data-buffy-preview>
+(function () {
+  try {
+    function send(type, detail) {
+      try { if (parent !== window) parent.postMessage({ source: 'buffy-preview', type: type, detail: detail }, '*'); } catch (error) {}
+    }
+    function reasonOf(reason) {
+      if (!reason) return 'A page script stopped unexpectedly.';
+      if (typeof reason === 'string') return reason;
+      return String(reason.message || reason);
+    }
+    window.addEventListener('error', function (event) {
+      send('error', { message: String(event.message || 'A page script failed.'), line: Number(event.lineno) || 0 });
+    });
+    window.addEventListener('unhandledrejection', function (event) {
+      send('error', { message: reasonOf(event.reason), line: 0 });
+    });
+    document.addEventListener('click', function (event) {
+      var node = event.target;
+      while (node && node !== document) {
+        if (node.tagName && String(node.tagName).toLowerCase() === 'a') {
+          var href = node.getAttribute('href') || '';
+          if (href.slice(0, 6) === '#page:') {
+            event.preventDefault();
+            send('navigate', { page: href.slice(6) });
+          }
+          return;
+        }
+        node = node.parentNode;
+      }
+    }, true);
+    function makeStore() {
+      var data = Object.create(null);
+      return {
+        get length() { return Object.keys(data).length; },
+        key: function (index) { return Object.keys(data)[index] || null; },
+        getItem: function (key) { key = String(key); return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null; },
+        setItem: function (key, value) { data[String(key)] = String(value); },
+        removeItem: function (key) { delete data[String(key)]; },
+        clear: function () { data = Object.create(null); }
+      };
+    }
+    function installStore(name) {
+      try { if (window[name]) { window[name].getItem('__buffy_preview__'); return; } } catch (error) {}
+      try { Object.defineProperty(window, name, { configurable: true, value: makeStore() }); } catch (error) {}
+    }
+    installStore('localStorage');
+    installStore('sessionStorage');
+  } catch (error) {}
+})();
+</script>`
+
 /** A page needs one page-level heading, even when a model starts at h2. */
 function normalizeHeadings(html: string): string {
   if (/<h1\b/i.test(html)) return html
@@ -717,9 +773,10 @@ function normalizeCtas(html: string): string {
 function secure(html: string): string {
   const csp =
     `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data: blob:; media-src https: data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:; frame-src *; connect-src 'none'; form-action 'none'; base-uri 'none'">`
+  const runtime = /data-buffy-preview/i.test(html) ? '' : PREVIEW_RUNTIME
   const withCsp = /<head(?:\s[^>]*)?>/i.test(html)
-    ? html.replace(/<head(?:\s[^>]*)?>/i, (tag) => `${tag}${csp}`)
-    : html.replace(/<html(?:\s[^>]*)?>/i, (tag) => `${tag}<head>${csp}</head>`)
+    ? html.replace(/<head(?:\s[^>]*)?>/i, (tag) => `${tag}${csp}${runtime}`)
+    : html.replace(/<html(?:\s[^>]*)?>/i, (tag) => `${tag}<head>${csp}${runtime}</head>`)
   const normalized = normalizeHeadings(normalizeCredits(normalizeCtas(withCsp)))
   if (/data-stet-base/i.test(normalized)) return normalized
   return /<\/head\s*>/i.test(normalized)

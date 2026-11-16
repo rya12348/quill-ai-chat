@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ink Coding Lab</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 32px auto; padding: 0 20px; color: #172033; }
+    section { border: 1px solid #d8dfea; border-radius: 12px; padding: 16px 20px; margin: 18px 0; }
+    h1 { margin-bottom: 4px; }
+    h2 { font-size: 18px; margin: 0 0 12px; }
+    .muted { color: #5d6b82; }
+    .price, .card, .item, label { margin: 6px 0; }
+    .cards { display: flex; flex-wrap: wrap; gap: 8px; }
+    .card { border: 1px solid #ccd5e2; border-radius: 8px; padding: 8px 10px; }
+    .price { list-style: none; font-variant-numeric: tabular-nums; }
+    ul { padding-left: 20px; }
+    input, select, button { font: inherit; padding: 7px 9px; margin: 4px 0; }
+    .result { font-weight: 700; color: #0b5d3b; }
+    .task-box { margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Ink Coding Lab</h1>
+  <p class="muted">Five independent tasks. Each writes its answer to a result element.</p>
+
+  <section id="test-1">
+    <h2>1. Price total</h2>
+    <ul>
+      <li class="price" data-cents="1250">$12.50</li>
+      <li class="price" data-cents="1999">$19.99</li>
+      <li class="price" data-cents="2748">$27.48</li>
+    </ul>
+    <p>Result: <span id="result-1" class="result">pending</span></p>
+  </section>
+
+  <section id="test-2">
+    <h2>2. In-stock products</h2>
+    <div class="cards">
+      <div class="card" data-stock="yes">Zeta Widget</div>
+      <div class="card" data-stock="no">Alpha Gadget</div>
+      <div class="card" data-stock="yes">Beta Device</div>
+      <div class="card" data-stock="no">Gamma Tool</div>
+      <div class="card" data-stock="yes">Delta Unit</div>
+    </div>
+    <p>Result: <span id="result-2" class="result">pending</span></p>
+  </section>
+
+  <section id="test-3">
+    <h2>3. Delayed items</h2>
+    <button id="load-items" type="button">Load items</button>
+    <ul id="items"></ul>
+    <p>Result: <span id="result-3" class="result">pending</span></p>
+  </section>
+
+  <section id="test-4">
+    <h2>4. Form values</h2>
+    <label>Name <input id="name" autocomplete="name" /></label><br />
+    <label>Email <input id="email" type="email" autocomplete="email" /></label><br />
+    <label>Plan
+      <select id="plan">
+        <option value="basic">Basic</option>
+        <option value="pro">Pro</option>
+        <option value="team">Team</option>
+      </select>
+    </label>
+    <p>Result: <span id="result-4" class="result">pending</span></p>
+  </section>
+
+  <section id="test-5">
+    <h2>5. Check every task</h2>
+    <label><input class="task-box" type="checkbox" checked /> Warm up</label><br />
+    <label><input class="task-box" type="checkbox" /> Read the brief</label><br />
+    <label><input class="task-box" type="checkbox" checked /> Open the editor</label><br />
+    <label><input class="task-box" type="checkbox" /> Write the code</label><br />
+    <label><input class="task-box" type="checkbox" /> Run the tests</label>
+    <p>Result: <span id="result-5" class="result">pending</span></p>
+  </section>
+
+  <script>
+    document.querySelector('#load-items').addEventListener('click', () => {
+      const list = document.querySelector('#items')
+      if (list.children.length) return
+      ;['First', 'Second', 'Third'].forEach((label, index) => {
+        setTimeout(() => {
+          const item = document.createElement('li')
+          item.className = 'item'
+          item.textContent = label
+          list.append(item)
+        }, 700 + index * 250)
+      })
+    })
+  </script>
+</body>
+</html>

@@ -1,20 +1,23 @@
 import { PICKER_MODEL_NAMES } from './config'
 import type { ModelInfo } from './types'
 
-// The app exposes five short names. Older replies and tool receipts stored
+// The picker exposes four brand rows. Older replies and tool receipts stored
 // upstream ids, so every render path resolves through this helper instead of
 // printing whatever string happened to be saved.
 const FALLBACKS: [RegExp, string][] = [
-  [/^buffy-lite$/i, 'Buffy'],
+  [/^buffy-lite$/i, 'Buffy Agent'],
   [/^buffy$/i, 'Buffy Agent'],
+  [/^claude-haiku-5-5$/i, 'Claude'],
+  [/^gpt-6-luna$/i, 'ChatGPT'],
+  [/^gpt-5\.4-mini$/i, 'ChatGPT'],
   [/^chatgpt$/i, 'ChatGPT'],
   [/claude|sonnet|opus|haiku/i, 'Sable'],
   [/kimi|moonshot/i, 'Sable'],
   [/stepfun|step[- ]?\d/i, 'Quill'],
   [/gpt|openai/i, 'Quill'],
   [/nemotron/i, 'Stride'],
-  [/gemini/i, 'Stride'],
-  [/deepseek/i, 'Ink'],
+  [/gemini/i, 'Gemini'],
+  [/deepseek/i, 'Dent'],
   [/command|cohere/i, 'Prism'],
 ]
 

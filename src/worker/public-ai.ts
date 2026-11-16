@@ -16,6 +16,7 @@ import { isProviderLimitText } from '../shared/agent'
 import type { LaneBilling } from '../shared/types'
 import { AiError, readSse, textFromContent, type ChatMessage, type StreamPiece } from './ai'
 import type { Env } from './env'
+import { GEMINI_WEB_MODEL, geminiWebResponse, geminiWebText } from './gemini-web'
 
 const POLLINATIONS_KEYED_URL = 'https://gen.pollinations.ai/v1/chat/completions'
 const POLLINATIONS_KEYLESS_URL = 'https://text.pollinations.ai/openai'
@@ -202,9 +203,17 @@ const COOLDOWN_AUTH = 30 * 60_000
 const COOLDOWN_MODEL = 30 * 60_000
 const COOLDOWN_ERROR = 2 * 60_000
 const cooldowns = new Map<string, number>()
+// Browser fallback needs the Worker env, but a PublicLane is serialized into
+// the picker response and must never carry secrets. Keep the binding in a
+// server-only WeakMap keyed by the lane object instead.
+const laneEnvs = new WeakMap<PublicLane, Env>()
 
 export const laneKey = (lane: PublicLane) => `${new URL(lane.url).host}|${lane.model}${lane.requestModel ? `|${lane.requestModel}` : ''}`
-const isCooling = (lane: PublicLane) => (cooldowns.get(laneKey(lane)) ?? 0) > Date.now()
+const isCooling = (lane: PublicLane) =>
+  // A selected-only lane is the exact model the person asked for. Resting it
+  // after one transient failure makes the picker look broken for ten minutes;
+  // let the next send try again instead.
+  !lane.selectedOnly && (cooldowns.get(laneKey(lane)) ?? 0) > Date.now()
 /** Lets an engine sort active lanes before a resting lane it may still retry. */
 export const laneIsCooling = (lane: PublicLane) => isCooling(lane)
 const cool = (lane: PublicLane, ms: number) => {
@@ -294,6 +303,7 @@ function labelFor(id: string): string {
   if (lower.includes('gemini-3.8')) return 'Gemini 3.8 Flash'
   if (lower.includes('gemini-3.6')) return 'Gemini 3.6 Flash'
   if (lower.includes('gemini-2.5-pro')) return 'Gemini 2.5 Pro'
+  if (lower === GEMINI_WEB_MODEL) return 'Gemini 4'
   if (lower.includes('gemini')) return lower.includes('pro') ? 'Gemini Pro' : 'Gemini Flash'
   if (lower.includes('gemma-4-31b')) return 'Gemma 4 31B'
   if (lower.includes('gemma-4-26b')) return 'Gemma 4 26B'
@@ -477,6 +487,7 @@ export function laneStrength(model: string, url?: string): number {
   let base = 60
   if (id === 'buffy') base = 95
   else if (id === 'buffy-lite') base = 82
+  else if (id === GEMINI_WEB_MODEL) base = 72
   // The 550B Ultra lane is the strongest free model when it answers. Its
   // health/quality record demotes it automatically after a 429, so preferring
   // it here does not put a rate-limited lane ahead of a working smaller one.
@@ -661,20 +672,6 @@ export function publicLanes(env: Env): PublicLane[] {
         label: labelFor(model),
         description: free ? 'Included via your OpenRouter key' : 'Paid via your OpenRouter key',
         billing: free ? 'free' : 'paid',
-        key: env.OPENROUTER_API_KEY,
-      })
-    }
-    // The picker's Gemini row uses the same server-side OpenRouter key. It is
-    // deliberately kept separate from the zero-cost block below so a paid
-    // Gemini call can never join an automatic free fallback chain.
-    const gemini = 'google/gemini-3.8-flash'
-    if (!models.includes(gemini)) {
-      lanes.push({
-        url: OPENROUTER_URL,
-        model: gemini,
-        label: 'Gemini 3.8 Flash',
-        description: 'Gemini via your OpenRouter key',
-        billing: 'paid',
         key: env.OPENROUTER_API_KEY,
       })
     }
@@ -906,10 +903,23 @@ export function publicLanes(env: Env): PublicLane[] {
   for (const lane of anonymousLanes()) {
     if (!lanes.some((known) => known.model === lane.model)) lanes.push(lane)
   }
+  // Gemini's public web StreamGenerate endpoint needs no key or cookie. Keep
+  // it selected-only: its free capacity is shared and should not silently join
+  // every automatic blend or fallback chain.
+  lanes.push({
+    url: 'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate',
+    model: GEMINI_WEB_MODEL,
+    label: 'Gemini 4',
+    description: 'Free Gemini 4, no key, via Gemini web',
+    billing: 'free',
+    selectedOnly: true,
+    skipHealth: true,
+  })
   lanes.push(...buffyLanes(env))
   // Capability is derived from the final lane, including env overrides, so an
   // image turn cannot accidentally fall through to a text-only model.
   const withVision = lanes.map((lane) => ({ ...lane, vision: laneSupportsVision(lane) }))
+  for (const lane of withVision) if (lane.model === GEMINI_WEB_MODEL) laneEnvs.set(lane, env)
   // Strongest first, so a quick reply and the team's referee both start from
   // the best lane the deployment can actually reach.
   return withVision.sort((a, b) => laneStrength(b.model, b.url) - laneStrength(a.model, a.url))
@@ -955,7 +965,15 @@ function anonymousLanes(): PublicLane[] {
 
 /** Puts the model someone picked first, keeping the rest as fallbacks. */
 export function orderLanes(lanes: PublicLane[], model?: string): PublicLane[] {
-  const eligible = lanes.filter((lane) => !lane.selectedOnly || lane.model === model)
+  const eligible = lanes.filter(
+    (lane) =>
+      !lane.selectedOnly ||
+      lane.model === model ||
+      // Buffy's fast sibling is an explicit fallback for the full agent, not a
+      // silent replacement. It lets a normal chat answer while the agent lane
+      // is still starting its tool run.
+      (model === 'buffy' && lane.model === 'buffy-lite'),
+  )
   const first = eligible.find((lane) => lane.model === model)
   return first ? [first, ...eligible.filter((lane) => lane !== first)] : eligible
 }
@@ -964,13 +982,34 @@ export function orderLanes(lanes: PublicLane[], model?: string): PublicLane[] {
 async function laneFailure(lane: PublicLane, response: Response): Promise<AiError> {
   const status = response.status
   if (status === 429) {
+    const detail = await response.clone().text().catch(() => '')
+    // OpenRouter's free tier is a shared daily allowance, not a per-minute
+    // burst limit. When it runs out every free model on that account returns
+    // 429 until midnight UTC, so retrying in 15 seconds only makes the picker
+    // look broken. Mark it as quota and let the picker remove those rows until
+    // the reset time instead of silently failing each selection.
+    let quota = /free-models-per-day|free[- ]model(?:s)?[- ]per[- ]day|daily free (?:limit|quota)|free quota (?:exceeded|exhausted)/i.test(detail)
+    let retryAfter = Number(response.headers.get('retry-after') ?? 0) * 1_000
+    let resetAt = 0
+    try {
+      const body = JSON.parse(detail) as {
+        error?: { message?: string; retry_after?: number; metadata?: { headers?: Record<string, string> } }
+      }
+      retryAfter = Number(body.error?.retry_after ?? 0) * 1_000 || retryAfter
+      resetAt = Number(body.error?.metadata?.headers?.['X-RateLimit-Reset'] ?? 0)
+      if (/free-models-per-day/i.test(body.error?.message ?? '')) quota = true
+    } catch {
+      /* not JSON; the header and regex above are still useful */
+    }
+    if (quota) {
+      // The reset can be hours away. Cap it at one day so a nonsensical clock
+      // cannot park the lane forever, and keep the normal short wait otherwise.
+      const until = resetAt > Date.now() ? Math.min(resetAt - Date.now(), 24 * 60 * 60_000) : COOLDOWN_MODEL
+      cool(lane, Math.max(until, 60_000))
+      return new AiError('quota', `${lane.label} has used its free daily requests. Try another model or come back later.`, 429)
+    }
     // Free gateways often say exactly how long to wait; honor a short retry
     // instead of resting the lane for the full ten minutes.
-    let retryAfter = Number(response.headers.get('retry-after') ?? 0) * 1_000
-    if (!Number.isFinite(retryAfter) || retryAfter <= 0) {
-      const body = (await response.clone().json().catch(() => null)) as { error?: { retry_after?: number } } | null
-      retryAfter = Number(body?.error?.retry_after ?? 0) * 1_000
-    }
     cool(lane, Math.min(Math.max(retryAfter || COOLDOWN_RATE, 15_000), COOLDOWN_RATE))
     return new AiError('busy', `${lane.label} is busy right now.`, 429)
   }
@@ -1015,16 +1054,19 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
   try {
     let response: Response
     try {
-      response = await fetch(lane.url, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          accept: 'application/json',
-          ...(lane.key ? { authorization: `Bearer ${lane.key}` } : {}),
-        },
-        body: JSON.stringify(requestBody(lane, input, true)),
-        signal,
-      })
+      response =
+        lane.model === GEMINI_WEB_MODEL
+          ? await geminiWebResponse(input.messages, signal, laneEnvs.get(lane))
+          : await fetch(lane.url, {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+                accept: 'application/json',
+                ...(lane.key ? { authorization: `Bearer ${lane.key}` } : {}),
+              },
+              body: JSON.stringify(requestBody(lane, input, true)),
+              signal,
+            })
     } catch {
       if (input.signal?.aborted) return
       cool(lane, COOLDOWN_ERROR)
@@ -1192,6 +1234,22 @@ export async function laneTextStreaming(
 /** One complete answer from a lane, used as a draft, a plan or a review. */
 export async function laneText(lane: PublicLane, input: LaneInput): Promise<string> {
   if (isCooling(lane) && !input.allowCooling) throw new AiError('busy', `${lane.label} is taking a short break.`, 429)
+  if (lane.model === GEMINI_WEB_MODEL) {
+    const startedAt = Date.now()
+    const timeout = AbortSignal.timeout(input.timeoutMs ?? 90_000)
+    const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout
+    try {
+      const text = await geminiWebText(input.messages, signal, laneEnvs.get(lane))
+      if (isProviderLimitText(text)) throw new AiError('quota', `${lane.label} has no free quota left right now.`, 429)
+      input.onLaneResult?.({ lane, ok: true, latencyMs: Date.now() - startedAt })
+      return text
+    } catch (error) {
+      if (input.signal?.aborted) throw new AiError('aborted', 'The reply was stopped.', 499)
+      const failure = error instanceof AiError ? error : new AiError('network', `Could not reach ${lane.label}.`, 503)
+      input.onLaneResult?.(failureResult(lane, failure, startedAt))
+      throw failure
+    }
+  }
   // The visible-thinking path must stream, not wait for a JSON response. It
   // forwards only reasoning to the caller; the final content is still returned.
   if (input.onReasoning) {
@@ -1302,8 +1360,11 @@ export async function* publicComplete(lanes: PublicLane[], input: LaneInput): As
     try {
       for await (const piece of streamLane(lane, {
         ...input,
-        timeoutMs: input.timeoutMs ?? 600_000,
-        idleMs: input.idleMs ?? 90_000,
+        timeoutMs: input.timeoutMs ?? 180_000,
+        // A free lane that does not emit a token is not going to make a chat
+        // feel responsive. Skip it after a short silence and try the next one;
+        // active streams keep resetting this timer.
+        idleMs: input.idleMs ?? 12_000,
       })) {
         if (piece.type === 'text') yieldedText = true
         yield piece

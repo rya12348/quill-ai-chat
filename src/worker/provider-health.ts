@@ -194,6 +194,10 @@ export async function probeProvider(descriptor: ProviderDescriptor, env: Env): P
       messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
       maxTokens: 16,
       temperature: 0,
+      // A probe is an explicit health check. Do not let the in-memory cooldown
+      // from an earlier failed request answer it with a zero-latency "busy";
+      // that hides the real upstream quota/auth result until a restart.
+      allowCooling: true,
       signal: timeout,
     })
     return { ok: true, latencyMs: Date.now() - startedAt }

@@ -1,7 +1,8 @@
 import { Hono, type Context } from 'hono'
+import { streamSSE } from 'hono/streaming'
 
 import { DAILY_MESSAGE_LIMIT } from '../../shared/config'
-import { cleanPageAnswer, directBrowserTask, directFormFill, isPageEditingTask, isPurchaseAction, isSimulationTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCodeReply, parseCompletionVerdict, parseReflection } from '../../shared/browser'
+import { cleanPageAnswer, directBrowserTask, directFormFill, genericSiteUrl, isPageEditingTask, isPurchaseAction, isSimulationTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE, parseCodeReply, parseCompletionVerdict, parseReflection } from '../../shared/browser'
 import type { BrowserAction, BrowserActResponse, BrowserElement, BrowserInspectResult, BrowserSnapshot } from '../../shared/types'
 import { AiError, aiConfigured, completeText, isModelId, type ChatMessage } from '../ai'
 import { MODELS, type ModelId } from '../../shared/config'
@@ -12,14 +13,16 @@ import { RATE_WINDOWS, rateLimit, tooManyRequests } from '../rate-limit'
 import { normalizeSiteUrl } from '../site-proxy'
 import type { AppContext, Env } from '../env'
 import { candidateLanes, laneIsCooling, laneStrength, laneTextStreaming, publicLanes, type PublicLane } from '../public-ai'
+import { runBrowserAgent } from '../browser-agent'
+import type { BrowserAgentTrace } from '../../shared/browser-agent'
 
 export const browser = new Hono<AppContext>()
 
 const MAX_STEPS = 60
 // Browser steps are model calls, but they are not chat replies. A long task
 // needs dozens of them, so they get their own daily allowance instead of
-// consuming the person's 50 chat messages.
-const BROWSER_DAILY_STEPS = 240
+// consuming the person's normal chat allowance.
+const BROWSER_DAILY_STEPS = 480
 const MAX_SCREENSHOT = 900_000
 const MAX_ELEMENTS = 200
 const MAX_TEXT = 8_000
@@ -582,7 +585,8 @@ function quickPlan(task: string, currentUrl: string): BrowserActResponse | null 
   const url =
     known ??
     targetUrl(target) ??
-    (/^[\w.-]+\.[a-z]{2,}(?:\/.*)?$/i.test(target) ? targetUrl(`https://${target}`) : null)
+    (/^[\w.-]+\.[a-z]{2,}(?:\/.*)?$/i.test(target) ? targetUrl(`https://${target}`) : null) ??
+    genericSiteUrl(target)
   if (!url) return null
   try {
     const now = new URL(currentUrl)
@@ -1133,7 +1137,12 @@ async function plan(input: {
   // when the instruction is short. Once a repeated browser job is in
   // code-first mode, keep every follow-up on the fast pool: the remaining work
   // is choosing the next short answer, not re-reasoning the whole task.
-  const deep = !input.codeFirst && (editing || shouldThinkHard(input.task, input.notes, input.recovering === true))
+  // Simulation is a small, bounded DOM script, not open-ended page editing.
+  // Routing it to the 550B reasoner added ~70 seconds before the first action;
+  // the fast planner can emit the same guarded script and the coder validates
+  // it. Real page edits still get the stronger lane.
+  const deep =
+    !input.codeFirst && ((editing && !simulation) || shouldThinkHard(input.task, input.notes, input.recovering === true))
   const ranked = candidateLanes(lanes).sort((a, b) => {
     const active = Number(laneIsCooling(a)) - Number(laneIsCooling(b))
     if (active) return active
@@ -1228,7 +1237,10 @@ async function plan(input: {
   // 12-second silence. The first valid intent wins; the remaining fast lanes
   // are still available as failovers.
   const candidates = deep
-    ? pool.slice(0, 1)
+    ? // A single slow reasoner used to consume the entire deadline. Race the
+      // two strongest lanes and take the first valid action; both are capable,
+      // so this is a latency hedge, not a quality downgrade.
+      pool.slice(0, 2)
     : fastestSmart
       ? [
           fastestSmart,
@@ -1265,12 +1277,16 @@ async function plan(input: {
   // producing tokens can take as long as its total timeout; one that has gone
   // quiet for this long is genuinely stuck. The old 6/12-second windows cut
   // off Qwen while it was still reasoning before its first token.
-  const idleMs = deep ? 30_000 : fastRetry ? 5_000 : compactStep ? 5_000 : longForm ? 22_000 : complex ? 20_000 : 15_000
+  const idleMs = deep ? 30_000 : fastRetry ? 5_000 : compactStep ? 5_000 : longForm ? 24_000 : complex ? 30_000 : 20_000
   // Honor the step's real budget. The old hard 8-second cap aborted healthy
   // models on multi-step and long-form tasks, then spent another cycle racing
   // fallbacks; raising the cap only affects those genuinely complex steps.
-  const timeoutMs = deep ? 90_000 : fastRetry ? 8_000 : compactStep ? 7_000 : longForm ? 45_000 : complex ? 30_000 : 24_000
-  const planDeadlineMs = deep ? 108_000 : fastRetry ? 10_000 : compactStep ? 9_000 : longForm ? 52_000 : complex ? 48_000 : 38_000
+  // A cold free lane can spend the first 25–35 seconds connecting and
+  // prefilling a large page. Giving it a little more room here is cheaper than
+  // aborting a healthy first attempt, cooling the lane, and making the person
+  // press Run again for the same answer.
+  const timeoutMs = deep ? 90_000 : fastRetry ? 8_000 : compactStep ? 8_000 : longForm ? 50_000 : complex ? 45_000 : 30_000
+  const planDeadlineMs = deep ? 108_000 : fastRetry ? 10_000 : compactStep ? 10_000 : longForm ? 60_000 : complex ? 65_000 : 45_000
   if (!candidates.length) {
     throw new AiError('browser_unavailable', 'No free browser-capable model is configured right now.', 503)
   }
@@ -2443,6 +2459,59 @@ browser.post('/answer', async (c) => {
   }
 })
 
+// A general tool loop for the browser page. Unlike the fast planner, this
+// route owns the whole trace: every tool result is appended and sent to the
+// model before the next choice. The existing /browser/plan path stays intact.
+browser.post('/agent', async (c) => {
+  const limit = await rateLimit(c.get('db'), 'browser:agent', c.req.raw, 20, RATE_WINDOWS.browser, c.get('user').sub)
+  if (!limit.allowed) return tooManyRequests(c, limit)
+  const raw = (await c.req.json<{ task?: unknown }>().catch(() => null)) as { task?: unknown } | null
+  const task = text(raw?.task, 2_000)
+  if (!task) return privateJson(c, { error: 'invalid_request', message: 'A browser task is required.' }, 400)
+  const owner = c.get('user').sub
+  let active: ActiveSession
+  try {
+    active = await activeSession(c.get('db'), c.env, owner)
+  } catch (error) {
+    return errorResponse(c, error)
+  }
+
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  c.req.raw.signal.addEventListener('abort', abort, { once: true })
+  c.header('Cache-Control', 'private, no-store')
+
+  return streamSSE(c, async (stream) => {
+    stream.onAbort(() => controller.abort())
+    let finished = false
+    const keepalive = setInterval(() => {
+      if (!stream.aborted) void stream.write(': keepalive\n\n').catch(() => {})
+    }, 5_000)
+    const emit = async (event: BrowserAgentTrace) => {
+      if (stream.aborted) return
+      if (event.type === 'done') finished = true
+      await stream.writeSSE({ event: 'trace', data: JSON.stringify(event) }).catch(() => {})
+    }
+    try {
+      await runBrowserAgent({
+        env: c.env,
+        sessionId: active.sessionId,
+        task,
+        signal: controller.signal,
+        emit,
+      })
+    } catch (error) {
+      if (!controller.signal.aborted && !finished) {
+        const message = error instanceof AiError ? error.message : 'The browser agent could not finish this run.'
+        await emit({ type: 'error', at: Date.now(), text: message })
+      }
+    } finally {
+      clearInterval(keepalive)
+      c.req.raw.signal.removeEventListener('abort', abort)
+    }
+  })
+})
+
 /**
  * Check a claimed completion against the live page. This is the browser agent's
  * equivalent of reading its own diff: a second, strong model decides whether
@@ -2529,9 +2598,16 @@ async function writePageCode(
   simulation = false,
   html = '',
 ): Promise<{ code: string; explanation: string; lane: string } | null> {
-  // Page code is Particle-1's job; ERNIE is the second choice. The generic
-  // deep ranking stays in charge for every other lane.
+  // Page code is a coding job: start with the strongest coding models, but
+  // keep enough fallback lanes to survive a free provider going dark.
   const codeScore = (lane: PublicLane) => {
+    // Prefer coding models that answered recently on this deployment. The
+    // free coder pool changes availability often; spending the whole request
+    // on two dead coder lanes made every page edit return “code unavailable”.
+    if (/qwen3\.8-27b/i.test(lane.model)) return 1_200
+    if (/minimax-m3\.1-flash/i.test(lane.model)) return 1_150
+    if (/codestral/i.test(lane.model)) return 1_100
+    if (/qwen2\.5-coder/i.test(lane.model)) return 1_050
     if (/particle-1/i.test(lane.model)) return 1_000
     if (/kimi-k3/i.test(lane.model)) return 980
     if (/ling-3\.2/i.test(lane.model)) return 950
@@ -2539,9 +2615,11 @@ async function writePageCode(
     return browserDeepScore(lane) + (/deepseek|step-5|qwen3\.8-max|gpt-6|claude-opus|kimi-k3/i.test(lane.model) ? 6 : 0)
   }
   const lanes = candidateLanes(publicLanes(env))
-    .filter((lane) => !laneIsCooling(lane))
     .sort((a, b) => codeScore(b) - codeScore(a))
-    .slice(0, 2)
+    // Six lanes covers the rotating free pool without turning one code edit
+    // into a long timeout chain. Cooling lanes stay at the back as a fallback.
+    .slice(0, 6)
+    .sort((a, b) => Number(laneIsCooling(a)) - Number(laneIsCooling(b)))
   if (!lanes.length) return null
   const messages: ChatMessage[] = [
     {

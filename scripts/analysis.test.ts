@@ -308,8 +308,8 @@ test('normalises an edited memory before it is stored', () => {
 })
 
 test('uses separate daily caps and counter queries', async () => {
-  assert.equal(ANALYZE_DAILY_LIMIT, 3)
-  assert.equal(BUILD_DAILY_LIMIT, 3)
+  assert.equal(ANALYZE_DAILY_LIMIT, 10)
+  assert.equal(BUILD_DAILY_LIMIT, 10)
   const fake = {
     prepare: () => ({ bind: () => ({ first: async () => ({ n: 3 }) }) }),
   } as unknown as D1Database

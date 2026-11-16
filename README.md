@@ -547,6 +547,150 @@ perks, and use the same daily limits. With no `OPENAI_API_KEY`, guests
 use the free chain; if you add a key later, guest replies will spend the
 owner's credits, so remove or gate guest access first.
 
+## Deploy the production Pages site
+
+`https://ink.7394.jo3.org/` is served by the Cloudflare Pages project `ink-jo3`.
+The production D1 binding and runtime flags live in `pages/wrangler.jsonc`; that
+file is the single source of truth, not a dashboard-only setting. Do not create
+a temporary staging directory or copy the build by hand. The root
+`wrangler.jsonc` is local development only, and `deploy.json` is the legacy
+Freebuff Sites manifest; neither is a production Pages deploy path.
+`npm run deploy:pages` runs `scripts/check-pages-config.mjs` first, so a drift in
+the project, domain, or production/preview database IDs stops the deploy.
+
+The ship command is:
+
+```sh
+npm run deploy:pages
+```
+
+It builds `dist/`, adds `dist/ai_chat/index.js` as the Pages `_worker.js`, deploys
+`dist/client` to the `ink-jo3` production branch (`main`), and removes the
+worker entry afterwards. `pages/wrangler.jsonc` is kept in the repo, so every
+deploy re-applies the `DB` binding for the `ink-live` database.
+
+The only prerequisite is a Wrangler login for the Cloudflare account that owns
+`ink-jo3`; the command runs the build itself. Secrets such as provider API keys
+are configured on the Pages project separately and are not committed here.
+
+`deploy:pages` now gates the release. A production deploy first writes a D1
+backup, then deploys the exact build, then checks `/api/health`, `/api/ready`,
+guest sign-in and one real streamed chat turn. A failure exits nonzero; the
+production job in CI only promotes after the same build passes against the
+isolated preview database.
+
+`PAGES_BRANCH` selects a Pages branch (`main` by default). The `preview`
+environment in `pages/wrangler.jsonc` uses the separate `ink-live-preview` D1
+database, so branch deployments cannot write production data. `PAGES_PROJECT`
+overrides the project name if needed.
+
+### Production secrets and account model
+
+Provider keys are synced from the owner's local `.env`/`.env.local` without
+printing their values:
+
+```sh
+npm run pages:secrets
+```
+
+The script copies only the provider/auth allowlist in
+`scripts/sync-pages-secrets.mjs` and writes the final set to the `ink-jo3`
+production environment. Redeploy after changing secrets. `npx wrangler pages secret list --project-name ink-jo3` shows names only.
+
+Production deliberately has no `OPENAI_API_KEY` (`/api/auth/status` reports
+`"ai":false`) and uses the free model lanes. Add the key through
+`pages:secrets` only if the owner intends to spend API credits. Auth mode is
+`off`: guests and first-party email/password accounts work, but Sign in with
+Freebuff is not configured. To enable it, add `FREEBUFF_CLIENT_ID` and
+`FREEBUFF_ISSUER` to the local env and sync them; do not invent credentials.
+
+### Rollback
+
+Every deploy records the Git commit hash and message in Pages. To inspect
+production history:
+
+```sh
+npx wrangler pages deployment list --project-name ink-jo3
+```
+
+To roll back, open the Pages project in the Cloudflare dashboard, choose
+**Deployments**, select the last known-good **Production** deployment, and use
+**Rollback**. Then verify `/api/ready` and `/api/auth/status` on the custom
+domain. If the incident involved a schema or data change, restore the matching
+D1 backup with `npm run db:restore -- <file> --production` (or use D1 Time
+Travel) rather than relying on code rollback alone.
+
+### Monitoring
+
+`.github/workflows/uptime.yml` checks the custom domain from GitHub's network
+every 30 minutes: the app shell, `/api/health`, `/api/ready`, and the aggregate
+5xx endpoint `/api/health/errors`, including latency against a 5-second budget
+and an error-count limit. A failure opens or updates an issue titled
+`[monitor] Production check failed`; recovery closes it. Run the same probe manually with:
+
+```sh
+node scripts/check-production.mjs
+```
+
+Set `PRODUCTION_URL`, `PRODUCTION_SLOW_MS`, or `PRODUCTION_ERROR_LIMIT` to
+change the target, latency budget, or one-hour 5xx threshold. The app records
+only route names, status codes and timestamps for aggregate 5xx responses; it
+never records a user, query string, or request body. Cloudflare Pages analytics
+remain the source for total request volume and full 5xx rates.
+
+`.github/workflows/load.yml` runs a small weekly load probe (`npm run load:test`)
+against the shell, `/api/health`, `/api/ready` and `/api/health/errors`. It only
+uses cache-safe endpoints and never starts a chat or spends a model request.
+Set `LOAD_REQUESTS`, `LOAD_CONCURRENCY`, or `LOAD_P95_MS` to tune it.
+
+### CI and promotion
+
+`.github/workflows/deploy.yml` runs typecheck, tests and a build for every pull
+request. Same-repository PRs get a Pages preview deployment and smoke test.
+Pushes to `main` first deploy and smoke-test `deploy-check-<run-id>` on the
+preview database, then deploy production. Set `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` as repository or environment secrets; use a token scoped
+to the `ink-jo3` Pages project and the `ink-live` D1 database.
+
+### Backups, restore and schema changes
+
+Create a timestamped production export (plus a SHA-256 sidecar):
+
+```sh
+npm run db:backup
+```
+
+Restores target the isolated preview database by default:
+
+```sh
+npm run db:restore -- backups/ink-live-...sql
+```
+
+Add `--production` only when deliberately restoring production. Backups live in
+the git-ignored `backups/` directory; keep them off the repository and retain
+what your recovery policy requires. Schedule the command from the owner's cron
+or Task Scheduler, for example `0 3 * * * cd /path/to/ink && npm run db:backup`.
+Do not upload a dump to a public artifact store: it contains user conversations.
+Cloudflare D1 Time Travel also retains point-in-time history and can restore a
+database in place.
+
+Short-lived operational rows are pruned with:
+
+```sh
+npm run db:prune -- --production
+```
+
+It deletes expired rate limits and sessions, guest counters older than two days,
+anonymous page views older than 90 days, and aggregate 5xx rows older than 30
+days. It never deletes a conversation or account; people remove those from
+Settings. The Privacy Policy describes the same retention window.
+
+The schema is the append-only `SCHEMA` list in `src/worker/db.ts`; the Worker
+applies it idempotently on first use. Add new statements at the end rather than
+editing existing ones, back up before a schema change, and verify `/api/ready`
+after deployment. The readiness response reports the required tables and the
+number of configured model lanes without exposing credentials.
+
 ## Where things are
 
 - `src/shared/config.ts`: name, tagline, system prompt, `MODELS` (the picker
@@ -591,3 +735,10 @@ regenerated ones; refused requests are free). Keep these when extending the
 app, and keep the development user limited to loopback and GitHub Codespaces
 preview hosts: on a normal deployed origin it must never activate. Personalised responses are `Cache-Control: private, no-store`. When web search
 is enabled, the user's question is sent to Exa; keys stay server-side.
+
+Deployed responses set HSTS, `X-Content-Type-Options`, a restrictive
+`Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, and a
+CSP; app documents also deny framing. Live-site previews and the Pyodide runner
+keep their own sandbox policies. `/privacy` and `/terms` are public, and
+Settings can delete a single account's chats, attachments, projects and
+account row. Dependabot checks npm and GitHub Actions weekly.

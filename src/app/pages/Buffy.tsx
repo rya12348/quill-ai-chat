@@ -1,21 +1,68 @@
-import { ArrowUp, Bot, ExternalLink, Paperclip, RotateCcw, Square, Terminal, X } from 'lucide-react'
+import {
+  AlertCircle,
+  ArrowUp,
+  Bot,
+  Brain,
+  Camera,
+  Check,
+  Code2,
+  ExternalLink,
+  FileText,
+  FolderTree,
+  Globe,
+  Loader2,
+  MousePointer2,
+  Paperclip,
+  RotateCcw,
+  Search,
+  Square,
+  Terminal,
+  X,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router'
 
 import { Markdown } from '../components/Markdown'
 import { Mark } from '../components/Shell'
+import { BUFFY_MODEL_LABELS, BUFFY_MODELS, buffyModelSpeed, isDuckModel, normalizeBuffyModel, type BuffyModel } from '../lib/buffy-models'
+import { requestDuckTurn, type DuckTurn } from '../lib/duck'
 
 type BuffyFile = { name: string; text: string }
-type Message = { role: 'user' | 'assistant'; content: string; files?: BuffyFile[] }
+type ToolStatus = 'running' | 'done' | 'error' | 'stopped'
+type BuffyTool = {
+  id: string
+  name: string
+  detail?: string
+  status: ToolStatus
+  summary?: string
+  agent?: string
+}
+type Message = { role: 'user' | 'assistant'; content: string; files?: BuffyFile[]; tools?: BuffyTool[] }
 type BridgeStatus = {
   ready: boolean
   configured: boolean
   mode?: 'bridge' | 'free'
+  chatgpt?: boolean
   reason?: string
   model?: string
   mock?: boolean
+  tools?: number
+  browser?: boolean
+  maxSteps?: number
+}
+type WireTool = {
+  type: 'tool_call' | 'tool_result'
+  id?: string
+  name?: string
+  detail?: string
+  status?: string
+  summary?: string
+  agentId?: string
+  parentAgentId?: string
 }
 
 const STORAGE_KEY = 'buffy:chat:v1'
+const MODEL_STORAGE_KEY = 'buffy:model:v1'
 const MAX_ATTACHMENTS = 4
 const MAX_ATTACHMENT_CHARS = 12_000
 const MAX_ATTACHMENT_FILE_CHARS = 8_000
@@ -33,6 +80,14 @@ const FREE_SUGGESTIONS = [
   'Write a short launch plan for a small web app.',
 ]
 
+function readModel(): BuffyModel {
+  try {
+    return normalizeBuffyModel(localStorage.getItem(MODEL_STORAGE_KEY))
+  } catch {
+    return 'dent'
+  }
+}
+
 function readSaved(): Message[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as unknown
@@ -40,7 +95,7 @@ function readSaved(): Message[] {
     return parsed
       .map((value): Message | null => {
         if (!value || typeof value !== 'object') return null
-        const message = value as { role?: unknown; content?: unknown; files?: unknown }
+        const message = value as { role?: unknown; content?: unknown; files?: unknown; tools?: unknown }
         if ((message.role !== 'user' && message.role !== 'assistant') || typeof message.content !== 'string') return null
         const files = Array.isArray(message.files)
           ? message.files
@@ -53,7 +108,26 @@ function readSaved(): Message[] {
               )
               .slice(0, MAX_ATTACHMENTS)
           : []
-        return { role: message.role, content: message.content, ...(files.length ? { files } : {}) }
+        const tools = Array.isArray(message.tools)
+          ? message.tools
+              .filter((tool): tool is BuffyTool => {
+                if (!tool || typeof tool !== 'object') return false
+                const item = tool as Partial<BuffyTool>
+                return (
+                  typeof item.id === 'string' &&
+                  typeof item.name === 'string' &&
+                  ['running', 'done', 'error', 'stopped'].includes(item.status || '')
+                )
+              })
+              .map((tool) => (tool.status === 'running' ? { ...tool, status: 'stopped' as const } : tool))
+              .slice(-40)
+          : []
+        return {
+          role: message.role,
+          content: message.content,
+          ...(files.length ? { files } : {}),
+          ...(tools.length ? { tools } : {}),
+        }
       })
       .filter((message): message is Message => message !== null)
       .slice(-60)
@@ -87,7 +161,121 @@ function errorText(value: unknown): string {
   return ''
 }
 
+const TOOL_TITLES: Record<string, string> = {
+  read_files: 'Read files',
+  read_subtree: 'Read project tree',
+  find_files: 'Find files',
+  code_search: 'Search code',
+  glob: 'Glob files',
+  list_directory: 'List directory',
+  read_docs: 'Read docs',
+  web_search: 'Search web',
+  think_deeply: 'Think deeply',
+  compact_context: 'Compact context',
+  write_file: 'Write file',
+  str_replace: 'Edit file',
+  apply_patch: 'Apply patch',
+  propose_write_file: 'Draft file',
+  propose_str_replace: 'Draft edit',
+  run_terminal_command: 'Run command',
+  run_file_change_hooks: 'Run file checks',
+  preview_navigate: 'Open page',
+  preview_snapshot: 'Read page',
+  preview_logs: 'Browser logs',
+  preview_wait: 'Wait for page',
+  preview_click: 'Click',
+  preview_type: 'Type',
+  preview_press: 'Press key',
+  preview_scroll: 'Scroll',
+  preview_evaluate: 'Evaluate page',
+  preview_screenshot: 'Screenshot',
+  browser_logs: 'Open browser',
+  spawn_agents: 'Spawn helper',
+  spawn_agent_inline: 'Spawn helper',
+  write_todos: 'Update plan',
+  add_subgoal: 'Add subgoal',
+  update_subgoal: 'Update subgoal',
+  create_plan: 'Create plan',
+  add_message: 'Update memory',
+  set_messages: 'Compact context',
+  set_output: 'Prepare answer',
+  task_completed: 'Finish',
+}
+
+function toolTitle(name: string): string {
+  return TOOL_TITLES[name] || name.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function ToolIcon({ name }: { name: string }) {
+  const className = 'size-3.5 shrink-0 text-faint'
+  if (name.includes('screenshot')) return <Camera className={className} />
+  if (name === 'preview_click' || name === 'preview_type' || name === 'preview_press' || name === 'preview_scroll') {
+    return <MousePointer2 className={className} />
+  }
+  if (name.startsWith('preview_') || name === 'browser_logs') return <Globe className={className} />
+  if (name === 'code_search' || name === 'find_files' || name === 'web_search' || name === 'read_docs') {
+    return <Search className={className} />
+  }
+  if (name === 'list_directory' || name === 'glob' || name === 'read_subtree' || name === 'compact_context') {
+    return <FolderTree className={className} />
+  }
+  if (
+    name === 'think_deeply' ||
+    name === 'create_plan' ||
+    name === 'write_todos' ||
+    name === 'add_subgoal' ||
+    name === 'update_subgoal'
+  ) {
+    return <Brain className={className} />
+  }
+  if (name === 'run_terminal_command' || name === 'run_file_change_hooks') return <Terminal className={className} />
+  if (name.includes('file') || name.startsWith('read_') || name.startsWith('propose_')) return <FileText className={className} />
+  return <Bot className={className} />
+}
+
+function ToolTimeline({ tools }: { tools: BuffyTool[] }) {
+  if (!tools.length) return null
+  return (
+    <div className="mb-3 overflow-hidden rounded-control border border-line bg-surface/60">
+      <div className="flex items-center gap-2 border-b border-line px-3 py-1.5 text-[11px] text-faint">
+        <Terminal className="size-3.5" />
+        Tool activity · {tools.length} {tools.length === 1 ? 'step' : 'steps'}
+      </div>
+      <ol className="divide-y divide-line/70">
+        {tools.map((tool) => (
+          <li key={tool.id} className="px-3 py-2">
+            <div className="flex items-center gap-2">
+              <ToolIcon name={tool.name} />
+              <span className="shrink-0 text-[12px] font-medium text-fg">{toolTitle(tool.name)}</span>
+              {tool.detail ? (
+                <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-faint" title={tool.detail}>
+                  {tool.detail}
+                </span>
+              ) : (
+                <span className="flex-1" />
+              )}
+              {tool.status === 'running' ? (
+                <Loader2 aria-label="Running" className="size-3.5 shrink-0 animate-spin text-sky-500" />
+              ) : tool.status === 'error' ? (
+                <AlertCircle aria-label="Failed" className="size-3.5 shrink-0 text-warning" />
+              ) : tool.status === 'stopped' ? (
+                <Square aria-label="Stopped" className="size-3 shrink-0 text-faint" />
+              ) : (
+                <Check aria-label="Finished" className="size-3.5 shrink-0 text-emerald-500" />
+              )}
+            </div>
+            {tool.summary ? (
+              <p className="mt-1 pl-[22px] text-[11.5px] leading-relaxed text-muted">{tool.summary}</p>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
 export function Buffy() {
+  const [searchParams] = useSearchParams()
   const [messages, setMessages] = useState<Message[]>(readSaved)
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<BuffyFile[]>([])
@@ -96,12 +284,16 @@ export function Buffy() {
   const [activity, setActivity] = useState('')
   const [status, setStatus] = useState<BridgeStatus | null>(null)
   const [statusLoading, setStatusLoading] = useState(true)
+  const [model, setModel] = useState<BuffyModel>(readModel)
   const freeMode = status?.mode === 'free'
+  const freeModel = BUFFY_MODEL_LABELS[model]
+  const freeModelTitle = `${freeModel.name} (${freeModel.detail})`
   const suggestions = freeMode ? FREE_SUGGESTIONS : SUGGESTIONS
   const abortRef = useRef<AbortController | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const handoffTask = useRef('')
 
   useEffect(() => {
     try {
@@ -110,6 +302,14 @@ export function Buffy() {
       /* private mode can refuse storage; the chat still works for this visit */
     }
   }, [messages])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MODEL_STORAGE_KEY, model)
+    } catch {
+      /* model choice still applies for this visit */
+    }
+  }, [model])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' })
@@ -211,11 +411,87 @@ export function Buffy() {
       })
     }
 
+    const updateTool = (incoming: WireTool) => {
+      if (!incoming.id) return
+      const id = incoming.id
+      setMessages((current) => {
+        const next = [...current]
+        const last = next[next.length - 1]
+        if (last?.role !== 'assistant') return current
+        const tools = [...(last.tools ?? [])]
+        const index = tools.findIndex((tool) => tool.id === id)
+        if (incoming.type === 'tool_call') {
+          const item: BuffyTool = {
+            id,
+            name: incoming.name || 'tool',
+            detail: incoming.detail || '',
+            status: 'running',
+            ...(incoming.parentAgentId ? { agent: incoming.parentAgentId } : {}),
+          }
+          if (index >= 0) tools[index] = { ...tools[index], ...item }
+          else tools.push(item)
+        } else {
+          const status: ToolStatus = incoming.status === 'error' ? 'error' : 'done'
+          if (index >= 0) {
+            tools[index] = {
+              ...tools[index],
+              ...(incoming.name ? { name: incoming.name } : {}),
+              ...(incoming.summary ? { summary: incoming.summary } : {}),
+              status,
+            }
+          } else {
+            tools.push({
+              id,
+              name: incoming.name || 'tool',
+              status,
+              ...(incoming.summary ? { summary: incoming.summary } : {}),
+            })
+          }
+        }
+        next[next.length - 1] = { ...last, tools }
+        return next
+      })
+    }
+
+    const settleTools = (status: ToolStatus) => {
+      setMessages((current) => {
+        const next = [...current]
+        const last = next[next.length - 1]
+        if (last?.role !== 'assistant' || !last.tools?.length) return current
+        next[next.length - 1] = {
+          ...last,
+          tools: last.tools.map((tool) => (tool.status === 'running' ? { ...tool, status } : tool)),
+        }
+        return next
+      })
+    }
+
     try {
+      let duck: DuckTurn | null = null
+      if (freeMode) {
+        if (isDuckModel(model)) {
+          setActivity(`Connecting to ${freeModel.name}…`)
+          try {
+            duck = await requestDuckTurn(model, controller.signal)
+          } catch (error) {
+            if (controller.signal.aborted) throw error
+            // The challenge can fail on a browser policy or a DuckDuckGo outage.
+            // The free hosted lanes below still answer, so the chat never blocks.
+            duck = null
+          }
+        }
+        setActivity(`${freeModel.name} is thinking…`)
+      }
       const response = await fetch('/api/buffy/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ messages: outgoing.map(messageForModel) }),
+        // In bridge mode the local agent owns the turn; only the free hosted
+        // lanes should send a model choice.
+        body: JSON.stringify({
+          messages: outgoing.map(messageForModel),
+          ...(freeMode ? { model } : {}),
+          ...(duck ? { duck } : {}),
+        }),
         signal: controller.signal,
       })
       if (!response.ok) {
@@ -252,6 +528,14 @@ export function Buffy() {
             }
             continue
           }
+          if (event === 'tool') {
+            try {
+              updateTool(JSON.parse(rawData) as WireTool)
+            } catch {
+              /* a malformed tool event should not end the reply */
+            }
+            continue
+          }
           if (rawData === '[DONE]') {
             done = true
             break
@@ -276,6 +560,7 @@ export function Buffy() {
       if (!accumulated) update('Buffy finished without a reply. Try asking again.')
     } catch (error) {
       if (controller.signal.aborted) {
+        settleTools('stopped')
         setMessages((current) => {
           const next = [...current]
           const last = next[next.length - 1]
@@ -283,6 +568,7 @@ export function Buffy() {
           return next
         })
       } else {
+        settleTools('error')
         const message = error instanceof Error ? error.message : 'Buffy could not answer.'
         setMessages((current) => {
           const next = [...current]
@@ -298,6 +584,21 @@ export function Buffy() {
       window.setTimeout(() => inputRef.current?.focus(), 0)
     }
   }
+
+  // A Browser Agent handoff opens /buffy?task=… on this computer when the full
+  // local toolset is available. Clear the query after starting so a reload does
+  // not send the same task twice.
+  useEffect(() => {
+    const requested = searchParams.get('task')?.trim()
+    if (!requested || handoffTask.current === requested || pending || !status?.ready) return
+    handoffTask.current = requested
+    void send(requested)
+    try {
+      window.history.replaceState(null, '', '/buffy')
+    } catch {
+      // The task has already been queued; a stale query is harmless.
+    }
+  }, [searchParams, pending, status?.ready, send])
 
   const stop = () => {
     abortRef.current?.abort()
@@ -323,14 +624,41 @@ export function Buffy() {
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-[17px] font-medium leading-tight">Buffy</h1>
           <p className="truncate text-[12.5px] text-faint">
-            {freeMode ? 'ChatGPT first · free fallbacks · no project setup' : 'The Codebuff coding agent, locally bridged'}
+            {freeMode
+              ? `${freeModelTitle} first · free fallbacks · no project setup`
+              : `Local coding agent${status?.tools ? ` · ${status.tools} tools` : ''} · files, edits, terminal, browser`}
           </p>
         </div>
         {status?.ready && (
           <span className="hidden items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-[11.5px] text-muted sm:flex">
             <span className={`size-1.5 rounded-full ${freeMode ? 'bg-sky-500' : 'bg-emerald-500'}`} />
-            {freeMode ? 'ChatGPT first' : status.mock ? 'Mock bridge' : 'Bridge connected'}
+            {freeMode ? `${freeModel.name} first` : status.mock ? 'Mock bridge' : status.tools ? `Bridge · ${status.tools} tools` : 'Bridge connected'}
           </span>
+        )}
+        <Link
+          to="/buffy/code"
+          className="inline-flex h-8 items-center gap-1.5 rounded-control border border-line bg-surface px-2.5 text-[12.5px] text-muted transition-colors hover:text-fg"
+          aria-label="Open Buffy Code workspace"
+          title="Open the hosted coding workspace"
+        >
+          <Code2 className="size-3.5" />
+          Code
+        </Link>
+        {freeMode && (
+          <select
+            aria-label="Choose free model"
+            title="Choose the free model Buffy tries first. Fast replies sooner; takes longer is more deliberate."
+            value={model}
+            disabled={pending}
+            onChange={(event) => setModel(normalizeBuffyModel(event.target.value))}
+            className="h-8 rounded-control border border-line bg-surface px-2 text-[12px] text-muted outline-none transition-colors hover:text-fg focus:border-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {BUFFY_MODELS.map((id) => (
+              <option key={id} value={id}>
+                {BUFFY_MODEL_LABELS[id].name} — {buffyModelSpeed(id).label.toLowerCase()}
+              </option>
+            ))}
+          </select>
         )}
         <button
           type="button"
@@ -351,7 +679,9 @@ export function Buffy() {
                 <div>
                   <p className="font-display text-[27px] font-medium leading-tight tracking-[-0.02em]">Talk to Buffy.</p>
                   <p className="mt-1 text-[14px] text-muted">
-                    {freeMode ? 'Free chat with Buffy. ChatGPT (GPT-5 Nano) is tried first, with free fallbacks if it is busy.' : 'The Codebuff agent when credits are available, with a free fallback lane.'}
+                    {freeMode
+                      ? `Free chat with Buffy. ${freeModelTitle} is tried first, with free fallbacks if it is busy.`
+                      : 'The full local Codebuff agent: read, edit, run, browse, and verify. No read-only mode.'}
                   </p>
                   <p className="mt-2 text-[12px] text-faint">Attach text or code with the paperclip, or paste it into the message.</p>
                 </div>
@@ -371,6 +701,19 @@ export function Buffy() {
                       {suggestion}
                     </button>
                   ))}
+                  <Link
+                    to="/buffy/code"
+                    className="mt-2 flex items-center gap-3 rounded-control border border-line bg-surface px-3.5 py-3 transition-colors hover:border-accent/40"
+                  >
+                    <span className="grid size-8 shrink-0 place-items-center rounded-tile bg-fg text-bg">
+                      <Code2 className="size-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13.5px] font-medium text-fg">Open Buffy Code</span>
+                      <span className="mt-0.5 block text-[11.5px] leading-snug text-faint">Write files, preview the result, and run page checks.</span>
+                    </span>
+                    <ExternalLink className="size-3.5 shrink-0 text-faint" />
+                  </Link>
                 </div>
               ) : (
                 <div className="mt-8 rounded-card border border-line bg-surface p-4">
@@ -442,9 +785,10 @@ export function Buffy() {
                       <Bot className="size-3.5" />
                     </span>
                     <div className="min-w-0 flex-1 pt-0.5">
+                      {message.tools?.length ? <ToolTimeline tools={message.tools} /> : null}
                       {message.content ? (
                         <Markdown className="prose-chat text-[14.5px] leading-[1.7]">{message.content}</Markdown>
-                      ) : (
+                      ) : message.tools?.length ? null : (
                         <p className="text-[13px] text-faint">{activity || 'Thinking…'}</p>
                       )}
                     </div>
@@ -538,7 +882,13 @@ export function Buffy() {
               }
             }}
             rows={1}
-            placeholder={status?.ready ? 'Ask anything — paste or attach text…' : 'Buffy is unavailable'}
+            placeholder={
+              status?.ready
+                ? freeMode
+                  ? 'Ask anything — paste or attach text…'
+                  : 'Ask anything — Buffy can read, edit, run and browse…'
+                : 'Buffy is unavailable'
+            }
             disabled={!status?.ready}
             aria-label="Message Buffy"
             className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2 py-1.5 text-[14px] leading-relaxed text-fg placeholder:text-faint focus:outline-none disabled:cursor-not-allowed"
@@ -564,7 +914,9 @@ export function Buffy() {
           )}
         </form>
         <p className="mx-auto mt-1.5 w-full max-w-[760px] text-[10.5px] text-faint">
-          {freeMode ? 'Buffy · ChatGPT first · free fallbacks · no project required' : 'Local bridge · Codebuff when available · free fallback otherwise'}
+          {freeMode
+            ? `Buffy · ${freeModelTitle} first · free fallbacks · no project required`
+            : `Local bridge · full coding toolset${status?.maxSteps ? ` · ${status.maxSteps} steps` : ''} · free fallback otherwise`}
         </p>
       </div>
 

@@ -1,0 +1,38 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "ink-jo3",
+  "pages_build_output_dir": "../dist/client",
+  "compatibility_date": "2026-09-29",
+  "vars": {
+    "APP_ORIGIN": "https://ink.7394.jo3.org",
+    "BROWSER_PROVIDER": "steel",
+    "RESEARCH_ENABLED": "1",
+    "ANALYZE_ENABLED": "1",
+    "BUILD_ENABLED": "1"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ink-live",
+      "database_id": "5916c00c-bfe1-4086-a296-eaaec2dfe147"
+    }
+  ],
+  "env": {
+    "preview": {
+      "vars": {
+        "APP_ORIGIN": "",
+        "BROWSER_PROVIDER": "steel",
+        "RESEARCH_ENABLED": "1",
+        "ANALYZE_ENABLED": "1",
+        "BUILD_ENABLED": "1"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ink-live-preview",
+          "database_id": "74de054a-cdb7-4c62-9a9d-6ae8d67ad0b6"
+        }
+      ]
+    }
+  }
+}

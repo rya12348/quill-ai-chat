@@ -1,6 +1,8 @@
 node_modules
 dist
 .wrangler
+backups
+.tmp-pages-secrets.json
 .env
 .env.*
 .freebuff

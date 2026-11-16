@@ -21,22 +21,28 @@ const cache = new Map<string, { at: number; results: SearchResult[] }>()
 export const searchConfigured = (_env: Env) => true
 
 const CURRENT =
-  /\b(latest|newest|today|tonight|yesterday|tomorrow|this (?:week|month|year)|current(?:ly)?|right now|recent(?:ly)?|news|updates?|updated|releases?|released|launch(?:ed|es)?|announc(?:e|ed|es|ement)|prices?|pricing|costs?|stock|weather|forecast|scores?|results?|who won|election|202[5-9]|as of|how much (?:is|are|does|do)|net worth|still (?:true|available|working|alive))\b/i
-const FACTUAL =
-  /^(?:who|what|when|where|which|whose|whom|how (?:many|much|old|tall|far|long|big|deep)|is|are|was|were|does|do|did)\b/i
-const CREATIVE = /^(?:write|draft|compose|imagine|create|generate|design|make|plan|suggest|give me|help me|tell me a story|roleplay)\b/i
+  /\b(latest|newest|today|tonight|yesterday|tomorrow|this (?:week|month|year)|current(?:ly)?|right now|recent(?:ly)?|news|updates?|updated|releases?|released|launch(?:ed|es)?|announc(?:e|ed|es|ement)|prices?|pricing|stock|weather|forecast|who won|election|202[5-9]|as of|how much (?:is|are)|net worth|still (?:true|available|working|alive))\b/i
 const CODE = /```|\b(?:error|exception|stack trace|typeerror|syntaxerror|referenceerror|not working|fails?|typescript|javascript|python|react|sql|npm|package|compile|build)\b/i
 const ABOUT_SELF = /\bwho are you\b|\bwhat are you\b|\byour (?:name|model|maker|creator)\b|\bhow do you work\b/i
+// Explicit requests are the other clear signal. A stable factual question
+// such as "is 91 prime" or "which is larger" is not a research task, and
+// sending it through the planner used to cost 12–17 seconds before a weak
+// fallback answered it.
+const EXPLICIT_SEARCH = /^\s*(?:search|look up|google|browse|find (?:me )?(?:sources?|information)|cite\b)/i
 
 /** True when the question is likely to benefit from a lookup. */
 export function shouldSearch(text: string): boolean {
   const trimmed = text.trim()
   if (trimmed.length < 8 || trimmed.length > 1_200) return false
   if (ABOUT_SELF.test(trimmed)) return false
-  if (CURRENT.test(trimmed)) return true
-  if (FACTUAL.test(trimmed) && !CREATIVE.test(trimmed)) return true
-  if (/\?/.test(trimmed) && CODE.test(trimmed)) return true
-  return false
+  if (EXPLICIT_SEARCH.test(trimmed)) return true
+  // A factorial/trailing-zero problem is self-contained, even when its answer
+  // happens to contain a year-shaped number such as 2026. Searching for it
+  // only added latency and could leave Chat waiting on a stale search lane.
+  if (/\b(?:factorial|trailing zeros?|n!)\b/i.test(trimmed)) return false
+  // Only time-sensitive facts and explicit lookups need the web. Stable
+  // definitions, arithmetic and self-contained reasoning stay on the model.
+  return CURRENT.test(trimmed)
 }
 
 type QueryKind = 'news' | 'code' | 'general'

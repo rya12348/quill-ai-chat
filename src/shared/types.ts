@@ -670,6 +670,8 @@ export interface ModelInfo {
   billing?: LaneBilling
   /** Capability score; the picker lists strongest first. */
   strength?: number
+  /** A healthy model currently standing in for a temporarily rate-limited exact route. */
+  fallback?: string
 }
 
 /** One free mode's daily allowance, as GET /api/me reports it. */

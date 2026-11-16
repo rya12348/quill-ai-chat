@@ -8,6 +8,7 @@ import { mapConversation, mapMessage, now, titleFrom } from '../db'
 import type { AppContext } from '../env'
 import { publicLanes } from '../public-ai'
 import { generateConversationTitle } from '../title'
+import { DUCK_MODELS } from './buffy'
 
 export const conversations = new Hono<AppContext>()
 
@@ -285,7 +286,12 @@ conversations.patch('/:id', async (c) => {
   let model = existing.model as string
   if (input.model !== undefined) {
     const lanes = aiConfigured(c.env) ? [] : publicLanes(c.env)
+    const duckModel =
+      !aiConfigured(c.env) &&
+      typeof input.model === 'string' &&
+      (DUCK_MODELS as readonly string[]).includes(input.model)
     const allowed =
+      duckModel ||
       isModelId(input.model) ||
       (typeof input.model === 'string' && (input.model === 'buffy-lite' || lanes.some((lane) => lane.model === input.model)))
     if (!allowed) return c.json({ error: 'Unknown model.' }, 400)

@@ -1,3 +1,4 @@
+import { questionLoopExpression } from '../../shared/browser'
 import type {
   BrowserAction,
   BrowserInspectResult,
@@ -17,7 +18,14 @@ import type {
  */
 
 const BRIDGE_URL = 'ws://127.0.0.1:8765'
-const REQUEST_TIMEOUT_MS = 20_000
+// A cold tab on a heavy dashboard can take longer than 20 seconds to answer
+// its first Runtime.evaluate. Timing that out made the first Run look broken
+// while an immediate second Run (with the page now warm) succeeded.
+const REQUEST_TIMEOUT_MS = 35_000
+// A page script may legitimately wait through a video pause and act in the
+// same evaluation. Keep that request alive without applying the short timeout
+// used by ordinary click/read CDP calls.
+const SCRIPT_TIMEOUT_MS = 600_000
 
 class LocalBrowserError extends Error {
   constructor(
@@ -348,14 +356,14 @@ class LocalBrowser {
     this.pending.clear()
   }
 
-  private send<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  private send<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
     if (!this.connected()) throw new LocalBrowserError(409, 'local_disconnected', 'Local Chrome is not connected.')
     const id = ++this.sequence
     return new Promise<T>((resolve, reject) => {
       const timer = window.setTimeout(() => {
         this.pending.delete(id)
         reject(new LocalBrowserError(504, 'local_timeout', `Local Chrome did not answer ${method}.`))
-      }, REQUEST_TIMEOUT_MS)
+      }, timeoutMs)
       this.pending.set(id, {
         resolve: (value) => resolve(value as T),
         reject,
@@ -365,25 +373,31 @@ class LocalBrowser {
     })
   }
 
-  private async evaluate(expression: string): Promise<unknown> {
+  private async evaluate(expression: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<unknown> {
     // Planner page actions often arrive as a statement block ending in
     // `return ...`. Runtime.evaluate rejects a top-level return with
     // “SyntaxError: Illegal return statement”, which made every such action
-    // fail in local mode. Wrap only those blocks in an IIFE.
+    // fail in local mode. Wrap those blocks in an async function so a
+    // code-first script can also await a video pause or a page condition.
     const source = expression.trim()
     const wrapped =
-      /\breturn\b/.test(source) && !/^(?:\(|async\b|function\b|class\b)/.test(source)
-        ? `(() => {\n${source}\n})()`
+      (/\breturn\b/.test(source) || /\bawait\b/.test(source)) &&
+      !/^(?:\(|async\b|function\b|class\b)/.test(source)
+        ? `(async () => {\n${source}\n})()`
         : expression
     const result = await this.send<{
       result?: { value?: unknown }
       exceptionDetails?: { text?: string; exception?: { description?: string } }
-    }>('Runtime.evaluate', {
-      expression: wrapped,
-      returnByValue: true,
-      awaitPromise: true,
-      userGesture: true,
-    })
+    }>(
+      'Runtime.evaluate',
+      {
+        expression: wrapped,
+        returnByValue: true,
+        awaitPromise: true,
+        userGesture: true,
+      },
+      timeoutMs,
+    )
     if (result.exceptionDetails) {
       const detail = result.exceptionDetails.exception?.description?.split('\n')[0]?.trim()
       throw new LocalBrowserError(502, 'local_page_error', detail || result.exceptionDetails.text || 'The page could not be read.')
@@ -799,9 +813,9 @@ class LocalBrowser {
         await sleep(Math.min(30_000, Math.max(0, Number(action.ms) || 500)))
         return 'waited'
       case 'waitFor': {
-        const deadline = Date.now() + Math.min(120_000, Math.max(500, Number(action.timeoutMs) || 10_000))
+        const deadline = Date.now() + Math.min(600_000, Math.max(500, Number(action.timeoutMs) || 10_000))
         if (action.state === 'time') {
-          await sleep(Math.min(120_000, Math.max(100, Number(action.timeoutMs) || 1_000)))
+          await sleep(Math.min(600_000, Math.max(100, Number(action.timeoutMs) || 1_000)))
           return 'waited'
         }
         const hidden = action.state === 'hidden'
@@ -815,9 +829,10 @@ class LocalBrowser {
               const style = getComputedStyle(element);
               return rect.width > 1 && rect.height > 1 && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
             };
-            ${action.text ? `const bodyText = roots.map((root) => root.body?.innerText || root.host?.innerText || '').join('\\n'); const hasText = bodyText.includes(${JSON.stringify(action.text)}); if (${hidden ? '!hasText' : 'hasText'}) return true;` : ''}
-            ${action.selector ? `const element = find(${JSON.stringify(action.selector)}); const shown = visible(element); if (${hidden ? '!shown' : 'shown'}) return true;` : ''}
-            ${action.state === 'ended' ? `const media = ${action.selector ? `[...roots.flatMap((root) => [...root.querySelectorAll(${JSON.stringify(action.selector)})])]` : `[...document.querySelectorAll('video,audio')]`}; if (media.some((item) => item.ended)) return true;` : ''}
+            ${action.text && action.state !== 'ended' && action.state !== 'attention' ? `const bodyText = roots.map((root) => root.body?.innerText || root.host?.innerText || '').join('\\n'); const hasText = bodyText.includes(${JSON.stringify(action.text)}); if (${hidden ? '!hasText' : 'hasText'}) return true;` : ''}
+            ${action.selector && action.state !== 'ended' && action.state !== 'attention' ? `const element = find(${JSON.stringify(action.selector)}); const shown = visible(element); if (${hidden ? '!shown' : 'shown'}) return true;` : ''}
+            ${action.state === 'ended' ? `const media = ${action.selector ? `[...roots.flatMap((root) => [...root.querySelectorAll(${JSON.stringify(action.selector)})])]` : `[...document.querySelectorAll('video,audio')]`}; if (media.some((item) => item.ended || (Number.isFinite(item.duration) && item.duration > 0 && item.currentTime >= item.duration - 0.25))) return true;` : ''}
+            ${action.state === 'attention' ? `const media = [...document.querySelectorAll('video,audio')]; const ended = media.some((item) => item.ended || (Number.isFinite(item.duration) && item.duration > 0 && item.currentTime >= item.duration - 0.25)); const paused = media.some((item) => item.paused && item.currentTime > 0.5 && !item.ended); const question = [...document.querySelectorAll('[role="dialog"], dialog, [class*="question" i], [class*="quiz" i], [class*="modal" i]')].some((item) => visible(item) && /\b(?:question|quiz|answer|select|choose|check)\b/i.test(item.textContent || '') && Boolean(item.querySelector('button, [role="button"], input, textarea, select'))); if (ended || paused || question) return true;` : ''}
             return false;
           })()`)
           if (found === true) return 'found'
@@ -826,8 +841,12 @@ class LocalBrowser {
         throw new LocalBrowserError(504, 'local_timeout', `The page did not reach that state within ${Math.round((Number(action.timeoutMs) || 10_000) / 1_000)} seconds.`)
       }
       case 'evaluate': {
-        const value = await this.evaluate(action.expression)
+        const value = await this.evaluate(action.expression, SCRIPT_TIMEOUT_MS)
         return typeof value === 'string' ? value.slice(0, 2000) : JSON.stringify(value ?? null).slice(0, 2000)
+      }
+      case 'questionLoop': {
+        const value = await this.evaluate(questionLoopExpression(action.answers, action.timeoutMs), SCRIPT_TIMEOUT_MS)
+        return typeof value === 'string' ? value.slice(0, 4000) : JSON.stringify(value ?? null).slice(0, 4000)
       }
       case 'style':
         await this.evaluate(`(() => { const style = document.createElement('style'); style.textContent = ${JSON.stringify(action.css)}; document.head.appendChild(style); return true; })()`)

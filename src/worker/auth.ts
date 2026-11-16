@@ -50,6 +50,23 @@ function isCodespacesHost(request: Request): boolean {
   return CODESPACES_HOST.test(new URL(request.url).hostname) || Boolean(forwardedCodespacesOrigin(request))
 }
 
+// Public addresses that are allowed to reach this deployment. These stay
+// fixed so a custom domain keeps working even if a stale APP_ORIGIN is
+// deployed by another process.
+const PUBLIC_ORIGINS = new Set([
+  'https://ink.7394.jo3.org',
+  'https://www.7394.jo3.org',
+  'https://7394.jo3.org',
+  'https://ink-jo3.pages.dev',
+])
+
+function publicForwardedOrigin(request: Request): string | undefined {
+  const host = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
+  if (!host) return undefined
+  const origin = `https://${host}`
+  return PUBLIC_ORIGINS.has(origin) ? origin : undefined
+}
+
 /**
  * Codespaces is a development origin. Use the development identity when no
  * client ID is configured, or when the auth config still points at loopback
@@ -268,7 +285,14 @@ export function appOrigin(env: Env, request: Request): string {
   // the browser is on the forwarded HTTPS origin, so use that instead. A
   // configured public APP_ORIGIN stays authoritative.
   if (forwarded && (!configured || isLoopbackOrigin(configured))) return forwarded
-  return configured || new URL(request.url).origin
+  // Pages forwards the original host. Keep the custom domain canonical even
+  // when an older APP_ORIGIN is still deployed.
+  const publicForwarded = publicForwardedOrigin(request)
+  if (publicForwarded) return publicForwarded
+  const requestOrigin = new URL(request.url).origin
+  if (PUBLIC_ORIGINS.has(requestOrigin)) return requestOrigin
+  if (configured) return configured
+  return requestOrigin
 }
 
 /** True for the public or forwarded host of a GitHub Codespace. */
@@ -308,6 +332,16 @@ export function buildEnabledFor(env: Env, request: Request): boolean {
  * configured APP_ORIGIN.
  */
 export function allowsMutation(env: Env, request: Request): boolean {
+  const origin = request.headers.get('origin')?.trim()
+  if (origin && PUBLIC_ORIGINS.has(origin)) return true
+  // A stale APP_ORIGIN must not break the origin that is actually serving the
+  // app. The browser's Origin header matching the request URL is the same
+  // same-origin signal, independent of deployment configuration.
+  try {
+    if (isSameOriginRequest(request, new URL(request.url).origin)) return true
+  } catch {
+    // Fall through to the configured origin check.
+  }
   if (isSameOriginRequest(request, appOrigin(env, request))) return true
   return authMode(env, request) === 'development' && request.headers.get('sec-fetch-site') === 'same-origin'
 }

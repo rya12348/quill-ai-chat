@@ -3,7 +3,8 @@ import { getCookie, setCookie } from 'hono/cookie'
 
 import { aiConfigured } from './ai'
 import { allowsMutation, appOrigin, authMode, getAuth, GUEST_COOKIE, isCodespacesRequest, isGuestId, requireUser } from './auth'
-import { requireDb } from './db'
+import { ensureSchema, requireDb } from './db'
+import { publicLanes } from './public-ai'
 import { RATE_WINDOWS, rateLimit, tooManyRequests } from './rate-limit'
 import type { AppContext, Env } from './env'
 import { isPokiGameId, isPokiGameWrapperUrl, isSafeGameSegment, pokiGameStartUrl, proxyPokiGameAsset } from './poki-game'
@@ -64,6 +65,7 @@ app.use('*', async (c, next) => {
     'X-Permitted-Cross-Domain-Policies': 'none',
     'X-Download-Options': 'noopen',
     'Referrer-Policy': 'no-referrer',
+    'Cross-Origin-Opener-Policy': 'same-origin',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
     ...(url.protocol === 'https:' ? { 'Strict-Transport-Security': 'max-age=31536000' } : {}),
   }
@@ -153,6 +155,59 @@ app.route('/api/auth', localAuth)
 app.get('/api/health', (c) => {
   c.header('Cache-Control', 'private, no-store')
   return c.json({ ok: true })
+})
+// Aggregate 5xx count for the external monitor. It contains route names and
+// counts only; no user, query string, or body is stored.
+app.get('/api/health/errors', requireDb, async (c) => {
+  c.header('Cache-Control', 'private, no-store')
+  const since = Date.now() - 60 * 60 * 1000
+  const total = await c
+    .get('db')
+    .prepare(`SELECT COUNT(*) AS n FROM http_errors WHERE created_at >= ?`)
+    .bind(since)
+    .first<{ n: number }>()
+  const rows = await c
+    .get('db')
+    .prepare(`SELECT path, COUNT(*) AS count FROM http_errors WHERE created_at >= ? GROUP BY path ORDER BY count DESC LIMIT 5`)
+    .bind(since)
+    .all<{ path: string; count: number }>()
+  return c.json({ ok: true, windowMinutes: 60, errors: Number(total?.n ?? 0), paths: rows.results })
+})
+// Liveness above stays cheap. Readiness is for deploys and monitors: it
+// proves the database schema exists and that at least one model lane can run.
+app.get('/api/ready', async (c) => {
+  c.header('Cache-Control', 'private, no-store')
+  const checks = { database: false, schema: false, models: false }
+  let detail: string | undefined
+  if (c.env.DB) {
+    checks.database = true
+    try {
+      await ensureSchema(c.env.DB)
+      const row = await c.env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name IN ('users', 'conversations', 'messages', 'auth_users', 'auth_sessions', 'guest_daily_usage')`,
+      ).first<{ n: number }>()
+      checks.schema = Number(row?.n) === 6
+      if (!checks.schema) detail = 'The database schema is incomplete.'
+    } catch {
+      detail = 'The database schema could not be verified.'
+    }
+  } else {
+    detail = 'No DB binding is attached.'
+  }
+  const lanes = publicLanes(c.env)
+  checks.models = aiConfigured(c.env) || lanes.length > 0
+  if (!checks.models) detail = 'No model lane or API key is configured.'
+  const ok = checks.database && checks.schema && checks.models
+  return c.json(
+    {
+      ok,
+      checks,
+      auth: authMode(c.env, c.req.raw),
+      models: { api: aiConfigured(c.env), freeLanes: lanes.length },
+      ...(detail ? { detail } : {}),
+    },
+    ok ? 200 : 503,
+  )
 })
 
 const ASSET_HEADERS = {
@@ -465,12 +520,40 @@ app.onError((error, c) => {
 })
 app.notFound((c) => (c.req.path.startsWith('/api/') ? c.json({ error: 'Not found.' }, 404) : c.env.ASSETS.fetch(c.req.raw)))
 
+function recordServerError(env: Env, ctx: ExecutionContext, request: Request, response: Response): void {
+  if (!env.DB || response.status < 500) return
+  try {
+    const path = new URL(request.url).pathname.slice(0, 200)
+    const now = Date.now()
+    ctx.waitUntil(
+      env.DB.prepare(`INSERT INTO http_errors (path, status, created_at) VALUES (?, ?, ?)`)
+        .bind(path, response.status, now)
+        .run()
+        .catch(() => undefined),
+    )
+    // Keep the table bounded without a scheduled job. Expired rows are not
+    // useful to the one-hour monitor and contain no user data.
+    if (Math.random() < 0.05) {
+      ctx.waitUntil(
+        env.DB.prepare(`DELETE FROM http_errors WHERE created_at < ?`)
+          .bind(now - 30 * 24 * 60 * 60 * 1000)
+          .run()
+          .catch(() => undefined),
+      )
+    }
+  } catch {
+    // Error recording must never replace the original response.
+  }
+}
+
 export default {
-  fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // Sign in with Freebuff owns /auth/freebuff/* and keeps sessions fresh.
     // Without a client ID the app falls back to the loopback development user.
     const auth = getAuth(env, request)
     const handler = (req: Request) => Promise.resolve(app.fetch(req, env, ctx))
-    return auth ? auth.wrap(handler)(request) : handler(request)
+    const response = auth ? await auth.wrap(handler)(request) : await handler(request)
+    recordServerError(env, ctx, request, response)
+    return response
   },
 }

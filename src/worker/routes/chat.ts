@@ -10,9 +10,12 @@ import type { AgentInfo, AgentTool, AnalysisInfo, AnalysisJob, BuildInfo, Canvas
 import { isAnalyzeIntent, isBuildRequest, isCanvasRequest, isResearchIntent, isSmallTalk, isWritingRequest, needsCurrentFacts, SUGGESTED_MODE_LABEL, suggestToolMode } from '../../shared/agent'
 import { agentComplete } from '../agent'
 import { AiError, aiConfigured, complete, isModelId, type ChatMessage } from '../ai'
+import { GEMINI_WEB_MODEL } from '../gemini-web'
+import { fallbackForUnavailableModel } from '../model-fallbacks'
 import { AttachmentValidationError, attachmentMeta, loadAttachmentsForMessages, messageWithAttachments, parseAttachments, type StoredAttachment } from '../attachments'
 import { analyzeEnabledFor, appOrigin, buildEnabledFor, isGuestUser, isOwner, researchEnabledFor } from '../auth'
-import { blendComplete, depthFor, type Depth } from '../blend'
+import { blendComplete, depthFor, isTrivialPrompt, type Depth } from '../blend'
+import { routeBuffyChat } from '../buffy-routing'
 import { chooseDepth, depthBucket, loadDepthQuality, loadLaneQuality, loadTaskQuality, type LaneRecord, type LaneRoute, type StoredLaneRoute } from '../lane-routing'
 import { analysisComplete, parseDataset } from '../analysis'
 import { buildComplete, buildEmbed, buildReference, isProxyRequest } from '../build'
@@ -112,10 +115,13 @@ chat.post('/', async (c) => {
   // Guest allowances live in a separate, address-keyed ledger. Their cookie
   // still owns conversations; it just cannot be the quota identity.
   const guestKey = isGuestUser(user) ? await guestUsageKey(c.req.raw) : undefined
-  const limit = await rateLimit(db, 'chat', c.req.raw, 30, RATE_WINDOWS.chat)
+  const limit = await rateLimit(db, 'chat', c.req.raw, 60, RATE_WINDOWS.chat)
   if (!limit.allowed) return tooManyRequests(c, limit)
   const unlimitedBuilds = isOwner(c.env, user, c.req.raw)
   const input = await c.req.json<Input>().catch(() => ({}) as Input)
+  // Browsers that cached the previous picker still send the old paid OpenRouter
+  // id. Map it onto the free Gemini web lane instead of running a stale model.
+  if (input.model === 'google/gemini-3.8-flash') input.model = GEMINI_WEB_MODEL
   let incomingAttachments: StoredAttachment[] = []
   try {
     incomingAttachments = parseAttachments(input.attachments)
@@ -134,10 +140,14 @@ chat.post('/', async (c) => {
   // Low skips the extra reasoning pass; Default and Max turn it on at medium
   // and high effort where the lane supports fine-grained control.
   const effort = input.effort === 'low' || input.effort === 'default' || input.effort === 'max' ? input.effort : null
-  const wantReasoning = effort ? effort !== 'low' : input.reasoning === true
+  const trivialContent = isTrivialPrompt(typeof input.content === 'string' ? input.content : '')
   // Raw chain-of-thought is an advanced-mode detail. A Fast reply may still let
-  // the model reason internally, but nothing is streamed or persisted for it.
+  // the model reason internally, but nothing is streamed or persisted for it —
+  // and it must not send the provider's separate reasoning budget, which can
+  // spend the whole answer deadline thinking about a one-line question. A
+  // greeting is never a reasoning task, even when Deep or Max is selected.
   const exposeReasoning = input.strategy !== 'fast'
+  const wantReasoning = !trivialContent && exposeReasoning && (effort ? effort !== 'low' : input.reasoning === true)
   const reasoningEffort = effort === 'low' ? 'low' : effort === 'max' ? 'high' : effort === 'default' ? 'medium' : 'high'
   const regenerate = input.regenerate === true
   const attachments = regenerate ? [] : incomingAttachments
@@ -262,7 +272,8 @@ chat.post('/', async (c) => {
   // Buffy Free is the local bridge lane when one is configured. A deployed
   // Worker has no loopback bridge, so the same row falls back to the strongest
   // hosted free lanes and keeps Buffy's no-tools identity.
-  const requestedModel = typeof input.model === 'string' ? input.model : conversationRow?.model
+  const requestedModel =
+    typeof input.model === 'string' ? input.model : typeof conversationRow?.model === 'string' ? conversationRow.model : undefined
   const duckFree = Boolean(!usingApi && duck && requestedModel === duck.model)
   const nativeBuffyFree =
     !usingApi &&
@@ -273,12 +284,54 @@ chat.post('/', async (c) => {
   // A free choice never silently spends a paid lane. Paid lanes are used only
   // when that exact model was selected, so a free chat, Deep pass or research
   // run stays free even when a paid key happens to be configured.
-  const selectedPaid = typeof input.model === 'string' && lanes.some((lane) => lane.model === input.model && lane.billing === 'paid')
-  // A paid choice is a single-model choice: do not blend it with every other
-  // paid lane just because the deployment has keys for them.
-  const engineLanes = (selectedPaid ? lanes.filter((lane) => lane.model === input.model) : lanes.filter((lane) => lane.billing !== 'paid')).filter(
+  const selectedLane = requestedModel ? lanes.find((lane) => lane.model === requestedModel) : undefined
+  const selectedPaid = Boolean(selectedLane && selectedLane.billing === 'paid')
+  // A paid or selected-only choice is a single-model choice: do not blend it
+  // with every other lane just because the deployment can reach them.
+  // A greeting sent to a Buffy row is answered locally. Do not route it
+  // through the full Codebuff agent just to say hello; that path can spend a
+  // minute assembling tools and still return a one-line reply. Keep the
+  // ordinary lanes available so blendComplete's trivial path can short-circuit.
+  const buffy = routeBuffyChat({
+    usingApi,
+    requestedModel,
+    content,
+    strategy: typeof input.strategy === 'string' ? input.strategy : undefined,
+    hasAttachments: attachments.length > 0,
+  })
+  // Buffy's full agent is the right tool when the task explicitly needs files,
+  // commands, tests, browsing, or the person chose Agent mode. For ordinary
+  // chat it is the wrong shape: it assembles tools before it writes a sentence,
+  // so a one-line question can miss the first response window. This split is
+  // intentional: a bare mention of "search", "test" or "code" stays fast.
+  let engineLanes = (selectedPaid || selectedLane?.selectedOnly ? lanes.filter((lane) => lane.model === input.model) : lanes.filter((lane) => lane.billing !== 'paid')).filter(
     (lane) => !nativeBuffyFree || !lane.model.startsWith('buffy'),
   )
+  if (buffy.local) engineLanes = lanes.filter((lane) => lane.billing !== 'paid' || lane.model === requestedModel)
+  if (buffy.fast) {
+    const lite = lanes.find((lane) => lane.model === 'buffy-lite')
+    engineLanes = [
+      ...(lite ? [lite] : []),
+      ...lanes.filter((lane) => lane.model !== 'buffy' && lane.billing !== 'paid'),
+    ]
+  }
+  // Health is used by every model-backed mode, not only the blended chat.
+  // Research, Build and Canvas used to retry the selected resting lane first
+  // and could spend their whole deadline on it.
+  const health = usingApi ? [] : await healthRows(db, owner)
+  // A selected frontier row can be temporarily out of its provider's free
+  // daily allowance. Keep that selection usable with a healthy equivalent
+  // instead of turning the picker into a dead end.
+  const fallback = selectedLane ? fallbackForUnavailableModel(selectedLane.model, lanes, health) : undefined
+  // A selected model is one choice, not a request for a multi-model blend. Use
+  // the healthy stand-in as a single lane: keeping the full pool would spend
+  // one deadline on drafts the person did not ask for and can leave a quota
+  // fallback looking just as unavailable as the exact route.
+  if (fallback) engineLanes = [fallback.lane]
+  const avoid = new Set(health.filter((row) => row.status === 'degraded' || row.status === 'down').map((row) => row.provider_id))
+  const laneHealth = new Map(health.map((row) => [row.provider_id, { status: row.status, latencyMs: row.latency_ms }]))
+  const availableLanes = engineLanes.filter((lane) => !avoid.has(laneKey(lane)))
+  const modeLanes = availableLanes.length ? availableLanes : engineLanes
   if (!usingApi && needsVision && !wantsResearch && !wantsAnalysis && !lanes.length) {
     return c.json({ error: 'vision_unavailable', message: 'No free image-capable model is configured right now. Add an OpenRouter or Gemini key and try again.' }, 503)
   }
@@ -315,7 +368,10 @@ chat.post('/', async (c) => {
   const wantsSources = /\b(?:sources?|cite|citations?|references?|bibliography)\b/i.test(content)
   const wantsResearchPaper = /\bresearch\s+(?:paper|report|essay|project)\b/i.test(content)
   const writingDocument = research && isWritingRequest(content) && !needsCurrentFacts(content) && !wantsSources && !wantsResearchPaper
-  const agent = wantsAgent && !duckFree && !nativeBuffyFree
+  // A greeting sent to Agent or Buffy should not start a tool loop. The
+  // trivial reply path below is local, instant and does not spend a provider
+  // call; let it handle acknowledgements even when an agent mode is selected.
+  const agent = wantsAgent && !duckFree && !nativeBuffyFree && !isTrivialPrompt(content)
   if (research && !writingDocument) {
     const reports = await researchToday(db, owner)
     if (reports >= RESEARCH_DAILY_LIMIT) {
@@ -376,16 +432,18 @@ chat.post('/', async (c) => {
   // The full local agent is a deliberate single run, not an ensemble member.
   // Buffy Free is a free lane: Deep mode may use it as the first draft and add
   // the independent review pass around it.
-  const selectedFullAgent = !usingApi && input.model === 'buffy'
+  const selectedFullAgent = buffy.fullAgent
   // A frontier lane must not be downgraded to a one-shot answer just because
   // the person left the speed switch on Fast. Its extra passes are the point.
   const selectedFrontier = Boolean(engineLanes.find((lane) => lane.frontier && lane.model === input.model))
-  const blend = !duckFree && !nativeBuffyFree && !selectedFullAgent && !proof && !research && !analyze && !build && !canvas && !agent && (input.strategy !== 'fast' || selectedFrontier) && engineLanes.length > 1
+  const blend = !duckFree && !nativeBuffyFree && !selectedFullAgent && !proof && !research && !analyze && !build && !canvas && !agent && (input.strategy !== 'fast' || selectedFrontier || buffy.local || buffy.fast) && engineLanes.length > 1
   const existingModel = conversationRow?.model
   const model: string = duckFree && duck
     ? duck.model
     : nativeBuffyFree
     ? 'buffy-lite'
+    : buffy.model
+    ? buffy.model
     : usingApi
       ? isModelId(input.model)
         ? input.model
@@ -792,7 +850,7 @@ chat.post('/', async (c) => {
           env: c.env,
           model: model as ModelId,
           usingApi,
-          lanes,
+          lanes: orderLanes(modeLanes, model),
           question: userMessage.content,
           signal: controller.signal,
           onLaneResult: recordLane,
@@ -888,32 +946,28 @@ chat.post('/', async (c) => {
       // models answer, blended when more than one is available.
       // Persisted provider health keeps a lane that just refused its key out of
       // the referee chair; the full list is still used as a fallback chain.
-      let avoid: Set<string> | undefined
       let laneQuality: Map<string, LaneRecord> | undefined
       if (!usingApi && blend) {
-        const unhealthy = await db
-          .prepare(`SELECT provider_id FROM provider_health WHERE owner_sub = ? AND status IN ('degraded', 'down')`)
-          .bind(owner)
-          .all<{ provider_id: string }>()
-        avoid = new Set(unhealthy.results.map((row) => row.provider_id))
         const kind = kindFor(userMessage.content)
         const bucket = depthBucket(userMessage.content)
-        const laneCount = activeLanes(engineLanes).length
+        const laneCount = activeLanes(modeLanes).length
         const [quality, depthQuality] = await Promise.all([
-          loadLaneQuality(db, owner, engineLanes, kind),
+          loadLaneQuality(db, owner, modeLanes, kind),
           loadDepthQuality(db, owner, kind, bucket),
         ])
         laneQuality = quality
-        // Effort is the person's explicit compute budget. Max gets the deep
-        // plan/draft/review pass even for a short question; Low skips it.
+        // Effort is the person's explicit compute budget, but it must not turn
+        // a one-line question into a deep pass. The regex prior recognizes the
+        // shape of the request; Max only upgrades work that actually needs it.
+        const baseline = depthFor(userMessage.content, laneCount)
         chosenDepth =
-          effort === 'low'
+          trivialContent || baseline === 'quick' || effort === 'low'
             ? 'quick'
             : effort === 'max' || input.strategy === 'team'
               ? 'deep'
               : laneCount < 2
                 ? 'quick'
-                : chooseDepth(userMessage.content, depthFor(userMessage.content, laneCount), depthQuality)
+                : chooseDepth(userMessage.content, baseline, depthQuality)
       }
       if (duckFree && duck) {
         // Plain chat on a free brand lane. It has no tools, so modes and
@@ -930,10 +984,42 @@ chat.post('/', async (c) => {
         }))
         const duckSystem =
           'You are Ink, a thoughtful writing, research and coding assistant. Answer the person directly and concisely. You have no tools in this chat: do not claim to have browsed, run code, read files or changed anything.'
-        for await (const piece of duckComplete(duck, duckMessages, controller.signal, duckSystem)) {
-          if (gone) return
-          text += piece
-          if (!(await send({ type: 'delta', text: piece }))) return await abandon()
+        let duckFailed = false
+        try {
+          for await (const piece of duckComplete(duck, duckMessages, controller.signal, duckSystem)) {
+            if (gone) return
+            text += piece
+            if (!(await send({ type: 'delta', text: piece }))) return await abandon()
+          }
+        } catch (error) {
+          if (controller.signal.aborted) return
+          if (text.trim()) {
+            const message = error instanceof AiError ? error.message : 'The free model stopped before finishing.'
+            await send({ type: 'error', code: 'interrupted', message }).catch(() => {})
+            return
+          }
+          duckFailed = true
+          await send({
+            type: 'status',
+            text: `${duck.model === 'claude-haiku-5-5' ? 'Claude' : 'ChatGPT'} is busy — switching to a free fallback…`,
+          })
+        }
+        if (duckFailed) {
+          // The free brand proof can be valid while DuckDuckGo's shared edge is
+          // rate-limited. Keep the selected row useful instead of turning a
+          // transient upstream 503 into a dead chat.
+          const fallback = blendComplete(orderLanes(modeLanes, model), {
+            messages: prompt,
+            signal: controller.signal,
+            onLaneResult: recordLane,
+            onStatus: (status) => { void send({ type: 'status', text: status }) },
+          })
+          for await (const piece of fallback) {
+            if (gone) return
+            if (piece.type !== 'text') continue
+            text += piece.text
+            if (!(await send({ type: 'delta', text: piece.text }))) return await abandon()
+          }
         }
       } else if (agent) {
         // Agent reuses the free-mode engines as tools. The plan is untrusted,
@@ -962,7 +1048,7 @@ chat.post('/', async (c) => {
           loadBuildReferences(db, owner),
         ])
         const outcome = await agentComplete({
-          lanes: orderLanes(engineLanes, model),
+          lanes: orderLanes(modeLanes, model),
           question: userMessage.content,
           owner,
           model,
@@ -1006,7 +1092,7 @@ chat.post('/', async (c) => {
         }
       } else if (analyze) {
         const outcome = await analysisComplete({
-          lanes: orderLanes(engineLanes, model),
+          lanes: orderLanes(modeLanes, model),
           question: userMessage.content || 'Analyze this CSV.',
           dataset: analyzeDataset!,
           signal: controller.signal,
@@ -1051,7 +1137,7 @@ chat.post('/', async (c) => {
               onStatus: (status) => { void send({ type: 'status', text: status }) },
             })
           : await buildComplete({
-              lanes: orderLanes(engineLanes, model),
+              lanes: orderLanes(modeLanes, model),
               health: new Map(
                 (await healthRows(db, owner)).map((row) => [row.provider_id, { status: row.status, latencyMs: row.latency_ms }]),
               ),
@@ -1077,7 +1163,7 @@ chat.post('/', async (c) => {
         if (!(await send({ type: 'build', build: buildInfo }))) return await abandon()
       } else if (canvas) {
         const outcome = await canvasComplete({
-          lanes: orderLanes(engineLanes, model),
+          lanes: orderLanes(modeLanes, model),
           question: userMessage.content,
           signal: controller.signal,
           onStatus: (status) => { void send({ type: 'status', text: status }) },
@@ -1093,7 +1179,7 @@ chat.post('/', async (c) => {
         if (!(await send({ type: 'canvas', canvas: canvasInfo }))) return await abandon()
       } else if (research) {
         const outcome = await researchComplete({
-          lanes: orderLanes(engineLanes, model),
+          lanes: orderLanes(modeLanes, model),
           owner,
           model,
           question: userMessage.content,
@@ -1133,7 +1219,7 @@ chat.post('/', async (c) => {
           library = []
         }
         const outcome = await proofComplete({
-          lanes: orderLanes(engineLanes, model),
+          lanes: orderLanes(modeLanes, model),
           messages: prompt,
           question: userMessage.content,
           results,
@@ -1156,7 +1242,7 @@ chat.post('/', async (c) => {
         const pieces = usingApi
           ? complete(c.env, { model: model as ModelId, messages: prompt, signal: controller.signal })
           : blend
-            ? blendComplete(orderLanes(engineLanes, model), {
+            ? blendComplete(orderLanes(modeLanes, model), {
                 messages: prompt,
                 signal: controller.signal,
                 reasoning: wantReasoning,
@@ -1165,6 +1251,7 @@ chat.post('/', async (c) => {
                 frontier: selectedFrontier || Boolean(engineLanes.find((lane) => lane.frontier && lane.model === model)),
                 onTeam: (team) => send({ type: 'team', team }),
                 avoid,
+                health: laneHealth,
                 quality: laneQuality,
                 depth: chosenDepth,
                 onRoute: (route) => { laneRoute = route },
@@ -1177,7 +1264,7 @@ chat.post('/', async (c) => {
                 onStatus: (text) => send({ type: 'status', text }),
                 onLaneResult: recordLane,
               })
-            : publicComplete(orderLanes(engineLanes, model), { messages: prompt, signal: controller.signal, reasoning: wantReasoning, reasoningEffort, onLaneResult: recordLane })
+            : publicComplete(orderLanes(modeLanes, model), { messages: prompt, signal: controller.signal, reasoning: wantReasoning, reasoningEffort, onLaneResult: recordLane })
         for await (const piece of pieces) {
           if (gone) return
           if (piece.type === 'reasoning') {

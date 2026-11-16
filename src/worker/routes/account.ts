@@ -1,13 +1,15 @@
 import { Hono } from 'hono'
+import { deleteCookie } from 'hono/cookie'
 
 import { ANALYZE_DAILY_LIMIT, BUILD_DAILY_LIMIT, DAILY_MESSAGE_LIMIT, MODELS, RESEARCH_DAILY_LIMIT } from '../../shared/config'
 import type { Me, ModelInfo } from '../../shared/types'
 import { aiConfigured, availableModels } from '../ai'
-import { analyzeEnabledFor, authMode, buildEnabledFor, isAccountUser, isGuestUser, isOwner, privateJson, researchEnabledFor } from '../auth'
+import { ACCOUNT_COOKIE, GUEST_COOKIE, analyzeEnabledFor, authMode, buildEnabledFor, isAccountUser, isGuestUser, isOwner, privateJson, researchEnabledFor } from '../auth'
 import { guestUsageToday, now, utcDay, usageToday } from '../db'
 import type { AppContext } from '../env'
-import { isLocalBridgeRequest, laneStrength, pickPickerFamilies, pickerModelDescription, pickerModelName, publicLanes } from '../public-ai'
-import { healthRows } from '../provider-health'
+import { familyForLane, isLocalBridgeRequest, laneStrength, pickPickerFamilies, pickerModelDescription, pickerModelName, publicLanes } from '../public-ai'
+import { fallbackLabelFor, replacementLabels, replacementLane } from '../model-fallbacks'
+import { healthRows, type HealthRow } from '../provider-health'
 import { guestUsageKey } from '../rate-limit'
 import { searchConfigured } from '../search'
 import { seedStatements } from '../seed'
@@ -82,9 +84,11 @@ account.get('/models', async (c) => {
   // currently working lane — healthy before merely strong — so the picker stays
   // short and the site chooses the variant instead of making people compare
   // provider suffixes.
+  let health: HealthRow[] = []
   let statuses = new Map<string, string>()
   try {
-    statuses = new Map((await healthRows(c.get('db'), c.get('user').sub)).map((row) => [row.provider_id, row.status]))
+    health = await healthRows(c.get('db'), c.get('user').sub)
+    statuses = new Map(health.map((row) => [row.provider_id, row.status]))
   } catch {
     // A fresh deployment has no health rows yet; strength alone still works.
   }
@@ -121,7 +125,7 @@ account.get('/models', async (c) => {
           },
         ]
       : []
-  // Stride and Prism spent the most time degraded and add little over the
+  // Stride and Dent spent the most time degraded and add little over the
   // stronger families. Retire those two rows and give their space to the
   // no-key Claude and ChatGPT lanes the Buffy page uses. The Step and GLM names
   // are kept for older lane aliases of the same models.
@@ -135,16 +139,39 @@ account.get('/models', async (c) => {
       .replace(/\s+(?:Preview|Flash)\b/gi, '')
       .replace(/\s+/g, ' ')
       .trim()
+  // DeepSeek V4.1 Flash is the product's "Dent" row. Keep the upstream id for
+  // routing and health, but do not leak the provider name into the picker.
+  const pickerNameFor = (lane: { model: string; label: string }) =>
+    /deepseek-(?:flash|v4\.1)/i.test(lane.model) ? 'Dent' : cleanPickerName(lane.label)
   const frontierDescriptions: Record<string, string> = {
     'stepfun-ai/step-5-preview': 'Frontier reasoning for long, hard tasks.',
-    'deepseek-ai/deepseek-v4.1-flash': 'Frontier harness: plans, drafts five ways, reviews and repairs.',
+    'deepseek-ai/deepseek-v4.1-flash': 'Strong free coder; behind Opus 5.5 on long-horizon agent work.',
+    'deepseek-flash': 'Strong free coder; behind Opus 5.5 on long-horizon agent work.',
     'moonshotai/kimi-k3': 'Frontier reasoning, coding and agentic work.',
     'inclusionai/ling-3.2-flash:free': 'Long-context multimodal reasoning and documents.',
     'baidu/ernie-5.5-flash-preview:free': 'Strong tool use and browsing for agent work.',
     'particle-ai/particle-1:free': 'Token-efficient coding and page edits.',
   }
+  const replacement = replacementLane(lanes)
+  const replacementNames = replacementLabels(lanes)
+  const replacementFallback = replacement ? fallbackLabelFor(replacement.model, lanes, health) : undefined
+  const replacementBackups = replacementNames.filter((name) => !replacement || !replacement.label.includes(name))
   const items: ModelInfo[] = [
     ...buffyRows,
+    ...(replacement
+      ? [
+          {
+            id: replacement.model,
+            name: cleanPickerName(replacement.label),
+            description: `Replaces ERNIE and Particle-1.${replacementBackups.length ? ` Automatic backups: ${replacementBackups.join(', ')}.` : ''}${replacementFallback ? ` Temporarily using ${replacementFallback}.` : ''}`,
+            available: true,
+            family: familyForLane(replacement),
+            billing: replacement.billing ?? 'free',
+            strength: laneStrength(replacement.model, replacement.url),
+            ...(replacementFallback ? { fallback: replacementFallback } : {}),
+          },
+        ]
+      : []),
     {
       id: 'claude-haiku-5-5',
       name: 'Claude',
@@ -168,7 +195,7 @@ account.get('/models', async (c) => {
           {
             id: 'gemini-web',
             name: 'Gemini',
-            description: 'Free Gemini, no key or setup.',
+            description: 'Free Gemini 4, no key or setup.',
             available: true,
             family: 'Gemini',
             billing: 'free' as const,
@@ -187,24 +214,88 @@ account.get('/models', async (c) => {
     )
       // Retired lanes are removed before the shortlist is built, so the pinned
       // DeepSeek row cannot displace a stronger free family only to be filtered.
-      .filter(({ family }) => !retiredFamilies.has(family))
+      .filter(
+        ({ family, lane }) =>
+          !retiredFamilies.has(family) &&
+          family !== 'ERNIE' &&
+          family !== 'Particle' &&
+          (!replacement || family !== familyForLane(replacement)) &&
+          lane.model !== replacement?.model,
+      )
       .map(({ family, lane }, index) => {
         // The two free frontier lanes are new enough that a borrowed alias
         // hides what they are. Show their real names and descriptions.
-        const actual = /ernie-5\.5|particle-1|ling-3\.2|step-5|kimi-k3|deepseek-v4\.1-flash/i.test(lane.model)
+        const actual = /ernie-5\.5|particle-1|ling-3\.2|step-5|kimi-k3|deepseek-(?:flash|v4\.1-flash)/i.test(lane.model)
+        const fallback = fallbackLabelFor(lane.model, lanes, health)
         return {
           id: lane.model,
-          name: actual ? cleanPickerName(lane.label) : pickerModelName(index),
-          description: actual ? frontierDescriptions[lane.model] ?? lane.description : pickerModelDescription(index),
+          name: actual ? pickerNameFor(lane) : pickerModelName(index),
+          description: actual
+            ? `${frontierDescriptions[lane.model] ?? lane.description}${fallback ? ` Temporarily using ${fallback}.` : ''}`
+            : pickerModelDescription(index),
           available: true,
           family,
           strength: laneStrength(lane.model, lane.url),
           ...(lane.billing ? { billing: lane.billing } : {}),
+          ...(fallback ? { fallback } : {}),
         }
       }),
   ]
   c.header('Cache-Control', 'private, no-store')
   return c.json({ items })
+})
+
+account.delete('/account', async (c) => {
+  const db = c.get('db')
+  const user = c.get('user')
+  const owner = user.sub
+  const accountId = isAccountUser(user) ? user.sub.slice('account:'.length) : null
+  const statements = [
+    db.prepare(`DELETE FROM message_reasoning WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM message_sources WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM message_feedback WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM message_team WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM message_lane_routes WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM message_proof WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM message_research WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM message_analysis WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM message_build WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM message_canvas WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM message_agent WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM canvas_reviews WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM pinned_artifacts WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM build_embeds WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM message_attachments WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM proof_runs WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM research_runs WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM proof_library WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM user_settings WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM provider_health WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM browser_session_slots WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM room_messages WHERE author_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM humanizer_runs WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM conversation_shares WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM conversation_summaries WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM project_conversations WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM project_settings WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM projects WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM messages WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM conversations WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM users WHERE owner_sub = ?`).bind(owner),
+    ...(accountId
+      ? [
+          db.prepare(`DELETE FROM auth_sessions WHERE user_id = ?`).bind(accountId),
+          db.prepare(`DELETE FROM auth_users WHERE id = ?`).bind(accountId),
+        ]
+      : []),
+    ...(isGuestUser(user)
+      ? [db.prepare(`DELETE FROM guest_daily_usage WHERE ip_hash = ?`).bind(await guestUsageKey(c.req.raw))]
+      : []),
+  ]
+  await db.batch(statements)
+  deleteCookie(c, ACCOUNT_COOKIE, { path: '/' })
+  deleteCookie(c, GUEST_COOKIE, { path: '/' })
+  return privateJson(c, { ok: true })
 })
 
 account.delete('/account/conversations', async (c) => {

@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { Menu as MenuIcon, Bot, Eye, FileText, Globe2, Library as LibraryIcon, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PenLine, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, Users, X } from 'lucide-react'
+import { Menu as MenuIcon, Bot, Code2, Eye, FileText, Globe2, Library as LibraryIcon, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PenLine, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, Users, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 
@@ -74,6 +74,16 @@ export function Shell() {
             }
           >
             <Monitor className="size-4" />
+          </NavLink>
+          <NavLink
+            to="/buffy/code"
+            aria-label="Buffy Code"
+            title="Buffy Code"
+            className={({ isActive }) =>
+              cx('mt-2 grid size-9 place-items-center rounded-tile transition-colors', isActive ? 'bg-surface text-fg shadow-card' : 'text-muted hover:bg-surface hover:text-fg')
+            }
+          >
+            <Code2 className="size-4" />
           </NavLink>
         </aside>
       ) : (
@@ -185,6 +195,15 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
         >
           <Bot className="size-4" />
           Buffy
+        </NavLink>
+        <NavLink
+          to="/buffy/code"
+          className={({ isActive }) =>
+            cx('relative flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
+          }
+        >
+          <Code2 className="size-4" />
+          Buffy Code
         </NavLink>
         <NavLink
           to="/humanizer"

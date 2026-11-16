@@ -135,10 +135,18 @@ export function Chat() {
   const [filePickerRequest, setFilePickerRequest] = useState(0)
   const [composerFocusRequest, setComposerFocusRequest] = useState(0)
   const [newModel, setNewModel] = useState(() => localStorage.getItem(MODEL_KEY) ?? DEFAULT_MODEL)
+  // A just-picked model must win over the conversation row until the
+  // set-model mutation refreshes it. Without this, selecting Gemini in an
+  // existing chat could still send the previous model while the pill already
+  // showed Gemini.
+  const [modelOverride, setModelOverride] = useState<string | null>(null)
   const [modelPreset, setModelPreset] = useState<ModelChoice>(() => {
     const saved = localStorage.getItem(MODEL_PRESET_KEY)
     return saved === 'auto' || saved === 'fast' || saved === 'best' || saved === 'manual' ? saved : 'manual'
   })
+  // Switching conversations abandons the local picker override; the stored
+  // conversation model becomes the source of truth again.
+  useEffect(() => setModelOverride(null), [id])
   // A new chat starts in plain Chat only. Modes are opt-in, and a mode chosen
   // in one conversation should not silently carry into the next new chat.
   const [proof, setProof] = useState(() => Boolean(id) && localStorage.getItem('proof') === 'on')
@@ -242,22 +250,33 @@ export function Chat() {
     ? usableModels.filter((candidate) => {
         const lanes = health.items.filter((item) => item.model === candidate.id)
         if (!lanes.length) return health.mode !== 'api' || !health.items[0] || health.items[0].status !== 'down'
-        return lanes.some((lane) => lane.status !== 'down' && lane.lastErrorCode !== 'invalid_key' && lane.lastErrorCode !== 'unavailable')
+        return lanes.some(
+          (lane) =>
+            lane.status !== 'down' &&
+            lane.lastErrorCode !== 'invalid_key' &&
+            lane.lastErrorCode !== 'unavailable' &&
+            lane.lastErrorCode !== 'empty' &&
+            lane.lastErrorCode !== 'quota',
+        )
       })
     : availableModels
-  const presetModels = healthyModels.length ? healthyModels : usableModels
+  // Health is authoritative for anything the composer can send. `/api/models`
+  // still describes the catalogue, so a temporarily busy model stays usable;
+  // a quota-exhausted or dead one does not.
+  const selectableModels = healthyModels.length ? healthyModels : usableModels
+  const presetModels = selectableModels
   // A fresh local install starts on the free Buffy lane when the bridge is
   // advertised. The full agent stays one click away for anyone with credits.
   // In a hosted deployment there is no bridge, so never fall through to a
   // paid row: the no-credit lanes must be the default.
-  const freeModels = usableModels.filter((model) => !('billing' in model) || model.billing !== 'paid')
+  const freeModels = selectableModels.filter((model) => !('billing' in model) || model.billing !== 'paid')
   const fallbackModel =
-    usableModels.find((model) => model.id === 'buffy-lite') ??
-    usableModels.find((model) => model.id === 'buffy') ??
+    selectableModels.find((model) => model.id === 'buffy-lite') ??
+    selectableModels.find((model) => model.id === 'buffy') ??
     freeModels[0] ??
-    usableModels[Math.floor((usableModels.length - 1) / 2)] ??
-    usableModels[0]
-  const selectedModel = usableModels.some((m) => m.id === newModel) ? newModel : fallbackModel?.id ?? DEFAULT_MODEL
+    selectableModels[Math.floor((selectableModels.length - 1) / 2)] ??
+    selectableModels[0]
+  const selectedModel = selectableModels.some((m) => m.id === newModel) ? newModel : fallbackModel?.id ?? DEFAULT_MODEL
   const mine = turn !== null && (turn.conversationId === (id ?? null) || (id === undefined && turn.conversationId === owned.current))
   const busy = mine && turn.status !== 'error'
   const mode = me?.capabilities.mode
@@ -298,7 +317,11 @@ export function Chat() {
                   ? 'Deep'
                   : 'Chat'
   const presetModel = resolvePresetModel(modelPreset, strategy, presetModels)
-  const model = presetModel ?? (conversation?.model && usableModels.some((m) => m.id === conversation.model) ? conversation.model : selectedModel)
+  const conversationModel =
+    conversation?.model && selectableModels.some((m) => m.id === conversation.model) ? conversation.model : null
+  const model =
+    presetModel ??
+    (modelOverride && selectableModels.some((m) => m.id === modelOverride) ? modelOverride : conversationModel ?? selectedModel)
   // Fast is the plain chat: hide exposed reasoning, including older replies,
   // until an advanced mode is selected. The model can still reason internally.
   const showReasoning = strategy !== 'fast'
@@ -648,11 +671,10 @@ export function Chat() {
   const changeModel = (next: string) => {
     setModelPreset('manual')
     localStorage.setItem(MODEL_PRESET_KEY, 'manual')
+    setModelOverride(next)
+    setNewModel(next)
+    localStorage.setItem(MODEL_KEY, next)
     if (conversation) setConversationModel.mutate({ id: conversation.id, model: next })
-    else {
-      setNewModel(next)
-      localStorage.setItem(MODEL_KEY, next)
-    }
   }
 
   const changePreset = (next: ModelPreset) => {

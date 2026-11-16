@@ -76,12 +76,12 @@ export const MODELS = [
   { id: 'gpt-6.1-sol', name: 'Quill', description: 'Broad knowledge for research and drafts.' },
   { id: 'gemini-4-argon', name: 'Stride', description: 'A balanced all-rounder for longer documents.' },
   { id: 'kimi-k3', name: 'Ink', description: 'Long context for large documents and deep threads.' },
-  { id: 'deepseek-v4.1-flash', name: 'Prism', description: 'Fast answers for quick, everyday questions.' },
+  { id: 'deepseek-v4.1-flash', name: 'Dent', description: 'Strong free coder; behind Opus 5.5 on long-horizon agent work.' },
 ] as const
 export type ModelId = (typeof MODELS)[number]['id']
 export const DEFAULT_MODEL: ModelId = 'gemini-4-argon'
 /** The five short names shown in the model picker, in order. */
-export const PICKER_MODEL_NAMES = ['Sable', 'Quill', 'Stride', 'Ink', 'Prism'] as const
+export const PICKER_MODEL_NAMES = ['Sable', 'Quill', 'Stride', 'Ink', 'Dent'] as const
 
 /** One sentence under each picker row, in the same order. */
 export const PICKER_MODEL_DESCRIPTIONS = [
@@ -89,7 +89,7 @@ export const PICKER_MODEL_DESCRIPTIONS = [
   'Broad knowledge for research and drafts.',
   'A balanced all-rounder for longer documents.',
   'Long context for large documents and deep threads.',
-  'Fast answers for quick, everyday questions.',
+  'Strong free coder; behind Opus 5.5 on long-horizon agent work.',
 ] as const
 
 /** The picker is a short shortlist, not the whole fallback chain. */
@@ -99,13 +99,13 @@ export const PICKER_MODEL_LIMIT = 6
 export const STOPPED_REPLY = 'Reply stopped before any text was returned.'
 
 /** Per-user limits. Messages are counted per UTC day. */
-export const DAILY_MESSAGE_LIMIT = 50
+export const DAILY_MESSAGE_LIMIT = 200
 /** Research reports are more expensive than a chat reply, so they have their own cap. */
-export const RESEARCH_DAILY_LIMIT = 3
-/** Analyses get a separate, small cap because each one can load a data runner. */
-export const ANALYZE_DAILY_LIMIT = 3
+export const RESEARCH_DAILY_LIMIT = 10
+/** Analyses get a separate cap because each one can load a data runner. */
+export const ANALYZE_DAILY_LIMIT = 10
 /** Builds are also a separate free-mode allowance. */
-export const BUILD_DAILY_LIMIT = 3
+export const BUILD_DAILY_LIMIT = 10
 /** A generated page is stored beside the reply, so keep it bounded. */
 export const MAX_BUILD_HTML_CHARS = 80_000
 /** Agent runs are bounded: at most five tool steps and one final answer. */
@@ -145,7 +145,7 @@ export const HUMANIZER_MAX_CHARS = 8_000
 export const HUMANIZER_VOICE_MIN_CHARS = 80
 export const HUMANIZER_VOICE_MAX_CHARS = 1_500
 /** A rewrite is cheaper than a chat turn, but still has a free daily cap. */
-export const HUMANIZER_DAILY_LIMIT = 20
+export const HUMANIZER_DAILY_LIMIT = 100
 
 /** A Chat-only reply may need to hand the request to a task mode. */
 export function toolModeNudge(label: string): string {

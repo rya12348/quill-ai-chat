@@ -431,6 +431,14 @@ export const useTraffic = () =>
     refetchOnWindowFocus: true,
   })
 
+export function useDeleteAccount() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () => api('/account', { method: 'DELETE' }),
+    onSuccess: () => client.clear(),
+  })
+}
+
 export function useDeleteAllConversations() {
   const client = useQueryClient()
   return useMutation({

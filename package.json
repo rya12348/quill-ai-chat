@@ -8,8 +8,16 @@
     "buffy": "node scripts/buffy-bridge.mjs",
     "local-bridge": "node scripts/local-bridge.mjs",
     "build": "vite build && node scripts/postbuild.mjs",
+    "deploy:pages": "node scripts/check-pages-config.mjs && npm run build && node scripts/deploy-pages.mjs",
+    "db:backup": "node scripts/db-backup.mjs",
+    "db:restore": "node scripts/db-restore.mjs",
+    "db:prune": "node scripts/prune-data.mjs",
+    "pages:secrets": "node scripts/sync-pages-secrets.mjs",
+    "load:test": "node scripts/load-test.mjs",
     "preview": "vite preview",
     "retro": "node scripts/retro-host.mjs",
+    "coding-lab": "node scripts/coding-lab.test.mjs",
+    "bench:repo": "tsx scripts/buffy-repo-benchmark.ts",
     "test": "tsx --test scripts/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -35,7 +43,8 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "tesseract.js": "^7.0.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^4.6.7"
   },
   "overrides": {
     "katex": "$katex"

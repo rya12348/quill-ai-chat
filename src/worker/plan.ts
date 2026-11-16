@@ -174,29 +174,39 @@ export async function planAndRetrieve(input: {
   }
 
   try {
-    await say('Planning a search…')
-    const planned = await askPlanner(
-      {
-        env: input.env,
-        model: input.model,
-        usingApi: input.usingApi,
-        lanes: input.lanes,
-        messages: [
-          { role: 'system', content: PLANNER },
-          { role: 'user', content: input.question.slice(0, 2_000) },
-        ],
-        signal,
-        onLaneResult: input.onLaneResult,
-      },
-      MAX_QUERIES,
-    )
+    // A short current-facts question already is a usable search query. Running
+    // a separate 6-second planning model before searching made a one-line
+    // lookup feel like a research project. Reserve planning for long,
+    // multi-part questions where it can actually improve the query.
+    const needsPlan = input.question.trim().length > 160
+    const planned = needsPlan
+      ? await (async () => {
+          await say('Planning a search…')
+          return askPlanner(
+            {
+              env: input.env,
+              model: input.model,
+              usingApi: input.usingApi,
+              lanes: input.lanes,
+              messages: [
+                { role: 'system', content: PLANNER },
+                { role: 'user', content: input.question.slice(0, 2_000) },
+              ],
+              signal,
+              onLaneResult: input.onLaneResult,
+            },
+            MAX_QUERIES,
+          )
+        })()
+      : []
     // A planner that fails or answers in prose still gets one honest query.
     const first = planned.length ? planned : [input.question.replace(/\s+/g, ' ').trim().slice(0, 120)]
     await say(`Plan: ${first.join(' · ')}`)
     await runRound(first)
 
-    // One refinement round, only when the first found little and time remains.
-    if (!signal.aborted && succeeded > 0 && results.length < 3 && attempts < MAX_SEARCHES) {
+    // One refinement round, only when planning was actually used and the first
+    // round found little.
+    if (planned.length && !signal.aborted && succeeded > 0 && results.length < 3 && attempts < MAX_SEARCHES) {
       await say('Refining the search…')
       const evidence =
         results

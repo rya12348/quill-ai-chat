@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Code2, ExternalLink, Globe2, Loader2, Monitor, Play, Plus, RefreshCw, Search, Square, Timer, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bot, Code2, ExternalLink, Globe2, Loader2, Monitor, Play, Plus, RefreshCw, Search, Square, Timer, X } from 'lucide-react'
 import { startTransition, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
@@ -96,7 +96,9 @@ const MAX_ACTIONS = MAX_STEPS * MAX_ROUNDS
 // lanes long before this; ordinary commands stay on the direct path.
 // A ceiling, not a delay: fast plans still return in seconds, while a hard
 // step the worker escalates to a strong reasoner is allowed to finish.
-const PLAN_TIMEOUT_MS = 125_000
+// Covers the first normal pass, the automatic normal retry, and the stronger
+// recovery pass without aborting the recovery while it is still healthy.
+const PLAN_TIMEOUT_MS = 190_000
 // The browser keeps its plan, notes and scratchpad on the device so closing a
 // popup or reloading the page does not erase what the agent already learned.
 const BROWSER_MEMORY_KEY = 'ink.browser.memory.v1'
@@ -188,7 +190,7 @@ function prefersPageScript(task: string): boolean {
   const repeated = /\b(?:every|all|each|rows?|table|pages?|items?|questions?|fields?|entries|list)\b/i.test(task)
   const work = /\b(?:answer|solve|complete|watch|finish|do|fill|submit|extract|collect|read|list|copy|download|open|compare|summari[sz]e)\b/i.test(task)
   return (
-    (/\b(?:videos?|quiz(?:zes)?|questions?|worksheets?|lessons?|flashcards?)\b/i.test(task) &&
+    (/\b(?:videos?|quiz(?:zes)?|questions?|worksheets?|lessons?|flashcards?|courses?|modules?|training)\b/i.test(task) &&
       /\b(?:answer|solve|complete|watch|finish|do|every|all|each|questions?)\b/i.test(task)) ||
     (repeated && work)
   )
@@ -475,6 +477,48 @@ const SIMULATION_CLEANUP = [
   "})();",
 ].join('\n')
 
+// A guaranteed cosmetic result for a “mock account / unlock everything”
+// request on any site. The free coder can take 40+ seconds or return no code
+// at all; this keeps the page-level simulation instant, labeled and reversible.
+const MOCK_ACCOUNT_SIMULATION = [
+  "(() => {",
+  "  const OLD = document.getElementById('ink-site-mock'); if (OLD) OLD.remove();",
+  "  const style = document.createElement('style'); style.id = 'ink-site-mock-style';",
+  "  style.textContent = '[class*=\"lock\" i], [class*=\"locked\" i], [aria-label*=\"lock\" i], [title*=\"lock\" i] { display: none !important; } [class*=\"blook\" i], [class*=\"card\" i] { filter: none !important; opacity: 1 !important; }'; ",
+  "  document.head.appendChild(style);",
+  "  const host = location.hostname.replace(/^www\\./i, '');",
+  "  const site = (document.title.split(/[|–—:]/)[0] || host).trim().slice(0, 40);",
+  "  const heading = site + ' Collection';",
+  "  const username = 'mock_' + (host.split('.')[0] || 'student').replace(/[^a-z0-9]/g, '') + '_' + String(Math.floor(1000 + Math.random() * 9000));",
+  "  const names = ['Starter','Bronze','Silver','Gold','Platinum','Diamond','Ruby','Emerald','Sapphire','Obsidian','Cosmic','Legendary','Mythic','Rare','Epic','Elite','Prime','Nova','Lunar','Solar','Frost','Ember','Ocean','Storm'];",
+  "  const colors = names.map((_, i) => 'hsl(' + Math.round((i * 137.5) % 360) + ' 70% 55%)');",
+  "  const wrap = document.createElement('div'); wrap.id = 'ink-site-mock';",
+  "  wrap.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483646;background:#eef2ff;display:block;overflow:auto;padding:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;';",
+  "  const card = document.createElement('div');",
+  "  card.style.cssText = 'width:100%;min-height:100vh;overflow:auto;background:#f8fafc;color:#0f172a;border-radius:0;padding:24px 32px;box-shadow:none;';",
+  "  card.innerHTML = '<div style=\"display:flex;justify-content:space-between;align-items:center;gap:12px\"><div><div style=\"font-size:11px;font-weight:800;letter-spacing:.14em;color:#64748b\">MOCK ACCOUNT</div><h2 style=\"margin:4px 0 0;font-size:28px\">' + heading + '</h2></div><span style=\"background:#dcfce7;color:#166534;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:800\">ALL UNLOCKED</span></div><p style=\"margin:12px 0 18px;color:#475569;font-size:14px\">A visual mock only. No real ' + host + ' account or data was changed.</p><div id=\"ink-site-grid\" style=\"display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px\"></div><button type=\"button\" style=\"margin-top:18px;border:0;border-radius:10px;background:#0f172a;color:white;padding:10px 14px;font-weight:700;cursor:pointer\">Exit mock</button>'; ",
+  "  const nav = document.createElement('div');",
+  "  nav.style.cssText = 'display:flex;align-items:center;gap:16px;padding:0 0 18px;margin-bottom:18px;border-bottom:1px solid #cbd5e1;';",
+  "  nav.innerHTML = '<strong style=\"font-size:20px\">' + site + '</strong><span style=\"color:#475569\">Dashboard</span><span style=\"margin-left:auto;font-weight:700\">' + username + '</span>';",
+  "  card.prepend(nav);",
+  "  document.documentElement.style.overflow = 'hidden'; document.body.style.overflow = 'hidden';",
+  "  const profile = document.createElement('div');",
+  "  profile.style.cssText = 'display:flex;align-items:center;gap:10px;margin:14px 0 4px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:12px;background:white;';",
+  "  profile.innerHTML = '<div style=\"width:36px;height:36px;border-radius:999px;background:#0f172a;color:white;display:grid;place-items:center;font-weight:800\">MS</div><div><strong>' + username + '</strong><div style=\"font-size:11px;color:#64748b\">Mock account</div></div>';",
+  "  card.querySelector('h2').insertAdjacentElement('afterend', profile);",
+  "  const grid = card.querySelector('#ink-site-grid');",
+  "  names.forEach((name, i) => { const tile = document.createElement('div'); tile.style.cssText = 'border:1px solid #e2e8f0;border-radius:14px;padding:10px;background:white;text-align:center;'; tile.innerHTML = '<div style=\"height:52px;border-radius:10px;background:' + colors[i] + ';display:grid;place-items:center;font-size:24px\">★</div><div style=\"margin-top:7px;font-size:12px;font-weight:700\">' + name + '</div><div style=\"font-size:10px;color:#16a34a;font-weight:700\">UNLOCKED</div>'; grid.appendChild(tile); });",
+  "  wrap.appendChild(card); document.body.appendChild(wrap);",
+  "  const keep = () => { if (!document.getElementById('ink-site-mock')) document.body.appendChild(wrap); for (const el of document.querySelectorAll('a,button')) { if (/^(log in|sign up)$/i.test((el.textContent || '').trim())) el.style.display = 'none'; } };",
+  "  keep();",
+  "  const observer = new MutationObserver(keep);",
+  "  observer.observe(document.documentElement, { childList: true, subtree: true });",
+  "  setTimeout(() => observer.disconnect(), 60000);",
+  "  card.querySelector('button').addEventListener('click', () => { observer.disconnect(); document.documentElement.style.overflow = ''; document.body.style.overflow = ''; wrap.remove(); });",
+  "  return { mockAccount: true, username, site: host, unlocked: names.length, panel: true };",
+  "})();",
+].join('\n')
+
 export function Browser() {
   const [searchParams] = useSearchParams()
   const [status, setStatus] = useState<BrowserStatus>('checking')
@@ -505,10 +549,10 @@ export function Browser() {
   const [screenNonce, setScreenNonce] = useState(0)
   const [liveNonce, setLiveNonce] = useState(0)
   const [liveFrame, setLiveFrame] = useState<{ width: number; height: number } | null>(null)
-  // Steel's live viewer streams the real browser, so clicks and typing go
-  // straight to the remote page instead of waiting for a screenshot round
-  // trip. The snapshot view stays available as a fallback for filters and
-  // providers that cannot be embedded.
+  // Prefer the provider's live player when the session exposes one. The old
+  // screenshot fallback refreshed every 1.2s, which made Chrome look like it
+  // ran at 1 FPS. The snapshot stays underneath as a loading frame and the
+  // header toggle can still switch back if a provider player fails.
   const [showLive, setShowLive] = useState(true)
   const [liveReady, setLiveReady] = useState(false)
   const [tabs, setTabs] = useState<BrowserTab[]>([])
@@ -599,6 +643,9 @@ export function Browser() {
   }, [])
 
   useEffect(() => {
+    // Start on the provider's live player when there is one. The old snapshot
+    // default polled a fresh screenshot every 1.2s, which looked like 1 FPS.
+    // The header toggle still switches to the snapshot if a player fails.
     setShowLive(true)
     setLiveReady(false)
     setTabs([])
@@ -1236,6 +1283,20 @@ export function Browser() {
     if (!text || !session || busy) return
     event.preventDefault()
     queueText(text)
+  }
+
+  const scrollScreen = async (event: React.WheelEvent<HTMLElement>) => {
+    if (!session || busy) return
+    event.preventDefault()
+    try {
+      await api('/browser/act', {
+        method: 'POST',
+        json: { action: { type: 'scroll', x: event.deltaX, y: event.deltaY }, read: false },
+      })
+      setScreenNonce((value) => value + 1)
+    } catch (cause) {
+      if (!handleSessionLoss(cause)) setError(messageFor(cause))
+    }
   }
 
   const clickScreen = async (event: React.MouseEvent<HTMLElement>) => {
@@ -2549,6 +2610,23 @@ export function Browser() {
     // clause needs a real planning decision.
     let actionState = leadState ?? view
     let nativeSteps = 0
+    // A navigation can return before the destination has finished exposing its
+    // controls. Refresh once before giving up on native actions; otherwise a
+    // simple multi-field form falls through to the slow planner even though the
+    // destination is already open.
+    if (actionState && !actionState.snapshot.elements.length) {
+      try {
+        const refreshed = await api<BrowserViewState>('/browser/state', {
+          method: 'POST',
+          signal: controller.signal,
+        })
+        actionState = refreshed
+        leadState = refreshed
+      } catch (refreshCause) {
+        if (controller.signal.aborted) throw refreshCause
+        if (isSessionLoss(refreshCause)) throw refreshCause
+      }
+    }
     for (let directSteps = 0; directSteps < 6 && actionState; directSteps += 1) {
       const nextDirect = directActionLead(planningTask, actionState.snapshot.elements)
       if (!nextDirect) break
@@ -3021,7 +3099,12 @@ export function Browser() {
     // instead of asking the action planner to squeeze JavaScript into JSON.
     const editingTask = isPageEditingTask(instruction)
     const simulationTask = isSimulationTask(instruction)
+    // Course lessons, quizzes, forms and repeated row/item work are exactly
+    // what a page program is for. Send these straight to the coder instead of
+    // spending one planner round trip per click.
+    const codeFirstTask = !editingTask && !simulationTask && prefersPageScript(planningTask)
     let simulationHtml = ''
+    let ranMockSimulation = false
     const failedActions = new Map<string, number>()
     const stalledActions = new Map<string, number>()
     try {
@@ -3110,33 +3193,66 @@ export function Browser() {
           history: history.slice(-10),
         }
         let planned: BrowserActResponse | null = null
+        // A plain page edit runs before planning: it is a few lines of DOM
+        // code, so waiting on a model only makes a fast native edit slow.
+        const directEdit = editingTask ? directPageEdit(instruction, current.snapshot.elements) : null
+        if (directEdit) {
+          planned = { action: directEdit, say: 'Edit the page', plan: ['Edit the page directly.'], lane: 'Page edit' }
+        }
+        // A cosmetic simulation is a page-code job, not an action-planning
+        // job. The action planner often cannot express “make it look like …”
+        // as valid JSON and burns its whole window; go straight to the coder
+        // that already knows how to inspect the markup and rewrite the DOM.
+        if (simulationTask && !planned && step === 0) {
+          planned = {
+            action: { type: 'inspect' },
+            say: instruction,
+            plan: ['Inspect the real page markup.', 'Apply the requested visual state in code.', 'Verify the visible result.'],
+            lane: 'Simulation',
+          }
+        }
+        if (codeFirstTask && !planned && step === 0) {
+          planned = {
+            action: { type: 'inspect' },
+            say: instruction,
+            plan: ['Read the page once.', 'Write one program for the whole repeated job.', 'Run it and verify the result.'],
+            lane: 'Code-first',
+          }
+        }
         try {
-          planned = await planWithRetry(planPayload, controller.signal)
+          planned ??= await planWithRetry(planPayload, controller.signal)
         } catch (cause) {
           if (controller.signal.aborted || isSessionLoss(cause) || !isPlanTimeout(cause)) throw cause
-          append({
-            role: 'stet',
-            text: 'The browser AI missed its first response window. Retrying once with a full planning pass; the page is still open.',
-          })
-          setPhase('Retrying with a full planning pass…')
+          // A first planner window can expire while a free lane is still
+          // warming up. Pressing Run used to be what rescued it because Run
+          // starts with the normal fast planner again, while the old automatic
+          // retry jumped straight to the slow "recovering" reasoner. Repeat
+          // the normal pass here, with a short pause, so the first Run behaves
+          // like the successful second click. Only escalate to the strong
+          // recovery pass after that normal retry has also missed.
+          setPhase('Retrying automatically…')
+          await new Promise((resolve) => setTimeout(resolve, 800))
           try {
-            // Do not shorten the recovery pass. The old `fast` retry gave the
-            // model eight seconds, skipped the fallback lanes and produced a
-            // second timeout that ended the run. `recovering` instead keeps the
-            // full budget and tells the planner to change its approach.
-            planned = await planWithRetry({ ...planPayload, recovering: true }, controller.signal)
+            planned = await planWithRetry(planPayload, controller.signal)
           } catch (retryCause) {
-            if (controller.signal.aborted || isSessionLoss(retryCause)) throw retryCause
-            // Do not turn a slow planner into a dead chat. Keep the page, the
-            // task and the session; the person can press Run immediately.
-            append({
-              role: 'stet',
-              text: 'The browser AI is still taking too long to answer. The page and task are still open — press Run to try this step again.',
-            })
-            setPhase('')
-            setStepNumber(0)
-            reachedEnd = true
-            break
+            if (controller.signal.aborted || isSessionLoss(retryCause) || !isPlanTimeout(retryCause)) throw retryCause
+            setPhase('Trying the stronger planner…')
+            await new Promise((resolve) => setTimeout(resolve, 1_200))
+            try {
+              planned = await planWithRetry({ ...planPayload, recovering: true }, controller.signal)
+            } catch (finalCause) {
+              if (controller.signal.aborted || isSessionLoss(finalCause)) throw finalCause
+              // Do not turn a slow planner into a dead chat. Keep the page, the
+              // task and the session; the person can press Run immediately.
+              append({
+                role: 'stet',
+                text: 'The browser AI is still taking too long to answer. The page and task are still open — press Run to try this step again.',
+              })
+              setPhase('')
+              setStepNumber(0)
+              reachedEnd = true
+              break
+            }
           }
         }
         if (!planned) {
@@ -3344,11 +3460,11 @@ export function Browser() {
         }
         let runAction: BrowserAction = planned.action
         let runLabel = label
-        if (editingTask) {
+        if (editingTask || codeFirstTask) {
           // A plain edit that the page itself can express does not need a model
           // at all, so no provider can refuse it. More complex code and all
           // cosmetic simulations go to the dedicated coder below.
-          const direct = directPageEdit(instruction, current.snapshot.elements)
+          const direct = editingTask ? directPageEdit(instruction, current.snapshot.elements) : null
           if (direct) {
             runAction = direct
             runLabel = 'Edit the page'
@@ -3357,7 +3473,14 @@ export function Browser() {
               setScript(agentScript)
               saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
             }
-          } else if (simulationTask || planned.action.type === 'evaluate') {
+          } else if (simulationTask && /\baccount\b/i.test(instruction)) {
+            runAction = { type: 'evaluate', expression: MOCK_ACCOUNT_SIMULATION }
+            runLabel = 'Run page code'
+            agentScript = MOCK_ACCOUNT_SIMULATION
+            ranMockSimulation = true
+            setScript(agentScript)
+            saveBrowserMemory({ task: instruction, plan: agentPlan, notes: agentNotes, script: agentScript })
+          } else if (simulationTask || codeFirstTask || planned.action.type === 'evaluate') {
             setPhase(simulationTask ? 'Making it look right…' : 'Writing the code…')
             // A visual simulation needs the real markup: locked states live in
             // classes, overlays and counters that the element list does not
@@ -3533,7 +3656,7 @@ export function Browser() {
         setPhase('Checking the page…')
         const detail = stateDetail(next)
         const resultDetail = next.observation ? `${detail} — ${next.observation}` : detail
-        history.push({ action: label, result: resultDetail })
+        history.push({ action: runLabel, result: resultDetail })
         // Carry the question script's handled answers into the next plan. The
         // final report otherwise tends to repeat only the last visible answer
         // (for example “Q2: ?”) even though the script already solved it.
@@ -3553,7 +3676,17 @@ export function Browser() {
             // no structured answer list to carry forward.
           }
         }
-        append({ role: 'action', text: label, detail: `Step ${roundStep + 1} · thought ${formatDuration(planMs)} · acted ${formatDuration(actMs)} · ${resultDetail}` })
+        append({ role: 'action', text: runLabel, detail: `Step ${roundStep + 1} · thought ${formatDuration(planMs)} · acted ${formatDuration(actMs)} · ${resultDetail}` })
+        if (ranMockSimulation) {
+          const host = (() => { try { return new URL(next.url).hostname.replace(/^www\./i, '') } catch { return 'the site' } })()
+          const answer = `Prepared a visual mock on ${host}: a mock account collection showing everything unlocked. No real account or site data was changed.`
+          append({ role: 'stet', text: answer })
+          setAnswer(answer)
+          clearAgentMemory({ keepScript: true })
+          reachedEnd = true
+          setPhase('')
+          break
+        }
         // “Open this and tell me its title” is already complete when the click
         // lands. The snapshot title is the answer; do not send another planner
         // request just to read it back.
@@ -3712,7 +3845,7 @@ export function Browser() {
   ) : null
 
   return (
-    <main className="flex min-h-dvh flex-col bg-bg text-fg xl:h-dvh xl:overflow-hidden">
+    <main className="flex min-h-dvh flex-col bg-bg text-fg md:h-dvh md:overflow-hidden">
       <header className="sticky top-0 z-30 flex min-h-16 shrink-0 flex-wrap items-center gap-2 border-b border-line bg-bg px-3 py-1.5 md:h-16 md:flex-nowrap md:px-4 md:py-0">
         <Link to="/" className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-tile px-2 text-[13px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg" aria-label="Back to Ink">
           <ArrowLeft className="size-3.5" />
@@ -3751,9 +3884,21 @@ export function Browser() {
         </form>
         ) : null}
         {liveView ? <div className="min-w-0 flex-1" aria-hidden="true" /> : null}
+        <Link to="/browser/agent" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-tile border border-accent/30 bg-accent/5 px-2.5 text-[12.5px] font-medium text-accent transition-colors hover:bg-accent/10">
+          <Bot className="size-3.5" />
+          Agent
+        </Link>
         <span className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 text-[12px] font-medium ${status === 'ready' ? 'border-line bg-surface text-muted' : status === 'unconfigured' || status === 'quota' ? 'border-warning/30 bg-warning/10 text-warning' : 'border-line bg-surface text-faint'}`}>
           {status === 'ready' ? (session?.sessionId === 'local' ? 'Local Chrome' : 'Connected') : status === 'starting' || status === 'checking' ? 'Starting' : status === 'quota' ? 'No time left' : status === 'unconfigured' ? 'Unavailable' : 'Ready'}
         </span>
+        <button
+          type="button"
+          onClick={() => document.getElementById('browser-tasks')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+          aria-label="Open AI task panel"
+          className="inline-flex h-8 shrink-0 items-center rounded-tile border border-line bg-surface px-2.5 text-[12.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg md:hidden"
+        >
+          Tasks
+        </button>
         {remainingMinutes !== null ? (
           <span
             title="Time left in this browser session"
@@ -3775,7 +3920,7 @@ export function Browser() {
                 }}
                 aria-pressed={liveView}
                 title={liveView ? 'Use the fallback screenshot view' : 'Use the interactive live view'}
-                className="hidden h-8 shrink-0 items-center rounded-tile border border-line bg-surface px-2.5 text-[12.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg md:inline-flex"
+                className="inline-flex h-8 shrink-0 items-center rounded-tile border border-line bg-surface px-2.5 text-[12.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg"
               >
                 {liveView ? 'Snapshot' : 'Live view'}
               </button>
@@ -3811,8 +3956,8 @@ export function Browser() {
         ) : null}
       </header>
 
-      <div className="flex flex-1 flex-col lg:min-h-0 lg:flex-row">
-        <section ref={browserSectionRef} className="flex min-h-[320px] flex-1 flex-col bg-surface-2 p-2.5 md:p-3 lg:min-h-0" aria-label="Browser">
+      <div className="flex flex-1 flex-col md:min-h-0 md:flex-row">
+        <section ref={browserSectionRef} className="flex min-h-[320px] flex-1 flex-col bg-surface-2 p-2.5 md:min-h-0 md:p-3" aria-label="Browser">
           {session ? (
             <>
               <div className="mb-1.5 flex h-8 shrink-0 items-center gap-1 overflow-x-auto rounded-tile border border-line bg-surface px-1.5" aria-label="Browser tabs">
@@ -3963,6 +4108,17 @@ export function Browser() {
                     }}
                   />
                   {!liveReady ? (
+                    <button
+                      type="button"
+                      aria-label="Click or type in the browser"
+                      onClick={clickScreen}
+                      onKeyDown={typeOnScreen}
+                      onPaste={pasteOnScreen}
+                      onWheel={scrollScreen}
+                      className="absolute inset-0 z-20 cursor-crosshair bg-transparent focus:outline-none"
+                    />
+                  ) : null}
+                  {!liveReady ? (
                     <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center p-2">
                       <p className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] text-muted shadow-card">
                         <Loader2 className="size-4 animate-spin text-accent" />
@@ -3988,6 +4144,7 @@ export function Browser() {
                     onClick={(event) => void clickScreen(event)}
                     onKeyDown={typeOnScreen}
                     onPaste={pasteOnScreen}
+                    onWheel={(event) => void scrollScreen(event)}
                     className="absolute inset-0 z-10 cursor-crosshair bg-transparent focus:outline-none"
                   />
                   {markerLayer}
@@ -4150,7 +4307,7 @@ export function Browser() {
 
         <aside
           id="browser-tasks"
-          className="flex w-full shrink-0 flex-col border-t border-line bg-bg lg:min-h-0 lg:w-[340px] lg:border-l lg:border-t-0 xl:w-[360px] 2xl:w-[380px]"
+          className="flex w-full shrink-0 scroll-mt-20 flex-col overflow-y-auto border-t border-line bg-bg md:min-h-0 md:w-[320px] md:border-l md:border-t-0 xl:w-[350px] 2xl:w-[370px]"
           aria-label="Browser controls"
         >
           <div className="border-b border-line px-4 py-3">

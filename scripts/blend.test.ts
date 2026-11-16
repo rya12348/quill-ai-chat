@@ -1,7 +1,25 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { depthFor } from '../src/worker/blend'
+import { depthFor, isFastAnswerPrompt, isTrivialPrompt, trivialReply } from '../src/worker/blend'
+
+test('greetings never enter the planning or reasoning harness', () => {
+  for (const text of ['hi', 'hello!', 'hey there', 'thanks', 'goodbye', 'what’s up?']) {
+    assert.equal(isTrivialPrompt(text), true, text)
+  }
+  assert.equal(isTrivialPrompt('Why does my React effect run twice?'), false)
+  assert.match(trivialReply('hi'), /help/i)
+  assert.equal(trivialReply('thanks'), "You're welcome.")
+})
+
+test('only calculators and exact-format prompts skip reasoning on the quick path', () => {
+  assert.equal(isFastAnswerPrompt('What is 2+2? Reply with just the number.'), true)
+  assert.equal(isFastAnswerPrompt('17 × 23'), true)
+  assert.equal(isFastAnswerPrompt('Reply with exactly OK'), true)
+  assert.equal(isFastAnswerPrompt('Which is larger: 9.11 or 9.9?'), false)
+  assert.equal(isFastAnswerPrompt('A bat and a ball cost $1.10. The bat costs $1 more. How much is the ball?'), false)
+  assert.equal(isFastAnswerPrompt('Explain 2+2'), false)
+})
 
 test('short chat questions use one lane instead of drafts and a merge', () => {
   assert.equal(depthFor('hello', 3), 'quick')

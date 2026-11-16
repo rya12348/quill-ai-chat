@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildAgentReceipt, correctDecisionPlan, ensureArtifactPlan, fallbackAgentPlan, isAnalyzeIntent, isBuildRequest, isCanvasRequest, isProviderLimitText, isResearchIntent, isSmallTalk, isUsableAgentAnswer, isWritingRequest, needsCurrentFacts, normalizeAgentPlan, parseAgentPlan, parseAgentReview, proofAnswerIssue, shouldPlanWithModel } from '../src/shared/agent'
+import { buildAgentReceipt, correctDecisionPlan, ensureArtifactPlan, fallbackAgentPlan, isAnalyzeIntent, isBuildRequest, isCanvasRequest, isProviderLimitText, isResearchIntent, isSmallTalk, isUsableAgentAnswer, isWritingRequest, needsBuffyTools, needsCurrentFacts, normalizeAgentPlan, parseAgentPlan, parseAgentReview, proofAnswerIssue, shouldPlanWithModel } from '../src/shared/agent'
 import type { AgentStep } from '../src/shared/types'
 
 test('parses a fenced plan and always ends with an answer step', () => {
@@ -49,6 +49,48 @@ test('the fallback only adds a tool when the wording asks for one', () => {
   assert.deepEqual(fallbackAgentPlan('Research the latest pricing and cite sources').map((step) => step.tool), ['research', 'answer'])
   assert.deepEqual(fallbackAgentPlan('Make flashcards for the French Revolution').map((step) => step.tool), ['canvas', 'answer'])
   assert.deepEqual(fallbackAgentPlan('Verify this calculation and double-check the result').map((step) => step.tool), ['proof', 'answer'])
+})
+
+test('Buffy escalates only explicit tool work, not bare tool words', () => {
+  for (const ordinary of [
+    'search for a good pizza recipe',
+    'test my knowledge of French history',
+    'explain this code',
+    'what is a unit test?',
+    'write code to reverse a string',
+    'how do I search a binary tree?',
+    'what is a repository?',
+    'search engines are useful',
+    'code review best practices',
+    'build a test plan',
+  ]) {
+    assert.equal(needsBuffyTools(ordinary), false, ordinary)
+  }
+
+  for (const toolWork of [
+    'read the file src/app.ts',
+    'run the tests',
+    'inspect src/worker/chat.ts',
+    'git status',
+    'open the terminal',
+    'fix the bug in my code',
+    'fix the failing test',
+    'run the failing tests',
+    'read the source file',
+    'test this code',
+    'search the web for the React docs',
+    'search my repo for TODO',
+    'npm test',
+    'run npm test',
+    'read the docs',
+    'execute this code',
+    'review my code',
+    'install the dependencies',
+    'deploy the app',
+    'read package.json',
+  ]) {
+    assert.equal(needsBuffyTools(toolWork), true, toolWork)
+  }
 })
 
 test('parses a strict reviewer verdict and ignores malformed reviews', () => {
