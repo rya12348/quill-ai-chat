@@ -84,9 +84,22 @@ async function requestJson(url, init) {
 }
 
 async function smoke(url) {
-  const health = await requestJson(`${url}/api/health`)
-  if (health.response.status !== 200 || health.body?.ok !== true) {
-    throw new Error(`health check failed (${health.response.status}): ${health.text.slice(0, 200)}`)
+  // Pages can answer from the previous deployment for a few seconds after the
+  // upload. Retry the first health request instead of failing a good deploy.
+  let health
+  let healthError
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      health = await requestJson(`${url}/api/health`)
+      if (health.response.status === 200 && health.body?.ok === true) break
+      healthError = `health check failed (${health.response.status}): ${health.text.slice(0, 200)}`
+    } catch (error) {
+      healthError = error instanceof Error ? error.message : String(error)
+    }
+    if (attempt < 9) await new Promise((resolve) => setTimeout(resolve, 1_500))
+  }
+  if (!health || health.response.status !== 200 || health.body?.ok !== true) {
+    throw new Error(healthError ?? 'health check failed')
   }
 
   const ready = await requestJson(`${url}/api/ready`)
