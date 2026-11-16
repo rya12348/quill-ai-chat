@@ -22,7 +22,7 @@ import { buildComplete, buildEmbed, buildReference, isProxyRequest } from '../bu
 import { canvasComplete } from '../canvas'
 import { kindFor, proofComplete, proofSignature, streamChunks } from '../proof'
 import { analysisToday, buildToday, claimGuestTurn, claimGuestUsage, guestUsageToday, id, mapConversation, mapMessage, now, parseBuild, repliesToday, researchToday, titleFrom, usageToday, utcDay } from '../db'
-import { refreshConversationSummary } from '../memory'
+import { hasConversationOverflow, refreshConversationSummary, shouldRefreshMemory } from '../memory'
 import { activeLanes, isLocalBridgeRequest, laneKey, orderLanes, publicComplete, publicLanes, type LaneResult } from '../public-ai'
 import { healthRows, recordProviderResult } from '../provider-health'
 import { planAndRetrieve } from '../plan'
@@ -884,7 +884,10 @@ chat.post('/', async (c) => {
       const recent = history.slice(-MAX_CONTEXT_MESSAGES)
       let memory = ''
       const oldestRecentAt = recent[0]?.createdAt
-      if (oldestRecentAt !== undefined) {
+      // Never attach a rolling summary to a chat that still fits verbatim.
+      // This also prevents an old summary from making a short chat "remember"
+      // turns that are already in front of the model.
+      if (hasConversationOverflow(history.length) && oldestRecentAt !== undefined) {
         const saved = await db
           .prepare(`SELECT summary, covered_through FROM conversation_summaries WHERE owner_sub = ? AND conversation_id = ?`)
           .bind(owner, conversation.id)
@@ -899,8 +902,7 @@ chat.post('/', async (c) => {
           )
           .bind(owner, conversation.id, oldestRecentAt, Number(saved?.covered_through ?? 0))
           .all()
-        if (uncovered.results.length) {
-          if (!(await send({ type: 'status', text: 'Recalling earlier context…' }))) return await abandon()
+        if (shouldRefreshMemory(uncovered.results.length)) {
           const condensed = await refreshConversationSummary({
             env: c.env,
             model,

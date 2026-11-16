@@ -3,7 +3,7 @@
 // compact memory. The caller persists it with a covered-through timestamp, so
 // the next request only folds in the turns that have just fallen out.
 
-import { MAX_MESSAGE_CHARS, MAX_SUMMARY_CHARS, type ModelId } from '../shared/config'
+import { MAX_CONTEXT_MESSAGES, MAX_MESSAGE_CHARS, MAX_SUMMARY_CHARS, type ModelId } from '../shared/config'
 import type { Message } from '../shared/types'
 import { aiConfigured, complete, type ChatMessage } from './ai'
 import type { Env } from './env'
@@ -11,6 +11,22 @@ import { orderLanes, publicComplete, publicLanes } from './public-ai'
 
 const SUMMARY_MAX_TOKENS = 900
 const MAX_SUMMARY_INPUT_CHARS = 48_000
+
+/**
+ * A single turn falling out of the verbatim window is not worth a model call,
+ * a visible status message, or an extra wait. Refresh memory only after a real
+ * batch of older turns has accumulated.
+ */
+export const MIN_MEMORY_MESSAGES = 8
+
+export function shouldRefreshMemory(uncoveredMessages: number): boolean {
+  return uncoveredMessages >= MIN_MEMORY_MESSAGES
+}
+
+/** Only a chat that has overflowed the verbatim window may use a summary. */
+export function hasConversationOverflow(historyMessages: number): boolean {
+  return historyMessages > MAX_CONTEXT_MESSAGES
+}
 
 const SUMMARY_SYSTEM = `You maintain a compact memory of an ongoing conversation for another assistant.
 

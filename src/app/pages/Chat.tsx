@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Bot, Brain, Compass, Download, FileSpreadsheet, FileText, Folder, FolderX, Globe2, Hammer, Layers, Menu as MenuIcon, MessageCircle, Monitor, Search, Share2, ShieldCheck, Sparkles, type LucideIcon } from 'lucide-react'
 
-import { DEFAULT_MODEL, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, MODELS, SUGGESTIONS } from '../../shared/config'
+import { DEFAULT_MODEL, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, MAX_CONTEXT_MESSAGES, MODELS, SUGGESTIONS } from '../../shared/config'
 import { modelDisplayName } from '../../shared/model-display'
 import { suggestToolMode, type SuggestedToolMode } from '../../shared/agent'
 import type { Conversation, Message, ModeUsage, ReasoningEffort } from '../../shared/types'
@@ -1168,7 +1168,7 @@ export function Chat() {
 
       <div ref={scroller} onScroll={onScroll} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
         <div className={cx('mx-auto w-full px-4 pb-6 pt-2 md:px-6', empty ? 'flex min-h-full max-w-[1040px] flex-col' : 'max-w-[760px]')}>
-          {conversation && messages.length > 0 ? <MemoryPanel conversationId={conversation.id} /> : null}
+          {conversation && messages.length > MAX_CONTEXT_MESSAGES ? <MemoryPanel conversationId={conversation.id} /> : null}
           {empty ? (
             <EmptyState
               disabled={limitReached}

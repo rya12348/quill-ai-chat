@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { MAX_CONTEXT_MESSAGES } from '../src/shared/config'
 import { routeBuffyChat } from '../src/worker/buffy-routing'
+import { hasConversationOverflow, shouldRefreshMemory } from '../src/worker/memory'
 
 test('greetings on Buffy, Buffy Free and Agent stay local', () => {
   const buffy = routeBuffyChat({ usingApi: false, requestedModel: 'buffy', content: 'hi' })
@@ -72,4 +74,20 @@ test('the host API path does not claim a Buffy route', () => {
     content: 'What is the capital of France?',
   })
   assert.deepEqual(route, { local: false, fast: false, fullAgent: false, model: null })
+})
+
+test('short chats never trigger rolling memory', () => {
+  assert.equal(hasConversationOverflow(3), false)
+  assert.equal(shouldRefreshMemory(7), false)
+})
+
+test('rolling memory waits for a real batch of old turns', () => {
+  assert.equal(shouldRefreshMemory(8), true)
+  assert.equal(shouldRefreshMemory(40), true)
+})
+
+test('rolling memory only starts after the verbatim window overflows', () => {
+  assert.equal(hasConversationOverflow(MAX_CONTEXT_MESSAGES - 1), false)
+  assert.equal(hasConversationOverflow(MAX_CONTEXT_MESSAGES), false)
+  assert.equal(hasConversationOverflow(MAX_CONTEXT_MESSAGES + 1), true)
 })
