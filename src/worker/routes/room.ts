@@ -178,7 +178,10 @@ room.post('/realtime/ticket', async (c) => {
     return c.json({ error: 'room', message: 'Unknown room.' }, 400)
   }
   if (!c.env.REALTIME) {
-    return c.json({ error: 'realtime_unavailable', message: 'Live updates are not enabled on this deployment.' }, 503)
+    // This is a normal fallback, not a server failure: the browser keeps the
+    // HTTP room and polling path. A 200 with live:false stops the client from
+    // retrying and keeps the aggregate 5xx monitor free of expected 503s.
+    return privateJson(c, { ok: false, live: false, message: 'Live updates are not enabled on this deployment.' })
   }
   const user = c.get('user')
   try {

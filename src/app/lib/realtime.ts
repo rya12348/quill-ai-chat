@@ -7,6 +7,7 @@ export type RoomRealtimeStatus =
   | 'connected'
   | 'disconnected'
   | 'unauthorized'
+  | 'unavailable'
   | 'closed'
 
 export type RoomPresenceMember = {
@@ -111,7 +112,12 @@ export function connectRoom({
         return
       }
       if (!response.ok) throw new Error('Ticket request failed.')
-      const ticket = (await response.json()) as { websocketUrl?: unknown }
+      const ticket = (await response.json()) as { websocketUrl?: unknown; live?: unknown }
+      if (ticket.live === false) {
+        stopped = true
+        status('unavailable')
+        return
+      }
       if (typeof ticket.websocketUrl !== 'string') throw new Error('Ticket response was invalid.')
       if (stopped) return
       const connection = new WebSocket(ticket.websocketUrl)
