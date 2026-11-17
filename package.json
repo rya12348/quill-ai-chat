@@ -29,7 +29,7 @@
     "@freebuff/auth": "^0.1.0",
     "@tanstack/react-query": "^5.104.0",
     "docx": "^9.15.3",
-    "hono": "^4.13.0",
+    "hono": "^4.13.18",
     "katex": "^0.19.1",
     "lucide-react": "^1.60.0",
     "mammoth": "^1.13.0",
