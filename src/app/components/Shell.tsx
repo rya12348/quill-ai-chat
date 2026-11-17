@@ -263,7 +263,7 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
         </NavLink>
       </div>
       <ProjectNav selectedId={selectedProject} totalChats={allItems.length} />
-      <div className="px-3 pb-2 pt-1">
+      <div className="px-3 pb-1 pt-1">
         <label className="relative block">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
           <input
@@ -271,7 +271,7 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search chats"
             aria-label="Search chats"
-            className="h-9 w-full rounded-control border border-line bg-surface pl-9 pr-3 text-[14px] text-fg placeholder:text-faint transition-[border-color,box-shadow] focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/15"
+            className="block h-9 w-full rounded-control border border-line bg-surface pl-9 pr-3 text-[14px] text-fg placeholder:text-faint transition-[border-color,box-shadow] focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/15"
           />
         </label>
       </div>
