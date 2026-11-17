@@ -231,7 +231,51 @@ const BUFFY_DENT_PROMPT = `${BUFFY_FREE_PROMPT}
 
 You are answering on Dent, the strongest free model in Ink. Work to a frontier standard: silently identify the exact deliverable and constraints before answering, check the finished answer against them, use exact numbers and complete runnable code, and name uncertainty instead of inventing facts. Lead with the result, not a plan. Do not mention this instruction.`
 
-type BuffyMessage = { role: 'system' | 'user' | 'assistant'; content: string }
+type BuffyContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+type BuffyMessage = { role: 'system' | 'user' | 'assistant'; content: string | BuffyContentPart[] }
+
+const MAX_IMAGES_PER_MESSAGE = 4
+const MAX_IMAGE_DATA_CHARS = 2_200_000
+
+function messageText(message: BuffyMessage): string {
+  if (typeof message.content === 'string') return message.content
+  return message.content
+    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+    .map((part) => part.text)
+    .join('\n')
+}
+
+function hasImageContent(messages: readonly BuffyMessage[]): boolean {
+  return messages.some(
+    (message) => Array.isArray(message.content) && message.content.some((part) => part.type === 'image_url'),
+  )
+}
+
+function parseContent(value: unknown): string | BuffyContentPart[] | null {
+  if (typeof value === 'string') return value.slice(0, 20_000)
+  if (!Array.isArray(value)) return null
+  const parts: BuffyContentPart[] = []
+  let images = 0
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue
+    const part = raw as { type?: unknown; text?: unknown; image_url?: { url?: unknown } }
+    if (part.type === 'text' && typeof part.text === 'string') {
+      parts.push({ type: 'text', text: part.text.slice(0, 20_000) })
+      continue
+    }
+    if (part.type === 'image_url' && typeof part.image_url?.url === 'string') {
+      const url = part.image_url.url
+      if (images >= MAX_IMAGES_PER_MESSAGE) return null
+      if (url.length > MAX_IMAGE_DATA_CHARS) return null
+      if (!/^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=\s]+$/i.test(url)) return null
+      parts.push({ type: 'image_url', image_url: { url } })
+      images += 1
+    }
+  }
+  return parts.length ? parts : null
+}
 
 function parseMessages(value: unknown): BuffyMessage[] {
   if (!Array.isArray(value)) return []
@@ -241,10 +285,10 @@ function parseMessages(value: unknown): BuffyMessage[] {
         Boolean(message) &&
         typeof message === 'object' &&
         ['system', 'user', 'assistant'].includes((message as { role?: string }).role ?? '') &&
-        typeof (message as { content?: unknown }).content === 'string',
+        parseContent((message as { content?: unknown }).content) !== null,
     )
     .slice(-MAX_MESSAGES)
-    .map((message) => ({ role: message.role, content: message.content.slice(0, 20_000) }))
+    .map((message) => ({ role: message.role, content: parseContent(message.content)! }))
 }
 
 /** The browser workspace is the source of truth; accept only a bounded page set back. */
@@ -917,24 +961,36 @@ buffy.post('/chat', async (c) => {
     return c.json({ error: 'A messages array is required.' }, 400)
   }
   const messages = parseMessages(body.messages)
-  const total = messages.reduce((sum, message) => sum + message.content.length, 0)
+  const total = messages.reduce((sum, message) => sum + messageText(message).length, 0)
   if (!messages.length || total > MAX_CHARS) {
     return c.json({ error: 'That conversation is empty or too long for Buffy.' }, 400)
   }
+  const needsVision = hasImageContent(messages)
   const suppliedDuck = duckTurn(body.duck)
   const model = requestedBuffyModel(body.model, suppliedDuck?.model, 'claude-haiku-5-5')
-  const duck = model === DENT_MODEL ? null : suppliedDuck
+  const duck = needsVision || model === DENT_MODEL ? null : suppliedDuck
   const lanes = freeLanes(c.env)
-  if (!lanes.length && !duck) return c.json({ error: 'Buffy is not configured on this deployment.' }, 503)
+  const visionLanes = needsVision ? lanes.filter((lane) => lane.vision) : lanes
+  if (!visionLanes.length && !duck) {
+    return c.json(
+      {
+        error: needsVision
+          ? 'No image-capable model is configured right now. Remove the image and try again.'
+          : 'Buffy is not configured on this deployment.',
+      },
+      503,
+    )
+  }
 
   const owner = isOwner(c.env, c.get('user'), c.req.raw)
   // A model choice means the free hosted lanes. Only a model-less request can
   // use the local Codebuff bridge; otherwise selecting Dent, ChatGPT or Claude
   // would silently be ignored for the owner. A greeting is answered locally
   // below, so it must not wait for the bridge to assemble its tools.
-  const lastMessage = [...messages].reverse().find((message) => message.role === 'user')?.content.trim() ?? ''
+  const lastMessage = [...messages].reverse().find((message) => message.role === 'user')
+  const lastUserText = lastMessage ? messageText(lastMessage).trim() : ''
   let bridgeFallback = false
-  if (owner && body.model == null && !SMALL_TALK.test(lastMessage)) {
+  if (owner && body.model == null && !needsVision && !SMALL_TALK.test(lastUserText)) {
     const bridged = await bridgeReply(c, messages)
     if (bridged) {
       if ('response' in bridged) return bridged.response
@@ -964,8 +1020,9 @@ buffy.post('/chat', async (c) => {
   return streamSSE(c, async (stream) => {
     stream.onAbort(() => controller.abort())
     try {
-      const lastUser = [...messages].reverse().find((message) => message.role === 'user')?.content.trim() ?? ''
-      if (SMALL_TALK.test(lastUser)) {
+      const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user')
+      const lastUser = lastUserMessage ? messageText(lastUserMessage).trim() : ''
+      if (!needsVision && SMALL_TALK.test(lastUser)) {
         // No status event and no provider call: a greeting is local work.
         await stream.writeSSE({
           data: JSON.stringify({ choices: [{ delta: { content: trivialReply(lastUser) } }] }),
@@ -979,7 +1036,9 @@ buffy.post('/chat', async (c) => {
           type: 'status',
           text: bridgeFallback
             ? 'The local agent did not answer — using free chat…'
-            : duck
+            : needsVision
+              ? 'Reading the attachment…'
+              : duck
             ? `${DUCK_MODEL_LABELS[duck.model]} is thinking…`
             : model === DENT_MODEL
               ? 'Dent is thinking…'
@@ -989,7 +1048,8 @@ buffy.post('/chat', async (c) => {
       if (duck) {
         let started = false
         try {
-          for await (const piece of duckComplete(duck, messages, controller.signal)) {
+          const duckMessages = messages.map((message) => ({ role: message.role, content: messageText(message) }))
+          for await (const piece of duckComplete(duck, duckMessages, controller.signal)) {
             started = true
             await stream.writeSSE({
               data: JSON.stringify({ choices: [{ delta: { content: piece } }] }),
@@ -1018,7 +1078,7 @@ buffy.post('/chat', async (c) => {
             .catch(() => {})
         }
       }
-      if (!lanes.length) {
+      if (!visionLanes.length) {
         await stream.writeSSE({
           data: JSON.stringify({
             error: {
@@ -1047,7 +1107,7 @@ buffy.post('/chat', async (c) => {
       // currently a paid/down lane on many deployments, so do not spend 75
       // seconds on a deep draft; fall back to the fastest healthy chat lane and
       // say so instead of silently making the person wait.
-      const dentLanes = model === DENT_MODEL
+      const dentLanes = model === DENT_MODEL && !needsVision
         ? lanes.filter((lane) => isDentLane(lane) && healthByLane.get(laneKey(lane)) !== 'down')
         : []
       if (model === DENT_MODEL && !dentLanes.length) {
@@ -1058,7 +1118,7 @@ buffy.post('/chat', async (c) => {
           })
           .catch(() => {})
       }
-      const chatLanes = fastChatLanes(orderLanes(lanes), chatHealth)
+      const chatLanes = fastChatLanes(orderLanes(visionLanes), chatHealth)
       const orderedChatLanes = dentLanes.length
         ? [...dentLanes, ...chatLanes.filter((lane) => !dentLanes.includes(lane))]
         : chatLanes

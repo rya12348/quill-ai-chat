@@ -10,10 +10,10 @@ import {
   Copy,
   ExternalLink,
   FileText,
-  FolderOpen,
   FolderTree,
   GitCompare,
   Globe,
+  Link2,
   Loader2,
   MousePointer2,
   Paperclip,
@@ -50,8 +50,10 @@ import { BUFFY_FALLBACK_MODEL, preferredBuffyModel } from '../lib/buffy-model-he
 import { BUFFY_MODEL_LABELS, DENT_MODEL, buffyModelSpeed, isDuckModel, normalizeBuffyModel, type BuffyModel } from '../lib/buffy-models'
 import { requestDuckTurn, type DuckTurn } from '../lib/duck'
 import { useBuffyModelOptions } from '../lib/use-buffy-model-options'
+import { ATTACHMENT_ACCEPT, clipboardFiles, readAttachment } from '../lib/attachments'
 
-type BuffyFile = { name: string; text: string }
+type BuffyImage = { mime: string; size: number; data: string }
+type BuffyFile = { name: string; text: string; image?: BuffyImage; link?: string }
 type ToolStatus = 'running' | 'done' | 'error' | 'stopped'
 type BuffyTool = {
   id: string
@@ -99,16 +101,14 @@ const MAX_BRIEF_NOTES = 8
 const MAX_BRIEF_CHECKS = 8
 const MAX_BRIEF_NOTE_CHARS = 600
 const MAX_ATTACHMENTS = 8
+const MAX_IMAGES = 4
 const MAX_ATTACHMENT_CHARS = 24_000
 const MAX_ATTACHMENT_FILE_CHARS = 8_000
-const MAX_ATTACHMENT_BYTES = 128_000
 const STATUS_TIMEOUT_MS = 6_000
 const STATUS_POLL_MS = 10_000
 // Final backstop against a dead stream. The server's bridge grace period is
 // 30s, so leave room for a fallback status to arrive after slow headers.
 const CHAT_IDLE_MS = 60_000
-const TEXT_FILE_ACCEPT =
-  'text/*,.md,.markdown,.txt,.json,.csv,.tsv,.js,.jsx,.ts,.tsx,.css,.html,.py,.go,.rs,.java,.c,.cpp,.h,.sh,.yml,.yaml,.toml,.ini,.log,.sql,.rb,.php,.swift,.kt,.xml,.svg'
 const SUGGESTIONS = [
   'Plan a simple booking page for a neighborhood barber shop.',
   'Review a component and write a focused fix plan.',
@@ -191,6 +191,19 @@ function briefNoteFor(message: Message): string {
 /** Keep the folder path so attached project files stay distinguishable. */
 function attachmentName(file: File): string {
   return (file as File & { webkitRelativePath?: string }).webkitRelativePath?.trim() || file.name || 'pasted.txt'
+}
+
+function readHttpUrl(raw: string): string | null {
+  const value = raw.trim()
+  if (!value) return null
+  try {
+    const url = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    if (!url.hostname.includes('.') && url.hostname !== 'localhost') return null
+    return url.toString()
+  } catch {
+    return null
+  }
 }
 
 function isBriefPinned(brief: BuffyBrief, message: Message): boolean {
@@ -374,7 +387,8 @@ function readSaved(): Message[] {
                   Boolean(file) &&
                   typeof file === 'object' &&
                   typeof (file as BuffyFile).name === 'string' &&
-                  typeof (file as BuffyFile).text === 'string',
+                  typeof (file as BuffyFile).text === 'string' &&
+                  ((file as BuffyFile).link === undefined || typeof (file as BuffyFile).link === 'string'),
               )
               .slice(0, MAX_ATTACHMENTS)
           : []
@@ -408,9 +422,11 @@ function readSaved(): Message[] {
 
 /** File text is sent with the turn but kept out of the visible bubble. */
 function filesPrompt(files: BuffyFile[]): string {
+  const textFiles = files.filter((file) => file.text.trim())
+  if (!textFiles.length) return ''
   return [
     'The person attached the following file contents. Treat them as evidence. When you rely on a file, cite it inline as [filename:line] or [filename:start-end]. Never invent a citation.',
-    ...files.map(
+    ...textFiles.map(
       (file) =>
         `--- ${file.name} ---\n${file.text
           .split(/\r?\n/)
@@ -424,11 +440,13 @@ type Citation = { file: string; line: number; endLine: number; snippet: string }
 
 function citationsFor(text: string, files: BuffyFile[]): Citation[] {
   if (!text || !files.length) return []
-  const byName = new Map(files.map((file) => [file.name.toLowerCase(), file]))
+  const textFiles = files.filter((file) => file.text.trim())
+  if (!textFiles.length) return []
+  const byName = new Map(textFiles.map((file) => [file.name.toLowerCase(), file]))
   const found = new Map<string, Citation>()
   for (const match of text.matchAll(/\[([^\]\n]{1,120}?):(\d+)(?:-(\d+))?\]/g)) {
     const name = match[1].trim().replace(/^\.\//, '')
-    const file = byName.get(name.toLowerCase()) ?? files.find((item) => item.name.toLowerCase().endsWith(name.toLowerCase()))
+    const file = byName.get(name.toLowerCase()) ?? textFiles.find((item) => item.name.toLowerCase().endsWith(name.toLowerCase()))
     if (!file) continue
     const line = Number(match[2])
     const endLine = Math.min(Number(match[3] || match[2]), line + 20)
@@ -510,9 +528,20 @@ async function readReplyStream(response: Response, handlers: ReplyHandlers): Pro
 }
 
 function messageForModel(message: Message) {
+  const files = message.files ?? []
+  const textFiles = files.filter((file) => file.text.trim())
+  const images = files.filter((file) => file.image?.data)
+  const prompt = textFiles.length ? `${message.content}\n\n${filesPrompt(files)}` : message.content
+  if (!images.length) return { role: message.role, content: prompt }
   return {
     role: message.role,
-    content: message.files?.length ? `${message.content}\n\n${filesPrompt(message.files)}` : message.content,
+    content: [
+      {
+        type: 'text' as const,
+        text: prompt.trim() || `The person attached ${images.length === 1 ? 'an image' : `${images.length} images`}.`,
+      },
+      ...images.map((file) => ({ type: 'image_url' as const, image_url: { url: file.image!.data } })),
+    ],
   }
 }
 
@@ -680,6 +709,8 @@ export function Buffy() {
   const [checkDraft, setCheckDraft] = useState('')
   const [noteDraft, setNoteDraft] = useState('')
   const [attachments, setAttachments] = useState<BuffyFile[]>([])
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkDraft, setLinkDraft] = useState('')
   const [fileError, setFileError] = useState('')
   const [pending, setPending] = useState(false)
   const [activity, setActivity] = useState('')
@@ -710,7 +741,6 @@ export function Buffy() {
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const folderRef = useRef<HTMLInputElement>(null)
   const opinionAbort = useRef<AbortController | null>(null)
   const bridgeTimers = useRef<number[]>([])
   const switchFreeRef = useRef(false)
@@ -721,7 +751,18 @@ export function Buffy() {
   useEffect(() => {
     if (privateMode) return
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.slice(-60)))
+      // Image bytes stay in memory for this turn. Persisting a full screenshot
+      // would consume the local-storage quota and evict the transcript.
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(
+          messages.slice(-60).map((message) =>
+            message.files?.some((file) => file.image)
+              ? { ...message, files: message.files.map((file) => (file.image ? { name: file.name, text: '' } : file)) }
+              : message,
+          ),
+        ),
+      )
     } catch {
       /* private mode can refuse storage; the chat still works for this visit */
     }
@@ -881,11 +922,6 @@ export function Buffy() {
     [],
   )
 
-  useLayoutEffect(() => {
-    const input = folderRef.current
-    if (input) (input as HTMLInputElement & { webkitdirectory: boolean }).webkitdirectory = true
-  }, [])
-
   // A page handed over from Browser opens here with its readable text already
   // attached, so the first question is about what the person is looking at.
   useEffect(() => {
@@ -939,33 +975,70 @@ export function Buffy() {
     }
     if (incoming.length > slots) setFileError(`Attach up to ${MAX_ATTACHMENTS} files; the rest were skipped.`)
     const next: BuffyFile[] = []
+    let images = attachments.filter((file) => file.image).length
     let total = attachments.reduce((sum, file) => sum + file.text.length, 0)
     for (const file of incoming.slice(0, slots)) {
-      if (file.size > MAX_ATTACHMENT_BYTES) {
-        setFileError(`${attachmentName(file) || 'That file'} is too large. Attach a text file under 128 KB.`)
+      const name = attachmentName(file)
+      let attachment
+      try {
+        attachment = await readAttachment(file)
+      } catch (error) {
+        setFileError(error instanceof Error ? error.message : `${name || 'That file'} could not be read.`)
         continue
       }
-      const text = await file.text().catch(() => '')
-      if (!text.trim()) {
-        setFileError(`${attachmentName(file) || 'That file'} is empty or is not readable text.`)
+      if (attachment.kind === 'image') {
+        if (images >= MAX_IMAGES) {
+          setFileError(`Attach up to ${MAX_IMAGES} images at a time.`)
+          continue
+        }
+        next.push({
+          name: name || attachment.name,
+          text: '',
+          image: { mime: attachment.mime, size: attachment.size, data: attachment.data },
+        })
+        images += 1
         continue
       }
-      if (text.includes('\u0000')) {
-        setFileError(`${attachmentName(file) || 'That file'} is not a text or code file.`)
+      const clipped = attachment.data.slice(0, MAX_ATTACHMENT_FILE_CHARS)
+      if (!clipped.trim()) {
+        setFileError(`${name || attachment.name || 'That file'} is empty or has no readable text.`)
         continue
       }
-      const clipped = text.slice(0, MAX_ATTACHMENT_FILE_CHARS)
-      if (clipped.length < text.length) {
-        setFileError(`${attachmentName(file) || 'That file'} was clipped to ${MAX_ATTACHMENT_FILE_CHARS.toLocaleString()} characters.`)
+      if (clipped.length < attachment.data.length) {
+        setFileError(`${name || attachment.name || 'That file'} was clipped to ${MAX_ATTACHMENT_FILE_CHARS.toLocaleString()} characters.`)
       }
       if (total + clipped.length > MAX_ATTACHMENT_CHARS) {
         setFileError(`Attachments can be up to ${MAX_ATTACHMENT_CHARS.toLocaleString()} characters at a time.`)
         break
       }
-      next.push({ name: attachmentName(file), text: clipped })
+      next.push({ name: name || attachment.name, text: clipped })
       total += clipped.length
     }
     if (next.length) setAttachments((current) => [...current, ...next])
+  }
+
+  const addLink = (raw: string) => {
+    const url = readHttpUrl(raw)
+    if (!url) {
+      setFileError('Enter a full web address, such as example.com/article.')
+      return false
+    }
+    if (attachments.length >= MAX_ATTACHMENTS) {
+      setFileError(`Attach up to ${MAX_ATTACHMENTS} items.`)
+      return false
+    }
+    let host = 'link'
+    try {
+      host = new URL(url).hostname.replace(/^www\./i, '') || 'link'
+    } catch {
+      // The link form already validated the URL; keep a readable fallback.
+    }
+    setAttachments((current) => [
+      ...current,
+      { name: host, text: `Shared link: ${url}`, link: url },
+    ])
+    setFileError('')
+    return true
   }
 
   type SendOptions = { base?: Message[]; files?: BuffyFile[]; model?: BuffyModel; bridge?: boolean }
@@ -974,7 +1047,10 @@ export function Buffy() {
     const files = options.files ?? attachments
     const base = options.base ?? messages
     const targetModel = options.model ?? model
-    const useFree = options.bridge ? false : freeMode || Boolean(options.model)
+    const hasImages = files.some((file) => file.image?.data)
+    // The local bridge and the text-only Duck session cannot see an image.
+    // Use a hosted vision lane for these turns instead of pretending they can.
+    const useFree = hasImages || (options.bridge ? false : freeMode || Boolean(options.model))
     if ((!content && !files.length) || pendingRef.current || !status?.ready) return
     const displayContent = content || 'Review the attached file(s).'
     const controller = new AbortController()
@@ -986,6 +1062,8 @@ export function Buffy() {
     if (options.model) setModel(options.model)
     setInput('')
     setAttachments([])
+    setLinkOpen(false)
+    setLinkDraft('')
     setFileError('')
     setBrief((current) => ({
       ...current,
@@ -1098,7 +1176,7 @@ export function Buffy() {
     try {
       let duck: DuckTurn | null = null
       if (useFree) {
-        if (isDuckModel(targetModel)) {
+        if (!hasImages && isDuckModel(targetModel)) {
           setActivity(`Connecting to ${BUFFY_MODEL_LABELS[targetModel].name}…`)
           try {
             // A busy DuckDuckGo edge must cost a few seconds, not the turn.
@@ -1110,7 +1188,7 @@ export function Buffy() {
             duck = null
           }
         }
-        setActivity(`${BUFFY_MODEL_LABELS[targetModel].name} is thinking…`)
+        setActivity(hasImages ? 'Looking at the attachment…' : `${BUFFY_MODEL_LABELS[targetModel].name} is thinking…`)
       }
       const response = await fetch('/api/buffy/chat', {
         method: 'POST',
@@ -1599,17 +1677,40 @@ export function Buffy() {
                   <div key={`${index}-user`} className="flex justify-end">
                     <div className="max-w-[88%] rounded-card bg-surface px-4 py-3 text-[14px] leading-relaxed shadow-card">
                       <p className="whitespace-pre-wrap">{message.content}</p>
-                      {message.files?.length ? (
+                      {message.files?.some((file) => file.image?.data) ? (
+                        <div className="mt-2 flex flex-wrap justify-end gap-1.5 border-t border-line pt-2">
+                          {message.files
+                            .filter((file) => file.image?.data)
+                            .map((file, fileIndex) => (
+                              <img
+                                key={`${file.name}-${fileIndex}`}
+                                src={file.image!.data}
+                                alt={file.name}
+                                title={file.name}
+                                className="max-h-48 max-w-[220px] rounded-[12px] border border-line bg-surface-2 object-contain"
+                              />
+                            ))}
+                        </div>
+                      ) : null}
+                      {message.files?.some((file) => !file.image) ? (
                         <div className="mt-2 flex flex-wrap gap-1.5 border-t border-line pt-2">
-                          {message.files.map((file, fileIndex) => (
-                            <span
-                              key={`${file.name}-${fileIndex}`}
-                              className="inline-flex max-w-full items-center gap-1 rounded-full bg-surface-2 px-2 py-0.5 text-[11.5px] text-muted"
-                            >
-                              <Paperclip className="size-3 shrink-0 text-faint" />
-                              <span className="truncate">{file.name}</span>
-                            </span>
-                          ))}
+                          {message.files
+                            .filter((file) => !file.image)
+                            .map((file, fileIndex) => (
+                              <span
+                                key={`${file.name}-${fileIndex}`}
+                                className="inline-flex max-w-full items-center gap-1 rounded-full bg-surface-2 px-2 py-0.5 text-[11.5px] text-muted"
+                              >
+                                {file.link ? <Link2 className="size-3 shrink-0 text-faint" /> : <Paperclip className="size-3 shrink-0 text-faint" />}
+                                {file.link ? (
+                                  <a href={file.link} target="_blank" rel="noreferrer" className="truncate hover:text-fg hover:underline">
+                                    {file.name}
+                                  </a>
+                                ) : (
+                                  <span className="truncate">{file.name}</span>
+                                )}
+                              </span>
+                            ))}
                         </div>
                       ) : null}
                     </div>
@@ -1758,23 +1859,48 @@ export function Buffy() {
           <div className="mx-auto mb-2 w-full max-w-[760px]">
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
-                {attachments.map((file, index) => (
-                  <span
-                    key={`${file.name}-${index}`}
-                    className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[11.5px] text-muted"
-                  >
-                    <Paperclip className="size-3 shrink-0 text-faint" />
-                    <span className="truncate">{file.name}</span>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${file.name}`}
-                      onClick={() => setAttachments((current) => current.filter((_, at) => at !== index))}
-                      className="grid size-4 place-items-center rounded-full text-faint transition-colors hover:bg-surface-2 hover:text-fg"
+                {attachments.map((file, index) =>
+                  file.image?.data ? (
+                    <div key={`${file.name}-${index}`} className="relative">
+                      <img
+                        src={file.image.data}
+                        alt={file.name}
+                        title={file.name}
+                        className="size-14 rounded-[10px] border border-line bg-surface-2 object-cover"
+                      />
+                      <button
+                        type="button"
+                        aria-label={`Remove ${file.name}`}
+                        onClick={() => setAttachments((current) => current.filter((_, at) => at !== index))}
+                        className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-line bg-accent text-bg shadow-sm transition-transform hover:scale-105"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <span
+                      key={`${file.name}-${index}`}
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[11.5px] text-muted"
                     >
-                      <X className="size-3" />
-                    </button>
-                  </span>
-                ))}
+                      {file.link ? <Link2 className="size-3 shrink-0 text-faint" /> : <Paperclip className="size-3 shrink-0 text-faint" />}
+                      {file.link ? (
+                        <a href={file.link} target="_blank" rel="noreferrer" className="truncate hover:text-fg hover:underline">
+                          {file.name}
+                        </a>
+                      ) : (
+                        <span className="truncate">{file.name}</span>
+                      )}
+                      <button
+                        type="button"
+                        aria-label={`Remove ${file.name}`}
+                        onClick={() => setAttachments((current) => current.filter((_, at) => at !== index))}
+                        className="grid size-4 place-items-center rounded-full text-faint transition-colors hover:bg-surface-2 hover:text-fg"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ),
+                )}
               </div>
             )}
             {fileError && (
@@ -1782,6 +1908,57 @@ export function Buffy() {
                 {fileError}
               </p>
             )}
+          </div>
+        )}
+        {linkOpen && (
+          <div className="mx-auto mb-2 flex w-full max-w-[760px] items-center gap-2 rounded-card border border-line bg-surface p-2 shadow-card">
+            <Link2 className="ml-1 size-4 shrink-0 text-faint" />
+            <input
+              autoFocus
+              type="url"
+              inputMode="url"
+              value={linkDraft}
+              onChange={(event) => {
+                setLinkDraft(event.target.value)
+                setFileError('')
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
+                event.preventDefault()
+                if (addLink(linkDraft)) {
+                  setLinkDraft('')
+                  setLinkOpen(false)
+                }
+              }}
+              placeholder="Paste or type a web address"
+              aria-label="Web address"
+              className="min-w-0 flex-1 bg-transparent px-1 py-1.5 text-[13.5px] text-fg placeholder:text-faint focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (addLink(linkDraft)) {
+                  setLinkDraft('')
+                  setLinkOpen(false)
+                }
+              }}
+              disabled={!linkDraft.trim()}
+              className="h-8 shrink-0 rounded-control bg-fg px-3 text-[12.5px] font-medium text-bg transition-opacity hover:opacity-85 disabled:opacity-30"
+            >
+              Add link
+            </button>
+            <button
+              type="button"
+              aria-label="Close link form"
+              onClick={() => {
+                setLinkOpen(false)
+                setLinkDraft('')
+                setFileError('')
+              }}
+              className="grid size-8 shrink-0 place-items-center rounded-control text-faint transition-colors hover:bg-surface-2 hover:text-fg"
+            >
+              <X className="size-4" />
+            </button>
           </div>
         )}
         <form
@@ -1795,20 +1972,7 @@ export function Buffy() {
             ref={fileRef}
             type="file"
             multiple
-            accept={TEXT_FILE_ACCEPT}
-            className="hidden"
-            onChange={(event) => {
-              const files = Array.from(event.target.files ?? [])
-              event.target.value = ''
-              void addFiles(files)
-            }}
-          />
-          <input
-            ref={folderRef}
-            type="file"
-            multiple
-            accept={TEXT_FILE_ACCEPT}
-            {...({ webkitdirectory: 'true' } as Record<string, string>)}
+            accept={ATTACHMENT_ACCEPT}
             className="hidden"
             onChange={(event) => {
               const files = Array.from(event.target.files ?? [])
@@ -1818,23 +1982,13 @@ export function Buffy() {
           />
           <button
             type="button"
-            aria-label="Attach text or code"
-            title="Attach text or code"
-            disabled={pending || !status?.ready}
+            aria-label="Attach an image or file"
+            title="Attach an image, screenshot, PDF or text file"
+            disabled={pending || !status?.ready || attachments.length >= MAX_ATTACHMENTS}
             onClick={() => fileRef.current?.click()}
             className="grid size-9 shrink-0 place-items-center rounded-control text-muted transition-colors hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-30"
           >
             <Paperclip className="size-4" />
-          </button>
-          <button
-            type="button"
-            aria-label="Attach a folder"
-            title="Attach a folder of text or code files"
-            disabled={pending || !status?.ready}
-            onClick={() => folderRef.current?.click()}
-            className="grid size-9 shrink-0 place-items-center rounded-control text-muted transition-colors hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-30"
-          >
-            <FolderOpen className="size-4" />
           </button>
           <textarea
             ref={inputRef}
@@ -1847,7 +2001,7 @@ export function Buffy() {
               }
             }}
             onPaste={(event) => {
-              const pasted = Array.from(event.clipboardData.files)
+              const pasted = clipboardFiles(event.clipboardData)
               if (pasted.length) {
                 event.preventDefault()
                 void addFiles(pasted)
@@ -1857,7 +2011,7 @@ export function Buffy() {
             placeholder={
               status?.ready
                 ? freeMode
-                  ? 'Ask anything — paste or attach text…'
+                  ? 'Ask anything — paste a screenshot, file or link…'
                   : 'Ask anything — Buffy can read, edit, run and browse…'
                 : 'Buffy is unavailable'
             }
