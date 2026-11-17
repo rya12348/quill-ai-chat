@@ -206,8 +206,10 @@ test('splits a multi-page build and drops a broken page', () => {
   assert.match(two[0].html, /data-stet-base/)
   assert.match(two[0].html, /img\{max-width:100%\}/)
   assert.match(two[0].html, /min-height:360px/)
-  // A nav link to a generated page becomes a preview tab link.
-  assert.match(two[0].html, /href="#page:menu"/)
+  // A nav link keeps its real file name so a downloaded multi-page site works;
+  // the preview runtime intercepts it and switches tabs.
+  assert.match(two[0].html, /href="menu\.html"/)
+  assert.doesNotMatch(two[0].html, /href="#page:/)
   // A truncated second page is dropped rather than failing the whole build.
   const broken = extractPages(
     [

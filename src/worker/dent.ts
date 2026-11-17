@@ -18,27 +18,6 @@ import { isTrivialPrompt, trivialReply } from './blend'
 export const DENT_PAGE_MAX_TOKENS = 10_000
 
 /**
- * One budget for the whole Dent page pass. The first draft may use its full
- * 120s window, but a repair does not get another full window after a slow
- * draft. If the deadline is spent and the draft still fails its checks, the
- * page builder gets the turn instead of showing a partial result.
- */
-export const DENT_PAGE_DEADLINE_MS = 140_000
-
-/** Do not start a repair with less than this much useful time left. */
-export const DENT_PAGE_REPAIR_MIN_BUDGET_MS = 30_000
-
-/** Clamp a page call so the whole pass cannot outlive its deadline. */
-export function dentPageTimeout(deadlineAt: number, baseMs: number, now = Date.now()): number {
-  return Math.max(1_000, Math.min(baseMs, deadlineAt - now))
-}
-
-/** A repair needs a real time slice; do not start one at the deadline. */
-export function dentPageHasBudget(deadlineAt: number, now = Date.now()): boolean {
-  return deadlineAt - now >= DENT_PAGE_REPAIR_MIN_BUDGET_MS
-}
-
-/**
  * A page task is not one answer; it is a small program with observable
  * invariants. The first Dent draft is measured by deterministic page checks,
  * and only a candidate that fixes more of those checks replaces it. This is

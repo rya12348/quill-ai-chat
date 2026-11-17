@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import type { BuildInfo } from '../src/shared/types'
-import { auditDesign, buildMessages, designScore, extractPages, hasInertButtons, hasInteractiveCode, hasProxyCode, isFunctionalRequest, isGameRequest, isInteractiveRequest, isProxyRequest } from '../src/worker/build'
+import { auditDesign, buildMessages, designScore, ensureViewport, extractPages, gameInitializationIssues, hasInertButtons, hasInteractiveCode, hasProxyCode, injectBaseControls, isFunctionalRequest, isGameRequest, isInteractiveRequest, isProxyRequest, repairGameInitialization, requestedControlIssues, requestedPageLimit, singleH1, verifyPage } from '../src/worker/build'
 
 const page = (body: string, script = '') =>
   `<!doctype html><html><head><title>Neon Runner</title></head><body>${body}${script ? `<script>${script}</script>` : ''}</body></html>`
@@ -54,6 +54,15 @@ test('a proxy build must drive the real proxy endpoint', () => {
   assert.equal(extractPages(marketing, { requireInteractive: true, requireProxy: proxy }).length, 0)
 })
 
+test('a 3D game that creates its WebGL canvas in JavaScript is still interactive', () => {
+  const threeD = page(
+    '<h1>Orbit</h1><div id="app"></div>',
+    `const canvas = document.createElement('canvas'); document.getElementById('app').appendChild(canvas); const gl = canvas.getContext('webgl'); let angle = 0; addEventListener('keydown', function (event) { angle += 0.1; }); function loop() { angle += 0.01; gl.clear(gl.COLOR_BUFFER_BIT); requestAnimationFrame(loop); } requestAnimationFrame(loop);`,
+  )
+  assert.equal(hasInteractiveCode(threeD), true)
+  assert.equal(extractPages(threeD, { requireInteractive: true }).length, 1)
+})
+
 test('a working tool must include real interactive code', () => {
   const calculator = page(
     '<h1>Tip calculator</h1><p>Enter the bill and see a twenty percent tip and the total update immediately.</p><input id="bill" aria-label="Bill"><button id="go">Calculate</button><output id="out"></output>',
@@ -61,6 +70,19 @@ test('a working tool must include real interactive code', () => {
   )
   assert.equal(extractPages(calculator, { requireInteractive: true }).length, 1)
   assert.equal(extractPages(page('<h1>Tip calculator</h1><p>Calculate a tip for any bill in seconds.</p>'), { requireInteractive: true }).length, 0)
+})
+
+test('fast drafts get one heading and usable control affordances without another model call', () => {
+  const raw = page('<h1>Field Notes</h1><h1>Today’s picks</h1><p>A small studio making notebooks, paper goods and useful objects for everyday work.</p><input aria-label="Search the catalogue">')
+  const tidy = injectBaseControls(ensureViewport(singleH1(raw)))
+  assert.equal((tidy.match(/<h1\b/gi) ?? []).length, 1)
+  assert.equal((tidy.match(/<h2\b/gi) ?? []).length, 1)
+  assert.match(tidy, /name="viewport"/)
+  assert.match(tidy, /:focus-visible/)
+  assert.match(tidy, /:where\(input,select,textarea\)/)
+  assert.doesNotMatch(auditDesign(tidy).issues.join(' '), /keyboard-focus|browser defaults|more than one h1/)
+  assert.ok(designScore(tidy) >= designScore(raw))
+  assert.equal(injectBaseControls(tidy), tidy)
 })
 
 test('the design audit rewards a considered layout over a browser-default prototype', () => {
@@ -114,6 +136,24 @@ test('a page without an h1 promotes its first section heading', () => {
   assert.equal((html.match(/<h2\b/gi) ?? []).length, 0)
 })
 
+test('a headingless canvas game gets one hidden accessible heading', () => {
+  const raw =
+    '<!doctype html><html lang="en"><head><title>Tag Arena</title></head><body><p>Two players chase each other across the platforms. Use WASD and the arrow keys to move.</p><canvas id="game" width="640" height="360"></canvas><script>addEventListener("keydown", function (e) { if (e.key === "w") move(); }); requestAnimationFrame(function loop(){ requestAnimationFrame(loop); });</script></body></html>'
+  const html = extractPages(raw)[0]!.html
+  assert.match(html, /<h1 style="position:absolute[^>]*>Tag Arena<\/h1>/)
+  assert.equal((html.match(/<h1\b/gi) ?? []).length, 1)
+  assert.equal(verifyPage(html, { interactive: true }).failures.some((failure) => /heading/i.test(failure)), false)
+
+  // Start and game-over overlays can each carry a heading; that is a warning,
+  // not a broken page.
+  const twoScreens = verifyPage(
+    page('<h1>Start</h1><h1>Time up</h1><button>Restart</button>', gameScript),
+    { interactive: true },
+  )
+  assert.equal(twoScreens.failures.some((failure) => /heading/i.test(failure)), false)
+  assert.equal(twoScreens.checks.find((check) => check.id === 'h1')?.status, 'warn')
+})
+
 test('a photo credit stays with its image and stray credits are removed', () => {
   const credited = page(
     '<h1>Roasted here</h1><p>Fresh coffee roasted every morning on Oak Street, with beans from small farms.</p><section><img src="https://upload.wikimedia.org/wikipedia/commons/example.jpg" alt="Coffee beans"><div class="caption">A Photographer / Wikimedia Commons, CC BY 4.0</div></section><section id="menu"><h2>Menu</h2><p>Espresso, filter and a rotating single origin.</p><div class="caption">Another Photographer / Wikimedia Commons, CC BY 4.0</div></section>',
@@ -131,6 +171,94 @@ test('a button nested inside a link becomes a styled navigation CTA', () => {
   assert.doesNotMatch(extracted[0]!.html, /<a[^>]*>\s*<button/i)
 })
 
+test('a two-player game must expose the requested controls and both players', () => {
+  const prompt = 'Make a two-player platformer tag game. One player uses WASD, the other uses the arrow keys.'
+  const tagPage = page(
+    '<h1>Tag arena</h1><p>Player 1 moves with WASD. Player 2 moves with the arrow keys. Tag the other player before the timer ends.</p><canvas id="game" width="640" height="360"></canvas><button id="start">Start</button>',
+    `addEventListener('keydown', function (event) { var key = event.key; if (['w','a','s','d'].indexOf(key) >= 0) movePlayer1(key); if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].indexOf(key) >= 0) movePlayer2(key); }); requestAnimationFrame(function loop(){ requestAnimationFrame(loop); });`,
+  )
+  assert.deepEqual(requestedControlIssues(prompt, tagPage), [])
+  assert.ok(verifyPage(tagPage, { interactive: true, question: prompt }).checks.some((check) => check.id === 'requested-controls' && check.status === 'pass'))
+
+  const oneControlMap = page(
+    '<h1>Tag arena</h1><p>Both players use the arrow keys. Tag the other player before the timer ends.</p><canvas id="game" width="640" height="360"></canvas><button id="start">Start</button>',
+    `addEventListener('keydown', function (event) { if (window.keys) keys[event.key] = true; }); requestAnimationFrame(function loop(){ requestAnimationFrame(loop); });`,
+  )
+  assert.match(requestedControlIssues(prompt, oneControlMap).join(' '), /WASD|both players/i)
+  const themed = verifyPage(oneControlMap, { interactive: true, question: prompt })
+  assert.ok(themed.failures.some((failure) => /Requested controls/i.test(failure)))
+
+  // Copy that names both schemes is not enough when the script only binds one.
+  const proseOnly = page(
+    '<h1>Tag arena</h1><p>Player 1 uses WASD and player 2 uses the arrow keys.</p><canvas id="game" width="640" height="360"></canvas><button id="start">Start</button>',
+    `addEventListener('keydown', function (event) { if (['w','a','s','d'].includes(event.key)) movePlayer1(event.key); }); requestAnimationFrame(function loop(){ requestAnimationFrame(loop); });`,
+  )
+  assert.match(requestedControlIssues(prompt, proseOnly).join(' '), /arrow-key controls are not wired/i)
+
+  // Down keys are optional in a platformer; a complete horizontal move plus
+  // jump scheme should not be rejected for leaving S and ArrowDown unused.
+  const noDownKeys = page(
+    '<h1>Tag arena</h1><p>Player 1 moves with WASD. Player 2 moves with the arrow keys. Tag the other player before the timer ends.</p><canvas id="game" width="640" height="360"></canvas><button id="start">Start</button>',
+    `addEventListener('keydown', function (event) { if (['w','a','d'].indexOf(event.key) >= 0) movePlayer1(event.key); if (['ArrowUp','ArrowLeft','ArrowRight'].indexOf(event.key) >= 0) movePlayer2(event.key); }); requestAnimationFrame(function loop(){ requestAnimationFrame(loop); });`,
+  )
+  assert.deepEqual(requestedControlIssues(prompt, noDownKeys), [])
+
+  // Key maps are often object literals with unquoted keys; `event.key in keys`
+  // is a complete binding, not prose.
+  const keyMap = page(
+    '<h1>Tag arena</h1><p>Player 1 moves with WASD. Player 2 moves with the arrow keys.</p><canvas id="game" width="640" height="360"></canvas><button id="start">Start</button>',
+    `const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowLeft: false, ArrowDown: false, ArrowRight: false }; addEventListener('keydown', function (event) { if (event.key in keys) keys[event.key] = true; }); requestAnimationFrame(function loop(){ requestAnimationFrame(loop); });`,
+  )
+  assert.deepEqual(requestedControlIssues(prompt, keyMap), [])
+
+  // A game may label its players by name or colour instead of P1/P2.
+  const namedPlayers = page(
+    '<h1>Tag arena</h1><p>Red moves with WASD; Blue moves with the arrow keys.</p><canvas id="game" width="640" height="360"></canvas><button id="start">Start</button>',
+    `const BIND = [{ name: 'Red', l: 'KeyA', r: 'KeyD', j: 'KeyW' }, { name: 'Blue', l: 'ArrowLeft', r: 'ArrowRight', j: 'ArrowUp' }]; addEventListener('keydown', function (event) { if (BIND.some(b => [b.l,b.r,b.j].includes(event.code))) event.preventDefault(); }); requestAnimationFrame(function loop(){ requestAnimationFrame(loop); });`,
+  )
+  assert.deepEqual(requestedControlIssues(prompt, namedPlayers), [])
+
+  // A tag must not flip every frame while the players stay overlapped.
+  const tagScript = (guarded: string) =>
+    `${guarded}addEventListener('keydown', function (event) { if (['w','a','s','d'].indexOf(event.key) >= 0) movePlayer1(event.key); if (['ArrowUp','ArrowLeft','ArrowRight'].indexOf(event.key) >= 0) movePlayer2(event.key); }); let itPlayer = 0; function checkTag(){ itPlayer = 1 - itPlayer; } requestAnimationFrame(function loop(){ checkTag(); requestAnimationFrame(loop); });`
+  assert.match(requestedControlIssues(prompt, page('<h1>Tag arena</h1><p>Player 1 uses WASD. Player 2 uses the arrow keys.</p>', tagScript(''))).join(' '), /cooldown/i)
+  assert.deepEqual(
+    requestedControlIssues(prompt, page('<h1>Tag arena</h1><p>Player 1 uses WASD. Player 2 uses the arrow keys.</p>', tagScript('let lastTag = 0; '))),
+    [],
+  )
+})
+
+test('a game never draws before its players exist', () => {
+  const broken = page(
+    copy,
+    `let p1, p2; function draw(){ ctx.fillStyle = p1.color; } function loop(){ draw(); requestAnimationFrame(loop); } requestAnimationFrame(loop);`,
+  )
+  assert.match(gameInitializationIssues(broken).join(' '), /before its players/i)
+  const repaired = repairGameInitialization(broken)
+  assert.match(repaired, /function draw\(\)\{\n  if \(!p1 \|\| !p2\) return;/)
+  assert.deepEqual(gameInitializationIssues(repaired), [])
+
+  // Inline players are safe, and a reset() call before the loop is safe too.
+  assert.deepEqual(gameInitializationIssues(page(copy, `const p1 = { x: 0 }; const p2 = { x: 10 }; function draw(){ ctx.fillStyle = p1.color; } requestAnimationFrame(draw);`)), [])
+  assert.deepEqual(gameInitializationIssues(page(copy, `let p1, p2; function draw(){ ctx.fillStyle = p1.color; }\nreset();\nrequestAnimationFrame(draw);`)), [])
+})
+
+test('a contact tag is checked before collision separation', () => {
+  const prompt = 'Make a two-player platformer tag game. One player uses WASD, the other uses the arrow keys.'
+  const controls = `addEventListener('keydown', function (event) { if (['w','a','s','d'].indexOf(event.key) >= 0) movePlayer1(event.key); if (['ArrowUp','ArrowLeft','ArrowRight'].indexOf(event.key) >= 0) movePlayer2(event.key); }); let tagCooldown = 0;`
+  const unreachable = page(
+    copy,
+    `${controls} function update(dt){ checkPlayerCollision(); if (tagCooldown === 0) { const dx = Math.abs(p1.x - p2.x); p1.isIt = !p1.isIt; tagCooldown = 1; } } requestAnimationFrame(function loop(){ update(0); requestAnimationFrame(loop); });`,
+  )
+  assert.match(requestedControlIssues(prompt, unreachable).join(' '), /separated|tag can never connect/i)
+
+  const reachable = page(
+    copy,
+    `${controls} function update(dt){ const dx = Math.abs(p1.x - p2.x); checkPlayerCollision(); if (tagCooldown === 0 && dx < 30) { p1.isIt = !p1.isIt; tagCooldown = 1; } } requestAnimationFrame(function loop(){ update(0); requestAnimationFrame(loop); });`,
+  )
+  assert.deepEqual(requestedControlIssues(prompt, reachable), [])
+})
+
 test('a game must have working code, not just a static mock-up', () => {
   assert.equal(hasInteractiveCode(page(copy, gameScript)), true)
   assert.equal(hasInteractiveCode(page(copy, 'document.addEventListener("scroll", function () {})')), false)
@@ -140,6 +268,13 @@ test('a game must have working code, not just a static mock-up', () => {
   // they ship a control that has no handler.
   const staticPage = page('<h1>Neon Runner</h1><p>Guide the runner through the neon city, collect energy cells and avoid the barriers. Use the arrow keys or the on-screen controls to play.</p><canvas id="game" width="640" height="360"></canvas>')
   assert.equal(extractPages(staticPage).length, 1)
+})
+
+test('a start-with request carries a final seeded-content acceptance check', () => {
+  const seeded = buildMessages('Build a meal planner. Start with a few realistic meals.', 'SYSTEM')
+  assert.match(seeded.at(-1)!.content, /ACCEPTANCE CHECK[\s\S]*empty state/i)
+  const plain = buildMessages('Build a mortgage calculator.', 'SYSTEM')
+  assert.doesNotMatch(plain.at(-1)!.content, /ACCEPTANCE CHECK/)
 })
 
 test('an edit sends the complete previous page back to the model', () => {
@@ -155,4 +290,59 @@ test('a live embed is not treated as an editable page', () => {
   const messages = buildMessages('edit this', 'SYSTEM', { ...previous, kind: 'embed', html: 'download note' })
   assert.equal(messages.length, 2)
   assert.doesNotMatch(String(messages[1]?.content), /Current site/)
+})
+
+test('a truncated page and an anchor to a missing section are rejected', () => {
+  const truncated =
+    '<!doctype html><html><head><title>Bookstore</title></head><body><h1>Paper Lantern</h1><p>A neighborhood bookstore with staff picks, events and a reading room.</p><section id="events"><div'
+  assert.equal(extractPages(truncated).length, 0)
+  const missingTarget =
+    "<!doctype html><html lang=\"en\"><head><title>Bookstore</title></head><body><h1>Paper Lantern</h1><p>A neighborhood bookstore with staff picks, events and a reading room.</p><nav><a href=\"#events\">Events</a><a href=\"#visit\">Visit</a></nav><section id=\"events\"><h2>Events</h2><p>Poetry night and a children's story hour this week.</p></section></body></html>"
+  const html = extractPages(missingTarget)[0]!.html
+  assert.ok(verifyPage(html).failures.some((failure) => /No section has id: visit/i.test(failure)))
+})
+
+test('duplicate element ids fail the page check', () => {
+  const html = extractPages(
+    page(
+      '<h1>Tip calculator</h1><p>Enter a bill, choose a tip and split the total between everyone at the table.</p><label for="roundup">Round up</label><input id="roundup" type="checkbox"><label for="roundup">Round up the total</label><input id="roundup" type="checkbox">',
+    ),
+  )[0]!.html
+  const verification = verifyPage(html)
+  assert.ok(verification.failures.some((failure) => /Element ids are unique/i.test(failure)))
+  // Ids that only appear inside script strings are not live DOM ids.
+  const scriptOnly = page(
+    '<h1>Tip calculator</h1><p>Enter a bill, choose a tip and split the total between everyone at the table.</p><output id="out"></output>',
+    `document.getElementById('out').innerHTML = '<span id="out">ready</span>'`,
+  )
+  const clean = verifyPage(scriptOnly).checks.find((check) => check.id === 'ids')
+  assert.equal(clean?.status, 'pass')
+})
+
+test('an explicit page count is honoured', () => {
+  assert.equal(requestedPageLimit('Make a one-page portfolio'), 1)
+  assert.equal(requestedPageLimit('Make a landing page for a coffee shop'), 1)
+  assert.equal(requestedPageLimit('Make a two-page site for a bakery'), 2)
+  assert.equal(requestedPageLimit('Build a 3 page dashboard'), 3)
+  assert.equal(requestedPageLimit('Build a multi-page site'), undefined)
+
+  const pages = extractPages(
+    `<!-- page: index.html -->\n${page('<h1>Home</h1><p>Welcome to the bakery. We bake bread every morning and keep a small menu of pastries and coffee for the neighborhood.</p>')}\n<!-- page: menu.html -->\n${page('<h1>Menu</h1><p>Our menu changes with the season. Today we have sourdough, rye, butter croissants and a simple filter coffee.</p>')}`,
+    { maxPages: 1 },
+  )
+  assert.equal(pages.length, 1, 'a one-page request must not be expanded to multiple pages')
+  assert.equal(pages[0]?.name, 'index.html')
+})
+
+test('page links keep real file names and preserve anchors', () => {
+  const linked = extractPages(
+    [
+      '<!-- page: index.html -->',
+      '<!doctype html><html><body><h1>Oak Street Roast</h1><p>Fresh coffee roasted on Oak Street every morning since 2019.</p><a href="./menu.html#drinks">Menu</a></body></html>',
+      '<!-- page: menu.html -->',
+      '<!doctype html><html><body><h1>Menu</h1><p>Espresso, flat white and a filter of the day, all under five dollars.</p></body></html>',
+    ].join('\n'),
+  )
+  assert.match(linked[0]!.html, /href="menu\.html#drinks"/)
+  assert.doesNotMatch(linked[0]!.html, /href="#page:/)
 })

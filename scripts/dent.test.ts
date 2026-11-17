@@ -3,13 +3,9 @@ import { createServer } from 'node:http'
 import test from 'node:test'
 
 import {
-  DENT_PAGE_DEADLINE_MS,
-  DENT_PAGE_REPAIR_MIN_BUDGET_MS,
   dentComplete,
-  dentPageHasBudget,
   dentPageImprovement,
   dentPageRepairPrompt,
-  dentPageTimeout,
   exactDentAnswer,
   isDentHardTask,
   normalizeDentAnswer,
@@ -33,24 +29,6 @@ test('Dent only accepts a repair that removes a failed check', () => {
   assert.equal(dentPageImprovement(before, { failures: ['a'], score: 80 }), true)
   assert.equal(dentPageImprovement(before, { failures: [], score: 90 }), true)
   assert.equal(dentPageImprovement({ failures: ['a'], score: 80 }, { failures: ['a'], score: 90 }), false)
-})
-
-test('Dent page calls share one deadline instead of two full timeouts', () => {
-  const start = 1_000
-  const deadline = start + DENT_PAGE_DEADLINE_MS
-
-  // The first draft keeps its original 120s window.
-  assert.equal(dentPageTimeout(deadline, 120_000, start), 120_000)
-
-  // After a slow first draft, there is not enough time to start a repair.
-  const afterFirstDraft = start + 120_000
-  assert.equal(DENT_PAGE_DEADLINE_MS - 120_000 < DENT_PAGE_REPAIR_MIN_BUDGET_MS, true)
-  assert.equal(dentPageHasBudget(deadline, afterFirstDraft), false)
-  assert.equal(dentPageTimeout(deadline, 75_000, afterFirstDraft), 20_000)
-
-  // A fast first draft leaves a real repair window, but it is still bounded.
-  assert.equal(dentPageHasBudget(deadline, start + 100_000), true)
-  assert.equal(dentPageTimeout(deadline, 75_000, start + 100_000), 40_000)
 })
 
 test('Dent rejects a repair that trades several failures for one worse failure', () => {

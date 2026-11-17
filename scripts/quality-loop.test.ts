@@ -105,21 +105,21 @@ test('a quota notice returned with HTTP 200 is a failed lane, not an answer', as
   }
 })
 
-test('Build runs a spec, a draft, an independent review and page checks', async () => {
+test('Build goes straight to a draft and skips optional review for a clean page', async () => {
   const style = /<style>[\s\S]*?<\/style>/.exec(goodPage)?.[0] ?? ''
   const toolPage = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tip calculator</title>${style}</head>
 <body><header><strong>Quick Tip</strong><nav><a href="#tool">Tool</a></nav></header><main id="tool"><p class="eyebrow">Restaurant maths</p><h1>Tip calculator</h1><p>Enter the bill and see a twenty percent tip and the total update immediately. The result stays visible while you adjust the amount.</p><label for="bill">Bill amount</label><input id="bill" type="number" value="40" aria-label="Bill amount"><button id="go">Calculate</button><p class="note" id="out" aria-live="polite"></p></main>
 <script>(function(){var bill=document.getElementById('bill');var out=document.getElementById('out');function calculate(){var value=Number(bill.value)||0;var tip=value*0.2;out.textContent='Tip '+tip.toFixed(2)+' · Total '+(value+tip).toFixed(2);}document.getElementById('go').addEventListener('click',calculate);bill.addEventListener('input',calculate);calculate();})();</script></body></html>`
   const originalFetch = globalThis.fetch
+  let calls = 0
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? '{}')) as { messages?: Array<{ content?: string }> }
     const system = body.messages?.[0]?.content ?? ''
-    const content = /build lead/i.test(system)
-      ? 'Primary user: a diner splitting a bill. Visual direction: warm compact utility. Controls: bill input and Calculate. Acceptance: total updates, tip is 20 percent, the layout works on a phone.'
-      : /independent product reviewer/i.test(system)
-        ? '{"verdict":"pass","issues":[]}'
-        : toolPage
-    return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+    // A simple utility should be written by the first lane and accepted without
+    // a preceding planner, a reviewer, or a design rewrite.
+    assert.match(system, /senior product engineer/i)
+    calls += 1
+    return new Response(JSON.stringify({ choices: [{ message: { content: toolPage } }] }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
     })
@@ -130,9 +130,10 @@ test('Build runs a spec, a draft, an independent review and page checks', async 
       { url: 'https://b.example/v1/chat/completions', model: 'nemotron-test', label: 'Nemotron Test', description: 'test' },
     ]
     const outcome = await buildComplete({ lanes, question: 'build a tip calculator' })
+    assert.equal(calls, 1, 'a clean draft should not spend extra model calls on planning or review')
     assert.equal(outcome.build.verification?.status, 'verified')
-    assert.equal(outcome.build.verification?.spec, true)
-    assert.equal(outcome.build.verification?.reviewer, 'Nemotron Test')
+    assert.equal(outcome.build.verification?.spec, false)
+    assert.equal(outcome.build.verification?.reviewer, undefined)
     assert.equal(outcome.route?.task, 'build')
     assert.ok(outcome.build.verification?.checks.some((check) => check.id === 'interactive' && check.status === 'pass'))
   } finally {
