@@ -24,7 +24,7 @@ async function* fakePublicComplete() {
 
 const publicAi = await import('../src/worker/public-ai')
 mock.module('../src/worker/public-ai.ts', {
-  exports: {
+  namedExports: {
     ...publicAi,
     publicLanes: () => [freeLane],
     publicComplete: fakePublicComplete,

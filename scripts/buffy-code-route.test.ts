@@ -77,14 +77,14 @@ const publicAi = await import('../src/worker/public-ai')
 const buildModule = await import('../src/worker/build')
 
 mock.module('../src/worker/public-ai.ts', {
-  exports: {
+  namedExports: {
     ...publicAi,
     publicLanes: () => [dentLane],
     publicComplete: fakePublicComplete,
   },
 })
 mock.module('../src/worker/build.ts', {
-  exports: {
+  namedExports: {
     ...buildModule,
     buildComplete: fakeBuildComplete,
   },
