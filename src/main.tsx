@@ -2,11 +2,15 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { App } from './app/App'
+import { clearAttention } from './app/lib/attention'
 import { initTheme } from './app/lib/theme'
 import './styles.css'
 import './retro.css'
 
 initTheme()
+// A reload starts with no unread room messages, so never keep the previous
+// tab count or app badge from an earlier session.
+clearAttention()
 
 const codespaces = /\.(?:app\.github\.dev|githubpreview\.dev)$/i.test(window.location.hostname)
 const canUseServiceWorker = 'serviceWorker' in navigator

@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
 import { BacktickNewTab } from './components/BacktickNewTab'
 import { ConnectionRecovery } from './components/ConnectionRecovery'
+import { RoomNotifications } from './components/RoomNotifications'
 import { OfflineBanner } from './components/OfflineBanner'
 import { Shell } from './components/Shell'
 import { Spinner, ToastProvider } from './components/ui'
@@ -101,33 +102,36 @@ function Gate() {
     return <SetupNeeded message={me.error.message} onRetry={retryable ? () => void me.refetch() : undefined} />
   }
   return (
-    <Routes>
-      <Route path="browser" element={<Browser />} />
-      <Route path="browser/agent" element={<BrowserAgent />} />
-      <Route path="live" element={<Navigate to="/browser" replace />} />
-      <Route element={<Shell />}>
-        <Route index element={<Chat />} />
-        <Route path="c/:id" element={<Chat />} />
-        <Route path="buffy" element={<Buffy />} />
-        <Route path="buffy/code" element={<BuffyCode />} />
-        <Route path="analytics" element={<Analytics />} />
-        <Route path="library" element={<Library />} />
-        <Route path="humanizer" element={<Humanizer />} />
-        <Route
-          path="tools/pdf"
-          element={
-            <Suspense fallback={<div className="grid min-h-0 flex-1 place-items-center p-10"><Spinner /></div>}>
-              <PdfWorkbench />
-            </Suspense>
-          }
-        />
-        <Route path="proxy" element={<ProxyPage />} />
-        <Route path="review" element={<Review />} />
-        <Route path="room" element={<Room />} />
-        <Route path="settings" element={<Settings />} />
-      </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <RoomNotifications />
+      <Routes>
+        <Route path="browser" element={<Browser />} />
+        <Route path="browser/agent" element={<BrowserAgent />} />
+        <Route path="live" element={<Navigate to="/browser" replace />} />
+        <Route element={<Shell />}>
+          <Route index element={<Chat />} />
+          <Route path="c/:id" element={<Chat />} />
+          <Route path="buffy" element={<Buffy />} />
+          <Route path="buffy/code" element={<BuffyCode />} />
+          <Route path="analytics" element={<Analytics />} />
+          <Route path="library" element={<Library />} />
+          <Route path="humanizer" element={<Humanizer />} />
+          <Route
+            path="tools/pdf"
+            element={
+              <Suspense fallback={<div className="grid min-h-0 flex-1 place-items-center p-10"><Spinner /></div>}>
+                <PdfWorkbench />
+              </Suspense>
+            }
+          />
+          <Route path="proxy" element={<ProxyPage />} />
+          <Route path="review" element={<Review />} />
+          <Route path="room" element={<Room />} />
+          <Route path="settings" element={<Settings />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   )
 }
 

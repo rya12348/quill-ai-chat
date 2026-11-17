@@ -67,8 +67,8 @@ export function Shell() {
           </NavLink>
           <NavLink
             to="/browser"
-            aria-label="Browser"
-            title="Browser"
+            aria-label="AI Agent"
+            title="AI Agent"
             className={({ isActive }) =>
               cx('mt-2 grid size-9 place-items-center rounded-tile transition-colors', isActive ? 'bg-surface text-fg shadow-card' : 'text-muted hover:bg-surface hover:text-fg')
             }
@@ -116,7 +116,7 @@ export function Shell() {
               </Button>
               <Logo size={24} />
               <div className="ml-auto flex items-center gap-1">
-                <Link to="/browser" aria-label="Open browser" title="Browser" className="grid size-9 place-items-center rounded-tile text-muted transition-colors hover:bg-surface-2 hover:text-fg">
+                <Link to="/browser" aria-label="Open AI Agent" title="AI Agent" className="grid size-9 place-items-center rounded-tile text-muted transition-colors hover:bg-surface-2 hover:text-fg">
                   <Monitor className="size-5" />
                 </Link>
               </div>
@@ -221,7 +221,7 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
           }
         >
           <Monitor className="size-4" />
-          Browser
+            AI Agent
         </NavLink>
         {showTraffic && (
           <NavLink
@@ -250,7 +250,7 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
           }
         >
           <Globe2 className="size-4" />
-          Google
+            Browser
         </NavLink>
         <NavLink
           to="/tools/pdf"
@@ -328,6 +328,11 @@ function ConversationRow({ conversation, streaming }: { conversation: Conversati
         className={cx('relative flex h-9 items-center gap-2 rounded-control pl-3 pr-9 text-[14px] transition-colors', active ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')}
       >
         <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
+        {conversation.reaction && (
+          <span className="shrink-0 text-[13px] leading-none" title="Chat reaction" aria-label={`Chat reaction: ${conversation.reaction}`}>
+            {conversation.reaction}
+          </span>
+        )}
         {streaming && <InkThinking compact />}
       </NavLink>
       <span className={cx('absolute right-1 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100', active && 'opacity-100')}>

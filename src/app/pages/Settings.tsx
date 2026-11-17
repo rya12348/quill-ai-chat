@@ -7,7 +7,9 @@ import { modelDisplayName } from '../../shared/model-display'
 import { isLocalTunnelHost } from '../../shared/traffic'
 import { Avatar, Badge, Button, ConfirmDialog, useToast } from '../components/ui'
 import { useDeleteAccount, useDeleteAllConversations, useMe, useModels, useSettings, useUpdateSettings } from '../lib/api'
+import { cx } from '../lib/cx'
 import { untilLabel } from '../lib/format'
+import { setNotificationSetting, useNotificationSettings } from '../lib/notifications'
 import { openNewTab } from '../components/BacktickNewTab'
 
 export function Settings() {
@@ -22,13 +24,65 @@ export function Settings() {
   const { data: models } = useModels()
   const { data: settings } = useSettings()
   const update = useUpdateSettings()
+  const notificationSettings = useNotificationSettings()
+  const [browserPermission, setBrowserPermission] = useState<NotificationPermission | 'unsupported'>(() =>
+    typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
+  )
   useEffect(() => {
     if (settings) setInstructions(settings.instructions)
   }, [settings])
+  useEffect(() => {
+    const refreshPermission = () =>
+      setBrowserPermission(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)
+    document.addEventListener('visibilitychange', refreshPermission)
+    window.addEventListener('focus', refreshPermission)
+    return () => {
+      document.removeEventListener('visibilitychange', refreshPermission)
+      window.removeEventListener('focus', refreshPermission)
+    }
+  }, [])
   if (!me) return null
   const mode = me.capabilities.mode
   const auth = me.capabilities.auth
   const canViewTraffic = auth !== 'guest' || isLocalTunnelHost(window.location.hostname)
+  const browserNotificationsOn = notificationSettings.browser && browserPermission !== 'unsupported'
+  const browserNotificationDetail =
+    browserPermission === 'unsupported'
+      ? 'This browser does not support notifications.'
+      : browserPermission === 'denied'
+        ? 'On by default, but blocked in your browser settings. Allow notifications for this site to receive them in another tab.'
+        : browserPermission === 'granted'
+          ? 'On by default. Shown only when Ink is in another tab.'
+          : 'On by default. Your browser will ask for permission once, then notifications work in another tab.'
+  const toggleBrowserNotifications = async () => {
+    if (typeof Notification === 'undefined') {
+      toast('This browser does not support notifications.', 'danger')
+      return
+    }
+    if (browserNotificationsOn) {
+      setNotificationSetting('browser', false)
+      return
+    }
+    if (Notification.permission === 'denied') {
+      toast('Browser notifications are blocked in your browser settings.', 'danger')
+      return
+    }
+    let permission: NotificationPermission = Notification.permission
+    if (permission === 'default') {
+      try {
+        permission = await Notification.requestPermission()
+      } catch {
+        permission = 'denied'
+      }
+      setBrowserPermission(permission)
+    }
+    if (permission !== 'granted') {
+      toast('Browser notifications were not enabled.', 'danger')
+      return
+    }
+    setNotificationSetting('browser', true)
+    toast('Browser notifications enabled')
+  }
   const modelNames = models?.items.map((model) => model.name).join(', ')
   const connections: { label: string; ok: boolean; detail: string; badge?: string; action?: React.ReactNode }[] = [
     {
@@ -139,6 +193,40 @@ export function Settings() {
               </Button>
             </div>
           </div>
+        </section>
+
+        <section className="mt-8">
+          <h2 className="text-[17px] font-semibold">Notifications</h2>
+          <div className="mt-3 divide-y divide-line rounded-card bg-surface shadow-card">
+            <div className="flex items-start justify-between gap-4 p-4">
+              <div className="min-w-0">
+                <p className="text-[14.5px] font-medium">Website notifications</p>
+                <p className="mt-1 text-[13.5px] leading-relaxed text-faint">
+                  Built-in notices and the unread tab count for every room. On by default.
+                </p>
+              </div>
+              <NotificationSwitch
+                checked={notificationSettings.inApp}
+                onChange={() => setNotificationSetting('inApp', !notificationSettings.inApp)}
+                label="Website notifications"
+              />
+            </div>
+            <div className="flex items-start justify-between gap-4 p-4">
+              <div className="min-w-0">
+                <p className="text-[14.5px] font-medium">Browser notifications</p>
+                <p className="mt-1 text-[13.5px] leading-relaxed text-faint">{browserNotificationDetail}</p>
+              </div>
+              <NotificationSwitch
+                checked={browserNotificationsOn}
+                onChange={() => void toggleBrowserNotifications()}
+                disabled={browserPermission === 'unsupported'}
+                label="Browser notifications"
+              />
+            </div>
+          </div>
+          <p className="mt-2 text-[12px] leading-relaxed text-faint">
+            While Ink is visible, only the in-app notice appears. Browser notifications are for when you switch to another tab; the two never fire together. Turn either off here; there is no separate enable button elsewhere.
+          </p>
         </section>
 
         <section className="mt-8">
@@ -257,5 +345,39 @@ export function Settings() {
         }
       />
     </div>
+  )
+}
+
+function NotificationSwitch({
+  checked,
+  onChange,
+  disabled,
+  label,
+}: {
+  checked: boolean
+  onChange: () => void
+  disabled?: boolean
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onChange}
+      className={cx(
+        'relative mt-0.5 inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+        checked ? 'bg-accent' : 'bg-line-strong',
+      )}
+    >
+      <span
+        className={cx(
+          'block size-5 rounded-full bg-surface shadow-[0_1px_3px_rgb(0_0_0/0.2)] transition-transform',
+          checked ? 'translate-x-[18px]' : 'translate-x-0.5',
+        )}
+      />
+    </button>
   )
 }
