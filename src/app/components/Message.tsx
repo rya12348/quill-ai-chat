@@ -54,13 +54,31 @@ export function UserMessage({ content, attachments }: { content: string; attachm
         )}
         {files.length > 0 && (
           <div className="flex flex-wrap justify-end gap-1.5">
-            {files.map((attachment) => (
-              <span key={attachment.id} className="inline-flex max-w-[260px] items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 text-[12.5px] text-muted" title={attachment.name}>
-                <FileText className="size-3.5 shrink-0" />
-                <span className="truncate">{attachment.name}</span>
-                <span className="shrink-0 text-faint">{fileSize(attachment.size)}</span>
-              </span>
-            ))}
+            {files.map((attachment) => {
+              const link =
+                attachment.mime === 'text/uri-list' && attachment.url && /^https?:\/\//i.test(attachment.url)
+                  ? attachment.url
+                  : null
+              return link ? (
+                <a
+                  key={attachment.id}
+                  href={link}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex max-w-[260px] items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 text-[12.5px] text-muted transition-colors hover:text-fg"
+                  title={link}
+                >
+                  <Link2 className="size-3.5 shrink-0" />
+                  <span className="truncate">{attachment.name}</span>
+                </a>
+              ) : (
+                <span key={attachment.id} className="inline-flex max-w-[260px] items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 text-[12.5px] text-muted" title={attachment.name}>
+                  <FileText className="size-3.5 shrink-0" />
+                  <span className="truncate">{attachment.name}</span>
+                  <span className="shrink-0 text-faint">{fileSize(attachment.size)}</span>
+                </span>
+              )
+            })}
           </div>
         )}
         {content.trim() && (

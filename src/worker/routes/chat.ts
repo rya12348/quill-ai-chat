@@ -198,8 +198,9 @@ chat.post('/', async (c) => {
   let conversationRow = input.conversationId
     ? await db
         .prepare(
-          `SELECT c.*, pc.project_id FROM conversations c
+          `SELECT c.*, pc.project_id, cr.reaction AS reaction FROM conversations c
            LEFT JOIN project_conversations pc ON pc.conversation_id = c.id AND pc.owner_sub = c.owner_sub
+           LEFT JOIN conversation_reactions cr ON cr.conversation_id = c.id AND cr.owner_sub = c.owner_sub
            WHERE c.owner_sub = ? AND c.id = ?`,
         )
         .bind(owner, input.conversationId)
@@ -453,7 +454,7 @@ chat.post('/', async (c) => {
       : (engineLanes.find((lane) => lane.model === input.model) ?? engineLanes.find((lane) => !lane.selectedOnly))?.model ?? DEFAULT_MODEL
   const statements: D1PreparedStatement[] = []
   if (!conversationRow) {
-    conversationRow = { id: id(), owner_sub: owner, title: titleFrom(content || attachments[0]?.name || ''), model, created_at: t, updated_at: t, project_id: projectId }
+    conversationRow = { id: id(), owner_sub: owner, title: titleFrom(content || attachments[0]?.name || ''), model, created_at: t, updated_at: t, project_id: projectId, reaction: null }
     statements.push(
       db.prepare(`INSERT INTO conversations (id, owner_sub, title, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`).bind(conversationRow.id, owner, conversationRow.title, model, t, t),
     )

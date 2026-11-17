@@ -79,6 +79,15 @@ const SCHEMA = [
     updated_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS conversation_summaries_owner ON conversation_summaries(owner_sub)`,
+  // A chat can carry one emoji reaction. Kept separate so existing
+  // conversation rows need no schema migration.
+  `CREATE TABLE IF NOT EXISTS conversation_reactions (
+    conversation_id TEXT PRIMARY KEY,
+    owner_sub TEXT NOT NULL,
+    reaction TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS conversation_reactions_owner ON conversation_reactions(owner_sub)`,
   // Pinning is a library preference, not a property of the artifact, so a pin
   // never rewrites the reply or its generated content.
   `CREATE TABLE IF NOT EXISTS pinned_artifacts (
@@ -302,6 +311,23 @@ const SCHEMA = [
   )`,
   `CREATE INDEX IF NOT EXISTS room_messages_room_created ON room_messages(room, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS room_messages_author_created ON room_messages(author_sub, room, created_at DESC)`,
+  // Room media uses the same short retention as its message. The row keeps the
+  // bytes so a private room's images still require the room access check.
+  `CREATE TABLE IF NOT EXISTS room_message_attachments (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    room TEXT NOT NULL,
+    owner_sub TEXT NOT NULL,
+    name TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    data TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS room_message_attachments_message ON room_message_attachments(room, message_id, position)`,
+  `CREATE INDEX IF NOT EXISTS room_message_attachments_created ON room_message_attachments(room, created_at)`,
   // Humanizer usage only. The pasted draft and the rewrite are never stored;
   // these rows exist to enforce the per-user daily cap and cooldown.
   `CREATE TABLE IF NOT EXISTS humanizer_runs (
@@ -399,6 +425,32 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS http_errors_created ON http_errors(created_at)`,
   // All-time unique counts and per-page rankings both look up visitor hashes.
   `CREATE INDEX IF NOT EXISTS site_visits_visitor ON site_visits(visitor_hash)`,
+  // Named chat rooms. The main room is seeded below and cannot be removed by
+  // the app. Private rows keep only a PBKDF2 hash; the password itself is
+  // never stored, logged or returned. room_access is the server-side unlock
+  // grant used for snapshots, messages and realtime tickets.
+  `CREATE TABLE IF NOT EXISTS chat_rooms (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    visibility TEXT NOT NULL CHECK (visibility IN ('public', 'private')),
+    password_hash TEXT,
+    created_by TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS chat_rooms_name ON chat_rooms(name COLLATE NOCASE)`,
+  `CREATE INDEX IF NOT EXISTS chat_rooms_visibility_created ON chat_rooms(visibility, created_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS room_access (
+    room_id TEXT NOT NULL,
+    user_sub TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, user_sub)
+  )`,
+  `CREATE INDEX IF NOT EXISTS room_access_user ON room_access(user_sub, created_at DESC)`,
+  `INSERT OR IGNORE INTO chat_rooms (id, name, visibility, password_hash, created_by, created_at)
+   VALUES ('general', 'General', 'public', NULL, 'system', 0)`,
+  // Preserve recent messages from the old single-room deployment. This is
+  // idempotent, so it is safe on the per-isolate schema pass.
+  `UPDATE room_messages SET room = 'general' WHERE room = 'lobby'`,
 ]
 
 let ready: Promise<void> | undefined
@@ -437,6 +489,7 @@ export function mapConversation(r: Row): Conversation {
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
     projectId: typeof r.project_id === 'string' ? r.project_id : null,
+    reaction: typeof r.reaction === 'string' && r.reaction ? r.reaction : null,
   }
 }
 

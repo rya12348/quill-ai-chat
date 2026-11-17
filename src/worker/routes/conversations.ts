@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 
+import { CHAT_REACTIONS } from '../../shared/config'
 import { normalizeMemory } from '../../shared/memory'
 import { groupAttachmentMeta } from '../attachments'
 import { aiConfigured, isModelId } from '../ai'
@@ -22,8 +23,9 @@ conversations.get('/', async (c) => {
   const rows = await c
     .get('db')
     .prepare(
-      `SELECT c.*, pc.project_id FROM conversations c
+      `SELECT c.*, pc.project_id, cr.reaction AS reaction FROM conversations c
        LEFT JOIN project_conversations pc ON pc.conversation_id = c.id AND pc.owner_sub = c.owner_sub
+       LEFT JOIN conversation_reactions cr ON cr.conversation_id = c.id AND cr.owner_sub = c.owner_sub
        WHERE c.owner_sub = ? ORDER BY c.updated_at DESC LIMIT 200`,
     )
     .bind(c.get('user').sub)
@@ -46,8 +48,9 @@ conversations.get('/:id', async (c) => {
   const [conversation, messages, attachmentRows] = await db.batch([
     db
       .prepare(
-        `SELECT c.*, pc.project_id FROM conversations c
+        `SELECT c.*, pc.project_id, cr.reaction AS reaction FROM conversations c
          LEFT JOIN project_conversations pc ON pc.conversation_id = c.id AND pc.owner_sub = c.owner_sub
+         LEFT JOIN conversation_reactions cr ON cr.conversation_id = c.id AND cr.owner_sub = c.owner_sub
          WHERE c.owner_sub = ? AND c.id = ?`,
       )
       .bind(owner, conversationId),
@@ -55,7 +58,7 @@ conversations.get('/:id', async (c) => {
       .prepare(`SELECT m.*, r.content AS reasoning, r.duration_ms AS reasoning_ms, s.content AS sources, f.rating AS feedback, tm.content AS team, mp.content AS proof, mr.content AS research, ma.content AS analysis, mb.content AS build, mc.content AS canvas, mg.content AS agent FROM messages m LEFT JOIN message_reasoning r ON r.message_id = m.id AND r.owner_sub = m.owner_sub LEFT JOIN message_sources s ON s.message_id = m.id AND s.owner_sub = m.owner_sub LEFT JOIN message_feedback f ON f.message_id = m.id AND f.owner_sub = m.owner_sub LEFT JOIN message_team tm ON tm.message_id = m.id AND tm.owner_sub = m.owner_sub LEFT JOIN message_proof mp ON mp.message_id = m.id AND mp.owner_sub = m.owner_sub LEFT JOIN message_research mr ON mr.message_id = m.id AND mr.owner_sub = m.owner_sub LEFT JOIN message_analysis ma ON ma.message_id = m.id AND ma.owner_sub = m.owner_sub LEFT JOIN message_build mb ON mb.message_id = m.id AND mb.owner_sub = m.owner_sub LEFT JOIN message_canvas mc ON mc.message_id = m.id AND mc.owner_sub = m.owner_sub LEFT JOIN message_agent mg ON mg.message_id = m.id AND mg.owner_sub = m.owner_sub WHERE m.owner_sub = ? AND m.conversation_id = ? AND NOT (m.role = 'assistant' AND m.content = '') ORDER BY m.created_at ASC`)
       .bind(owner, conversationId),
     db
-      .prepare(`SELECT id, message_id, name, mime, size, kind FROM message_attachments WHERE owner_sub = ? AND conversation_id = ? ORDER BY message_id, position, created_at`)
+      .prepare(`SELECT id, message_id, name, mime, size, kind, CASE WHEN mime = 'text/uri-list' THEN data END AS url FROM message_attachments WHERE owner_sub = ? AND conversation_id = ? ORDER BY message_id, position, created_at`)
       .bind(owner, conversationId),
   ])
   if (!conversation.results[0]) return c.json({ error: 'Not found.' }, 404)
@@ -169,6 +172,36 @@ conversations.post('/:id/title', async (c) => {
     .bind(owner, conversationId)
     .first<{ title: string }>()
   return privateJson(c, { title: saved?.title ?? title })
+})
+
+/** Attach or remove the owner's single emoji reaction to a chat. */
+conversations.patch('/:id/reaction', async (c) => {
+  const db = c.get('db')
+  const owner = c.get('user').sub
+  const conversationId = c.req.param('id')
+  const input = await c.req.json<{ reaction?: unknown }>().catch(() => ({} as { reaction?: unknown }))
+  const reaction = input.reaction
+  if (reaction !== null && (typeof reaction !== 'string' || !(CHAT_REACTIONS as readonly string[]).includes(reaction))) {
+    return c.json({ error: 'reaction', message: 'Choose one of the available reactions.' }, 400)
+  }
+  const exists = await db
+    .prepare(`SELECT 1 FROM conversations WHERE owner_sub = ? AND id = ?`)
+    .bind(owner, conversationId)
+    .first()
+  if (!exists) return c.json({ error: 'not_found', message: 'This chat is not here any more.' }, 404)
+  if (reaction === null) {
+    await db.prepare(`DELETE FROM conversation_reactions WHERE owner_sub = ? AND conversation_id = ?`).bind(owner, conversationId).run()
+  } else {
+    await db
+      .prepare(
+        `INSERT INTO conversation_reactions (conversation_id, owner_sub, reaction, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(conversation_id) DO UPDATE SET reaction = excluded.reaction, updated_at = excluded.updated_at`,
+      )
+      .bind(conversationId, owner, reaction, now())
+      .run()
+  }
+  return privateJson(c, { reaction })
 })
 
 /** The condensed memory carried from earlier turns, when one exists. */
@@ -309,8 +342,9 @@ conversations.patch('/:id', async (c) => {
   await db.batch(statements)
   const row = await db
     .prepare(
-      `SELECT c.*, pc.project_id FROM conversations c
+      `SELECT c.*, pc.project_id, cr.reaction AS reaction FROM conversations c
        LEFT JOIN project_conversations pc ON pc.conversation_id = c.id AND pc.owner_sub = c.owner_sub
+       LEFT JOIN conversation_reactions cr ON cr.conversation_id = c.id AND cr.owner_sub = c.owner_sub
        WHERE c.owner_sub = ? AND c.id = ?`,
     )
     .bind(owner, conversationId)
@@ -340,6 +374,7 @@ conversations.delete('/:id', async (c) => {
     db.prepare(`DELETE FROM message_attachments WHERE owner_sub = ? AND conversation_id = ?`).bind(owner, conversationId),
     db.prepare(`DELETE FROM conversation_shares WHERE owner_sub = ? AND conversation_id = ?`).bind(owner, conversationId),
     db.prepare(`DELETE FROM conversation_summaries WHERE owner_sub = ? AND conversation_id = ?`).bind(owner, conversationId),
+    db.prepare(`DELETE FROM conversation_reactions WHERE owner_sub = ? AND conversation_id = ?`).bind(owner, conversationId),
     db.prepare(`DELETE FROM project_conversations WHERE owner_sub = ? AND conversation_id = ?`).bind(owner, conversationId),
     db.prepare(`DELETE FROM messages WHERE owner_sub = ? AND conversation_id = ?`).bind(owner, conversationId),
     db.prepare(`DELETE FROM conversations WHERE owner_sub = ? AND id = ?`).bind(owner, conversationId),

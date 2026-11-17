@@ -5,6 +5,9 @@
 export const BRAND = 'Ink'
 export const TAGLINE = 'Write, research and build pages in one thread.'
 
+/** The emoji a person can attach to a chat. */
+export const CHAT_REACTIONS = ['❤️', '😂', '👍', '🔥', '😮', '🎉'] as const
+
 /** What the model is told before every conversation. */
 export const SYSTEM_PROMPT = `You are ${BRAND}, a sharp, practical writing and research tool. Your job is to help the person think clearly and get the thing done — not to sound impressive.
 
@@ -165,9 +168,16 @@ export const FREEBUFF_API_URL = 'https://freebuff.com/api/v1/paid'
 /** Where the app's owner creates and funds an API key. */
 export const FREEBUFF_API_KEYS_URL = 'https://freebuff.com/account/api'
 
-/** The one public room. The ticket and message routes accept only this id. */
-export const ROOM_ID = 'lobby'
-export const ROOM_NAME = 'Chat'
+/** The main room. It is always present, public, and cannot be replaced. */
+export const ROOM_ID = 'general'
+export const ROOM_NAME = 'General'
+/** Room names are short enough to scan in the room rail. */
+export const ROOM_NAME_CHARS = 32
+/** Private rooms need a password the creator chooses. */
+export const ROOM_PASSWORD_MIN_CHARS = 4
+export const ROOM_PASSWORD_MAX_CHARS = 72
+/** Keep the room catalog small enough to load in one snapshot. */
+export const MAX_ROOMS = 50
 /** A room message is deliberately shorter than a chat reply. */
 export const ROOM_MESSAGE_CHARS = 500
 /** Messages are part of the room for exactly thirty minutes. */

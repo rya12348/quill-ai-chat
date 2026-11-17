@@ -400,18 +400,18 @@ Caching strategy in `public/sw.js`:
   Online reads are never stale. Cached responses carry `x-stet-offline: 1`,
   which is what makes the offline banner appear.
 - **API writes and the chat stream** pass through untouched online. If the
-  network is down the Worker returns a JSON 503. The app stores the draft per
-  conversation, queues one send and retries it when the browser comes online.
-  The send carries a client-generated message id, so the Worker refuses a
-  duplicate instead of adding the same message twice.
+  network is down the Worker returns a JSON 503. The app keeps the draft per
+  conversation and puts a failed send back in the composer with an error, so a
+  retry is always explicit. The send carries a client-generated message id, so
+  the Worker refuses a duplicate instead of adding the same message twice.
 - **Hashed assets** (JS, CSS, fonts, icons) are precached during service-worker
   install. The first offline load therefore has the complete app, not just the
   HTML shell.
 
 Offline, the shell, the chat list and any conversation opened before are
 readable; one never opened shows **Not available offline** instead of crashing
-or a blank page. A message typed offline stays visible in the composer, survives
-a reload, and sends once when the connection returns. Search and Settings
+or a blank page. A message typed offline stays visible in the composer and
+survives a reload; send it again when the connection returns. Search and Settings
 changes still need the network. The service worker runs only in the built app
 (`npm run build`), not under `vite dev`; run the built Worker to try install and
 offline behaviour.

@@ -203,6 +203,8 @@ export function groupAttachmentMeta(rows: Row[], baseUrl = '/api/attachments'): 
       size: Number(row.size),
       kind: row.kind === 'image' ? 'image' : 'text',
     }, baseUrl)
+    const link = row.url
+    if (typeof link === 'string' && /^https?:\/\//i.test(link)) attachment.url = link
     const messageId = row.message_id as string
     const list = grouped.get(messageId) ?? []
     list.push(attachment)

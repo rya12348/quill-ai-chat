@@ -1,84 +1,8 @@
-// A send typed while offline is kept in localStorage until the network comes
-// back. The draft is stored separately per conversation so a reload puts the
-// exact text back in the composer; the pending item carries the settings and a
-// client-generated message id, so the Worker can make the retry idempotent.
-import { useSyncExternalStore } from 'react'
-
-import type { ReasoningEffort } from '../../shared/types'
-
-export type PendingMessage = {
-  clientMessageId: string
-  conversationId: string | null
-  projectId: string | null
-  content: string
-  model: string
-  strategy: 'fast' | 'blend' | 'proof' | 'research' | 'analyze' | 'build' | 'canvas' | 'agent' | 'advisor'
-  reasoning: boolean
-  effort?: ReasoningEffort
-  createdAt: number
-}
-
-const PENDING_KEY = 'stet:pending-send'
-const listeners = new Set<() => void>()
-
-function parsePending(value: string | null): PendingMessage | null {
-  if (!value) return null
-  try {
-    const raw = JSON.parse(value) as Partial<PendingMessage>
-    if (typeof raw.clientMessageId !== 'string' || typeof raw.content !== 'string' || !raw.content.trim()) return null
-    return {
-      clientMessageId: raw.clientMessageId,
-      conversationId: typeof raw.conversationId === 'string' ? raw.conversationId : null,
-      projectId: typeof raw.projectId === 'string' ? raw.projectId : null,
-      content: raw.content,
-      model: typeof raw.model === 'string' ? raw.model : '',
-      strategy: raw.strategy === 'fast' ? 'fast' : raw.strategy === 'proof' ? 'proof' : raw.strategy === 'research' ? 'research' : raw.strategy === 'analyze' ? 'analyze' : raw.strategy === 'build' ? 'build' : raw.strategy === 'canvas' ? 'canvas' : raw.strategy === 'advisor' ? 'advisor' : raw.strategy === 'agent' ? 'agent' : 'blend',
-      reasoning: raw.reasoning === true,
-      ...(raw.effort === 'low' || raw.effort === 'default' || raw.effort === 'max' ? { effort: raw.effort } : {}),
-      createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
-    }
-  } catch {
-    return null
-  }
-}
-
-let pending: PendingMessage | null = typeof localStorage !== 'undefined' ? parsePending(localStorage.getItem(PENDING_KEY)) : null
-
-function emit() {
-  listeners.forEach((listener) => listener())
-}
-
-function update(next: PendingMessage | null) {
-  pending = next
-  if (typeof localStorage !== 'undefined') {
-    if (next) localStorage.setItem(PENDING_KEY, JSON.stringify(next))
-    else localStorage.removeItem(PENDING_KEY)
-  }
-  emit()
-}
-
-export function usePendingMessage(): PendingMessage | null {
-  return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-    () => pending,
-    () => pending,
-  )
-}
-
-/** Keeps one queued send at a time so a retry cannot fan out into duplicates. */
-export function queueMessage(message: PendingMessage): boolean {
-  if (pending) return false
-  update(message)
-  return true
-}
-
-export function clearPendingMessage(clientMessageId: string) {
-  if (pending?.clientMessageId !== clientMessageId) return
-  update(null)
-}
+// Draft text is stored per conversation so a reload puts the exact text back in
+// the composer. Sends are never queued in the background: if a request cannot
+// start, the caller restores the text as a normal draft and lets the person try
+// again immediately.
+const LEGACY_PENDING_KEY = 'stet:pending-send'
 
 export function draftKey(conversationId: string | undefined): string {
   return `stet:draft:${conversationId ?? 'new'}`
@@ -86,19 +10,50 @@ export function draftKey(conversationId: string | undefined): string {
 
 export function readDraft(key: string): string {
   if (typeof localStorage === 'undefined') return ''
-  return localStorage.getItem(key) ?? ''
+  try {
+    return localStorage.getItem(key) ?? ''
+  } catch {
+    return ''
+  }
 }
 
 export function writeDraft(key: string, value: string) {
   if (typeof localStorage === 'undefined') return
-  if (value) localStorage.setItem(key, value)
-  else localStorage.removeItem(key)
+  try {
+    if (value) localStorage.setItem(key, value)
+    else localStorage.removeItem(key)
+  } catch {
+    /* storage can be unavailable; the in-memory draft still works */
+  }
 }
 
-if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (event) => {
-    if (event.key !== PENDING_KEY) return
-    pending = parsePending(event.newValue)
-    emit()
-  })
+/**
+ * Older builds kept one failed send in localStorage and retried it in the
+ * background. If that retry stalled it could block the composer forever.
+ * Consume a matching legacy entry once, restore its text as a draft, and
+ * remove the key. New sends never create this entry.
+ */
+export function takeLegacyPendingMessage(conversationId: string | undefined): string | null {
+  if (typeof localStorage === 'undefined') return null
+  let raw: string | null
+  try {
+    raw = localStorage.getItem(LEGACY_PENDING_KEY)
+  } catch {
+    return null
+  }
+  if (!raw) return null
+  try {
+    const value = JSON.parse(raw) as { content?: unknown; conversationId?: unknown }
+    if (typeof value.content !== 'string' || !value.content.trim()) {
+      localStorage.removeItem(LEGACY_PENDING_KEY)
+      return null
+    }
+    const storedConversationId = typeof value.conversationId === 'string' ? value.conversationId : null
+    if (storedConversationId !== (conversationId ?? null)) return null
+    localStorage.removeItem(LEGACY_PENDING_KEY)
+    return value.content
+  } catch {
+    localStorage.removeItem(LEGACY_PENDING_KEY)
+    return null
+  }
 }

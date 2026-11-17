@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Bot, Brain, ClipboardList, Compass, Download, FileSpreadsheet, FileText, Folder, FolderX, Globe2, Hammer, Layers, Menu as MenuIcon, MessageCircle, Monitor, Search, Share2, ShieldCheck, Sparkles, type LucideIcon } from 'lucide-react'
 
-import { DEFAULT_MODEL, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, MAX_CONTEXT_MESSAGES, MODELS, SUGGESTIONS } from '../../shared/config'
+import { CHAT_REACTIONS, DEFAULT_MODEL, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, MAX_CONTEXT_MESSAGES, MODELS, SUGGESTIONS } from '../../shared/config'
 import { modelDisplayName } from '../../shared/model-display'
 import { estimateConversationTokens, estimateTokens } from '../../shared/tokens'
 import { suggestToolMode, type SuggestedToolMode } from '../../shared/agent'
@@ -16,7 +16,7 @@ import { Mark, useMobileNav } from '../components/Shell'
 import { ShareDialog } from '../components/ShareDialog'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { Button, Dialog, Menu, Spinner, useToast } from '../components/ui'
-import { ApiError, useConversation, useMe, useMessageFeedback, useModels, useProjects, useProviders, useReviewSummary, useSetConversationModel, useSetConversationProject } from '../lib/api'
+import { ApiError, useConversation, useMe, useMessageFeedback, useModels, useProjects, useProviders, useReviewSummary, useSetConversationModel, useSetConversationProject, useSetConversationReaction } from '../lib/api'
 import { cx } from '../lib/cx'
 import { untilLabel } from '../lib/format'
 import { resolvePresetModel, type ModelChoice, type ModelPreset } from '../lib/model-presets'
@@ -24,8 +24,8 @@ import { AttachmentError, clipboardFiles, readAttachment, type PendingAttachment
 import { briefFromConversation } from '../lib/buffy-brief'
 import { buildDataset, isDataFile, readDataFile } from '../lib/dataset'
 import { getDataset, putDataset } from '../lib/dataset-store'
-import { checkConnection, useOffline } from '../lib/offline'
-import { clearPendingMessage, draftKey, queueMessage, readDraft, usePendingMessage, writeDraft } from '../lib/outbox'
+import { checkConnection } from '../lib/offline'
+import { draftKey, readDraft, takeLegacyPendingMessage, writeDraft } from '../lib/outbox'
 import { dismissTurn, refreshConversationTitle, settleAnalysis, startTurn, useTurn } from '../lib/turn'
 
 // Versioned so the new mid-list default reaches people who had the old first model saved.
@@ -121,18 +121,18 @@ export function Chat() {
   const { data: me } = useMe()
   const { data: models } = useModels()
   const { data: health } = useProviders()
-  const page = useConversation(id)
+  const turn = useTurn()
+  // While a reply is streaming, startTurn owns the cache. Once the chat is
+  // idle, poll the saved conversation so another tab or device appears without
+  // a manual browser reload.
+  const page = useConversation(id, { refetchInterval: turn ? false : 4_000 })
   const { data: projectData } = useProjects()
   const projects = projectData?.items ?? []
-  const turn = useTurn()
   const setConversationModel = useSetConversationModel()
   const setConversationProject = useSetConversationProject()
   const feedback = useMessageFeedback()
-  const offline = useOffline()
-  const pending = usePendingMessage()
-
   const draftStoreKey = draftKey(id)
-  const [draft, setDraft] = useState(() => readDraft(draftStoreKey))
+  const [draft, setDraft] = useState(() => readDraft(draftStoreKey) || takeLegacyPendingMessage(id) || '')
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [filePickerRequest, setFilePickerRequest] = useState(0)
   const [composerFocusRequest, setComposerFocusRequest] = useState(0)
@@ -172,6 +172,17 @@ export function Chat() {
   const [queuedToolSend, setQueuedToolSend] = useState<{ content: string; mode: SuggestedToolMode } | null>(null)
   const skipToolSuggestion = useRef(false)
   const queuedSendActive = useRef(false)
+  const sendingKey = useRef<string | null>(null)
+  const failedSend = useRef<{
+    clientMessageId: string
+    content: string
+    conversationId: string | undefined
+    projectId: string | undefined
+    model: string
+    strategy: string
+    effort: ReasoningEffort
+    attachmentKey: string
+  } | null>(null)
   // The conversation this page created from "/", so it keeps showing the
   // reply during the moment between the server naming it and the URL changing.
   const owned = useRef<string | null>(null)
@@ -199,8 +210,8 @@ export function Chat() {
   useEffect(() => {
     if (draftKeyRef.current === draftStoreKey) return
     draftKeyRef.current = draftStoreKey
-    setDraft(readDraft(draftStoreKey))
-  }, [draftStoreKey])
+    setDraft(readDraft(draftStoreKey) || takeLegacyPendingMessage(id) || '')
+  }, [draftStoreKey, id])
   useEffect(() => {
     writeDraft(draftKeyRef.current, draft)
   }, [draft])
@@ -328,7 +339,6 @@ export function Chat() {
   // until an advanced mode is selected. The model can still reason internally.
   const showReasoning = strategy !== 'fast'
   const limitReached = me ? me.usage.used >= me.usage.limit && !busy : false
-  const pendingHere = pending !== null && (pending.conversationId ?? null) === (id ?? null)
   const canOfferMode = (candidate: SuggestedToolMode) => {
     if (candidate === 'research') return canResearch && researchLeft !== 0
     if (candidate === 'analyze') return canAnalyze && analyzeLeft !== 0
@@ -403,6 +413,35 @@ export function Chat() {
     [agentOn, analyzeOn, attachments, buildOn, researchOn, toast],
   )
 
+  const addLink = useCallback(
+    (raw: string) => {
+      if (attachments.length >= MAX_ATTACHMENTS) {
+        toast(`You can attach up to ${MAX_ATTACHMENTS} items.`, 'danger')
+        return
+      }
+      const url = raw.trim()
+      let host = 'link'
+      try {
+        if (/\s/.test(url) || !/^https?:\/\//i.test(url)) return
+        const parsed = new URL(url)
+        if (!parsed.hostname.includes('.') && parsed.hostname !== 'localhost') return
+        host = parsed.hostname.replace(/^www\./i, '') || 'link'
+      } catch {
+        return
+      }
+      const attachment: PendingAttachment = {
+        id: crypto.randomUUID(),
+        name: host,
+        mime: 'text/uri-list',
+        size: new TextEncoder().encode(url).byteLength,
+        kind: 'text',
+        data: url,
+      }
+      setAttachments((current) => [...current, attachment])
+    },
+    [attachments.length, toast],
+  )
+
   // Pasting a screenshot should work even when focus is on the page rather
   // than the textarea. The composer handles pastes aimed at its textarea; this
   // catch-all deliberately leaves every other editable field alone.
@@ -414,15 +453,11 @@ export function Chat() {
       if (!files.length) return
       event.preventDefault()
       if (busy || limitReached) return
-      if (pending) {
-        toast('A saved message is already waiting to send.', 'danger')
-        return
-      }
       addFiles(files)
     }
     document.addEventListener('paste', onPaste)
     return () => document.removeEventListener('paste', onPaste)
-  }, [addFiles, busy, limitReached, pending, toast])
+  }, [addFiles, busy, limitReached, toast])
 
   const send = useCallback(
     async (content: string) => {
@@ -453,10 +488,6 @@ export function Chat() {
         toast('Describe the goal you want Agent to work on.', 'danger')
         return
       }
-      if (pending) {
-        toast('A saved message is already waiting to send.', 'danger')
-        return
-      }
       if (skipToolSuggestion.current) {
         skipToolSuggestion.current = false
       } else if (!busy && !limitReached && strategy === 'fast' && !taskMode && !proof && !blend) {
@@ -469,20 +500,40 @@ export function Chat() {
           return
         }
       }
-      const clientMessageId = crypto.randomUUID()
+      const projectId = !id ? selectedProjectId ?? undefined : undefined
+      const attachmentKey = outgoing.map((attachment) => attachment.id).join('|')
+      const submissionKey = `${id ?? 'new'}|${content}|${attachmentKey}`
+      // A second submit of the same message before React paints the busy state
+      // must not start a second turn with a second id.
+      if (sendingKey.current === submissionKey) return
+      sendingKey.current = submissionKey
+      const previous = failedSend.current
+      const clientMessageId =
+        previous &&
+        previous.content === content &&
+        previous.conversationId === id &&
+        previous.projectId === projectId &&
+        previous.model === model &&
+        previous.strategy === strategy &&
+        previous.effort === effort &&
+        previous.attachmentKey === attachmentKey
+          ? previous.clientMessageId
+          : crypto.randomUUID()
+      failedSend.current = null
       let dataset = outgoing[0]?.dataset
       if (analyzeOn && outgoing[0]) {
         try {
           dataset ??= buildDataset(outgoing[0].name, outgoing[0].mime, outgoing[0].size, outgoing[0].data)
           await putDataset(dataset, outgoing[0].data)
         } catch (error) {
+          sendingKey.current = null
           toast(error instanceof Error ? error.message : 'Could not read that table.', 'danger')
           return
         }
       }
       const request = {
         conversationId: id,
-        projectId: !id ? selectedProjectId ?? undefined : undefined,
+        projectId,
         content,
         ...(analyzeOn && dataset
           ? { dataset }
@@ -502,45 +553,40 @@ export function Chat() {
         effort,
         clientMessageId,
       }
-      const saveForRetry = () => {
-        const stored = queueMessage({
-          clientMessageId,
-          conversationId: id ?? null,
-          projectId: !id ? selectedProjectId ?? null : null,
-          content,
-          model,
-          strategy,
-          effort,
-          reasoning: effort !== 'low',
-          createdAt: Date.now(),
-        })
-        if (stored) {
-          setDraft(content)
-          toast('Saved. It will send when the connection returns.')
-        } else {
-          toast('A saved message is already waiting to send.', 'danger')
-        }
-      }
       // Always try the request. `navigator.onLine` is only a hint and can be
       // false while the network is usable, so refusing here stranded Build,
       // Research and Agent sends behind a stale browser flag.
       setDraft('')
       setAttachments([])
       let started = false
+      const rememberFailedSend = () => {
+        failedSend.current = {
+          clientMessageId,
+          content,
+          conversationId: id,
+          projectId,
+          model,
+          strategy,
+          effort,
+          attachmentKey,
+        }
+      }
       try {
         await startTurn(client, request, { onConversation: openCreated, onStarted: () => { started = true } })
       } catch (error) {
         if (error instanceof ApiError && (error.code === 'offline' || error.status === 0)) {
           void checkConnection()
-          if (outgoing.length) {
-            if (!started) {
-              setDraft(content)
-              setAttachments(outgoing)
-            }
-            toast('Could not send the attachment. Check your connection and try again.', 'danger')
-            return
+          if (!started) {
+            rememberFailedSend()
+            setDraft(content)
+            setAttachments(outgoing)
           }
-          saveForRetry()
+          toast(
+            outgoing.length
+              ? 'Could not send the attachment. Check your connection and try again.'
+              : 'Could not send the message. Check your connection and try again.',
+            'danger',
+          )
           return
         }
         if (error instanceof ApiError && error.code === 'duplicate') {
@@ -550,88 +596,18 @@ export function Chat() {
           return
         }
         if (!started) {
+          rememberFailedSend()
           setDraft(content)
           setAttachments(outgoing)
         }
         if (error instanceof ApiError && (error.code === 'limit' || error.code?.endsWith('_limit'))) void client.invalidateQueries({ queryKey: ['me'] })
         toast(error instanceof Error ? error.message : 'Could not send this message', 'danger')
+      } finally {
+        if (sendingKey.current === submissionKey) sendingKey.current = null
       }
     },
-    [agentOn, analyzeOn, attachments, blend, buildOn, busy, canOfferMode, client, effort, id, limitReached, model, navigate, offline, openCreated, pending, proof, researchOn, selectedProjectId, strategy, taskMode, toast],
+    [agentOn, analyzeOn, attachments, blend, buildOn, busy, canOfferMode, client, effort, id, limitReached, model, navigate, openCreated, proof, researchOn, selectedProjectId, strategy, taskMode, toast],
   )
-
-  // A send saved while offline goes out once, when the browser is back online.
-  // The server sees the same clientMessageId if this runs twice, so a reload
-  // cannot create a duplicate turn.
-  const flushing = useRef<string | null>(null)
-  useEffect(() => {
-    if (!pending || offline) return
-    if ((pending.conversationId ?? null) !== (id ?? null)) return
-    if (flushing.current === pending.clientMessageId) return
-    const item = pending
-    flushing.current = item.clientMessageId
-    const clearDraftIfUnchanged = () => setDraft((current) => (current === item.content ? '' : current))
-    void (async () => {
-      try {
-        await startTurn(
-          client,
-          {
-            conversationId: item.conversationId ?? undefined,
-            projectId: item.projectId ?? undefined,
-            content: item.content,
-            model: item.model,
-            strategy: item.strategy,
-            ...(item.effort ? { effort: item.effort } : { reasoning: item.reasoning }),
-            clientMessageId: item.clientMessageId,
-          },
-          {
-            onConversation: openCreated,
-            onStarted: () => {
-              clearPendingMessage(item.clientMessageId)
-              clearDraftIfUnchanged()
-            },
-          },
-        )
-      } catch (error) {
-        if (error instanceof ApiError && error.code === 'duplicate') {
-          clearPendingMessage(item.clientMessageId)
-          clearDraftIfUnchanged()
-          if (error.conversationId && !item.conversationId) {
-            navigate(`/c/${error.conversationId}`, { replace: true })
-            void client.invalidateQueries({ queryKey: ['conversations'] })
-          } else if (item.conversationId) {
-            void client.invalidateQueries({ queryKey: ['conversation', item.conversationId] })
-          }
-          toast('That saved message was already sent.')
-        } else if (error instanceof ApiError && (error.code === 'offline' || error.status === 0 || error.status === 503)) {
-          void checkConnection()
-        } else {
-          clearPendingMessage(item.clientMessageId)
-          setDraft(item.content)
-          toast(error instanceof Error ? error.message : 'Could not send the saved message', 'danger')
-        }
-      } finally {
-        flushing.current = null
-      }
-    })()
-  }, [client, id, navigate, offline, openCreated, pending, toast])
-
-  // A server restart or a flaky connection may not fire a browser `online`
-  // event. While a send is waiting, a tiny health probe notices recovery and
-  // lets the flush effect above run.
-  useEffect(() => {
-    if (!pending) return
-    let stopped = false
-    const probe = () => {
-      if (!stopped) void checkConnection()
-    }
-    void probe()
-    const timer = window.setInterval(() => void probe(), 4_000)
-    return () => {
-      stopped = true
-      window.clearInterval(timer)
-    }
-  }, [pending])
 
   const regenerate = useCallback(async (retryModel?: string) => {
     if (!id) return
@@ -1149,6 +1125,7 @@ export function Chat() {
                 items={projectItems}
               />
             )}
+            {conversation && <ChatReaction conversation={conversation} />}
             {conversation && (
               <button
                 type="button"
@@ -1311,11 +1288,6 @@ export function Chat() {
       </div>
 
       <div className="mx-auto w-full max-w-[760px] px-4 pb-4 md:px-6 md:pb-6">
-        {pendingHere && (
-          <p role="status" className="mb-2 rounded-control bg-surface-2 px-3.5 py-2.5 text-[13.5px] leading-relaxed text-muted">
-            Draft saved. It will send automatically when the connection returns.
-          </p>
-        )}
         {limitReached && me ? (
           <Notice>
             You have used today&apos;s {me.usage.limit} replies. More {untilLabel(me.usage.resetsAt)}.
@@ -1335,6 +1307,7 @@ export function Chat() {
               effort={mode === 'public' && me?.capabilities.reasoning ? effort : undefined}
               onChangeEffort={changeEffort}
               onAttach={addFiles}
+              onAddLink={!taskMode ? addLink : undefined}
               openFilePicker={filePickerRequest}
               focusRequest={composerFocusRequest}
               onRemoveAttachment={(attachmentId) => setAttachments((current) => current.filter((item) => item.id !== attachmentId))}
@@ -1396,6 +1369,52 @@ function modeNote(usage?: ModeUsage): string | undefined {
 
 function Notice({ children }: { children: React.ReactNode }) {
   return <p className="rounded-control bg-surface-2 px-4 py-3 text-center text-[14.5px] text-muted">{children}</p>
+}
+
+const CHAT_REACTION_NAMES: Record<string, string> = {
+  '❤️': 'Love',
+  '😂': 'Laugh',
+  '👍': 'Like',
+  '🔥': 'Fire',
+  '😮': 'Wow',
+  '🎉': 'Celebrate',
+}
+
+function ChatReaction({ conversation }: { conversation: Conversation }) {
+  const setReaction = useSetConversationReaction()
+  const toast = useToast()
+  const choose = (reaction: string) => {
+    setReaction.mutate(
+      { id: conversation.id, reaction: conversation.reaction === reaction ? null : reaction },
+      { onError: (error) => toast(error instanceof Error ? error.message : 'Could not save the reaction', 'danger') },
+    )
+  }
+  return (
+    <Menu
+      align="end"
+      trigger={
+        <button
+          type="button"
+          aria-label={conversation.reaction ? `Chat reaction: ${conversation.reaction}` : 'React to this chat'}
+          title={conversation.reaction ? 'Change or remove this chat reaction' : 'React to this chat'}
+          className="grid size-8 shrink-0 place-items-center rounded-tile text-faint transition-colors hover:bg-surface-2 hover:text-fg"
+        >
+          {conversation.reaction ? (
+            <span className="text-[15px] leading-none">{conversation.reaction}</span>
+          ) : (
+            <span className="text-[16px] leading-none" aria-hidden="true">☺</span>
+          )}
+        </button>
+      }
+      items={[
+        ...CHAT_REACTIONS.map((reaction) => ({
+          label: `${reaction}  ${CHAT_REACTION_NAMES[reaction]}${conversation.reaction === reaction ? ' ✓' : ''}`,
+          onSelect: () => choose(reaction),
+        })),
+        ...(conversation.reaction ? [{ label: 'Remove reaction', onSelect: () => choose(conversation.reaction!) }] : []),
+      ]}
+    />
+  )
 }
 
 function ChatHeader({

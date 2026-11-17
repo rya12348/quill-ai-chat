@@ -23,6 +23,8 @@ export interface Conversation {
   createdAt: number
   updatedAt: number
   projectId: string | null
+  /** The single emoji reaction attached to this chat, when set. */
+  reaction?: string | null
 }
 
 export type FeedbackRating = 'up' | 'down'
@@ -55,7 +57,7 @@ export interface MessageAttachment {
   mime: string
   size: number
   kind: AttachmentKind
-  /** Set for images: a same-origin URL that serves the bytes to the owner. */
+  /** Set for images (served bytes) and links (the attached web address). */
   url?: string
 }
 
@@ -750,11 +752,33 @@ export interface HumanizerResult {
   notice?: string
 }
 
-/** A message in the public live room. */
+export type RoomVisibility = 'public' | 'private'
+
+/** One room in the chat catalog. Password hashes never leave the Worker. */
+export interface RoomSummary {
+  id: string
+  name: string
+  visibility: RoomVisibility
+  createdAt: number
+  /** True when this account created the room. */
+  createdByMe: boolean
+  /** Public rooms are always open; private rooms open after a password check. */
+  unlocked: boolean
+}
+
+/** The rooms shown when chat opens: private rooms first, then public rooms. */
+export interface RoomList {
+  items: RoomSummary[]
+  defaultRoomId: string
+}
+
+/** A message in a room. */
 export interface RoomMessage {
   id: string
   room: string
   body: string
+  /** Images, files and links shared with the room. */
+  attachments?: MessageAttachment[]
   authorName: string
   /** A short one-way tag; the account id is never sent to the browser. */
   authorId: string
@@ -765,9 +789,22 @@ export interface RoomMessage {
 export interface RoomSnapshot {
   room: string
   name: string
+  visibility: RoomVisibility
+  createdByMe: boolean
   messages: RoomMessage[]
   /** Lets the browser label its own messages without exposing account ids. */
   viewerId: string
+  asOf: number
+}
+
+/** A new message in a room this account can access. */
+export interface RoomActivityItem extends RoomMessage {
+  roomName: string
+}
+
+/** Recent room activity for notifications outside the open room. */
+export interface RoomActivity {
+  items: RoomActivityItem[]
   asOf: number
 }
 

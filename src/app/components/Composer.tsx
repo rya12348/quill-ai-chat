@@ -1,4 +1,4 @@
-import { ArrowUp, Camera, Check, ChevronDown, FileText, Loader2, Paperclip, Plus, Square, Wrench, X, type LucideIcon } from 'lucide-react'
+import { ArrowUp, Camera, Check, ChevronDown, FileText, Link2, Loader2, Paperclip, Plus, Square, Wrench, X, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 
 import { MAX_MESSAGE_CHARS } from '../../shared/config'
@@ -40,6 +40,7 @@ export function Composer({
   effort,
   onChangeEffort,
   onAttach,
+  onAddLink,
   onRemoveAttachment,
   onSend,
   onStop,
@@ -70,6 +71,8 @@ export function Composer({
   effort?: ReasoningEffort
   onChangeEffort?: (effort: ReasoningEffort) => void
   onAttach: (files: File[]) => void
+  /** Adds a web address as a text attachment when the host page supports it. */
+  onAddLink?: (url: string) => void
   onRemoveAttachment: (id: string) => void
   onSend: () => void
   onStop: () => void
@@ -99,6 +102,9 @@ export function Composer({
   const [toolsOpen, setToolsOpen] = useState(false)
   const [attachOpen, setAttachOpen] = useState(false)
   const [cameraOpen, setCameraOpen] = useState(false)
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkValue, setLinkValue] = useState('')
+  const [linkError, setLinkError] = useState('')
   const [cameraReady, setCameraReady] = useState(false)
   const [cameraError, setCameraError] = useState('')
   const [placeholderIndex, setPlaceholderIndex] = useState(0)
@@ -340,6 +346,26 @@ export function Composer({
       0.9,
     )
   }
+  const submitLink = () => {
+    if (!onAddLink) return
+    const value = linkValue.trim()
+    if (!value) return
+    if (/\s/.test(value)) {
+      setLinkError('Enter a web address without spaces, such as example.com/article.')
+      return
+    }
+    try {
+      const url = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`)
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('protocol')
+      if (!url.hostname.includes('.') && url.hostname !== 'localhost') throw new Error('host')
+      onAddLink(url.toString())
+      setLinkOpen(false)
+      setLinkValue('')
+      setLinkError('')
+    } catch {
+      setLinkError('Enter a full web address, such as example.com/article.')
+    }
+  }
   const animatedPlaceholder = Boolean(placeholderPrompts?.length && !value)
   // "Chat only" is the absence of a tool, not an active mode. Keeping it quiet
   // leaves the composer's accent for the send action and real tool selection.
@@ -384,9 +410,15 @@ export function Composer({
               </div>
             ) : (
               <span key={attachment.id} className="inline-flex max-w-[230px] items-center gap-1.5 rounded-full border border-line bg-surface-2 px-2.5 py-1.5 text-[13px] text-muted" title={attachment.name}>
-                <FileText className="size-3.5 shrink-0" />
+                {attachment.mime === 'text/uri-list' ? (
+                  <Link2 className="size-3.5 shrink-0" />
+                ) : (
+                  <FileText className="size-3.5 shrink-0" />
+                )}
                 <span className="truncate">{attachment.name}</span>
-                <span className="shrink-0 text-faint">{formatFileSize(attachment.size)}</span>
+                {attachment.mime === 'text/uri-list' ? null : (
+                  <span className="shrink-0 text-faint">{formatFileSize(attachment.size)}</span>
+                )}
                 <button
                   type="button"
                   onClick={() => onRemoveAttachment(attachment.id)}
@@ -471,6 +503,23 @@ export function Composer({
                     <span className="mt-0.5 block text-[11.5px] leading-snug text-faint">Images, PDFs and text</span>
                   </span>
                 </button>
+                {onAddLink ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setAttachOpen(false)
+                      setLinkOpen(true)
+                    }}
+                    className="flex w-full items-start gap-2.5 rounded-tile px-2.5 py-2 text-left text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+                  >
+                    <Link2 className="mt-0.5 size-4 shrink-0" />
+                    <span>
+                      <span className="block text-[13.5px] font-medium">Add a link</span>
+                      <span className="mt-0.5 block text-[11.5px] leading-snug text-faint">Include a web address</span>
+                    </span>
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   role="menuitem"
@@ -605,6 +654,60 @@ export function Composer({
           )}
         </div>
       </div>
+      <Dialog
+        open={linkOpen}
+        onClose={() => {
+          setLinkOpen(false)
+          setLinkValue('')
+          setLinkError('')
+        }}
+        title="Add a link"
+        description="Include a web address in this message."
+        width={430}
+        footer={
+          <>
+            <Button
+              onClick={() => {
+                setLinkOpen(false)
+                setLinkValue('')
+                setLinkError('')
+              }}
+            >
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={submitLink} disabled={!linkValue.trim()}>
+              Add link
+            </Button>
+          </>
+        }
+      >
+        <label className="block text-[12.5px] font-medium text-muted" htmlFor="composer-link-url">
+          Web address
+        </label>
+        <input
+          id="composer-link-url"
+          type="url"
+          inputMode="url"
+          autoFocus
+          value={linkValue}
+          onChange={(event) => {
+            setLinkValue(event.target.value)
+            setLinkError('')
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') return
+            event.preventDefault()
+            submitLink()
+          }}
+          placeholder="https://example.com/article"
+          className="mt-1.5 h-10 w-full rounded-control border border-line bg-bg px-3 text-[14px] text-fg outline-none placeholder:text-faint focus:border-accent/60"
+        />
+        {linkError ? (
+          <p role="alert" className="mt-2 text-[12px] text-warning">
+            {linkError}
+          </p>
+        ) : null}
+      </Dialog>
       <Dialog
         open={cameraOpen}
         onClose={closeCamera}

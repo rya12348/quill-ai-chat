@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { ArtifactSummary, Conversation, ConversationMemory, FeedbackRating, HumanizerLength, HumanizerPurpose, HumanizerResult, HumanizerStrength, HumanizerTone, Me, Message, ModelInfo, Project, ProviderHealth, ProxySession, ReviewQueue, ReviewRating, ReviewRatingResult, ReviewSummary, RoomMessage, RoomSnapshot, SharedConversation, TrafficSummary, UserSettings } from '../../shared/types'
+import type { ArtifactSummary, AttachmentInput, Conversation, ConversationMemory, FeedbackRating, HumanizerLength, HumanizerPurpose, HumanizerResult, HumanizerStrength, HumanizerTone, Me, Message, ModelInfo, Project, ProviderHealth, ProxySession, ReviewQueue, ReviewRating, ReviewRatingResult, ReviewSummary, RoomList, RoomMessage, RoomSnapshot, RoomSummary, RoomVisibility, SharedConversation, TrafficSummary, UserSettings } from '../../shared/types'
 import { localBrowser } from './local-browser'
 import { noteOffline } from './offline'
 
@@ -81,27 +81,74 @@ export const useMe = () =>
     refetchOnWindowFocus: true,
   })
 
-/** The public room's durable snapshot. Realtime broadcasts are merged on top. */
-export const useRoom = () =>
+/** Private rooms come first, then public rooms; General stays the main room. */
+export const useRooms = () =>
   useQuery({
-    queryKey: ['room'],
-    queryFn: () => api<RoomSnapshot>('/room'),
+    queryKey: ['rooms'],
+    queryFn: () => api<RoomList>('/rooms'),
     staleTime: 0,
-    // A cold Worker or a dropped provider request should not leave the room on
-    // an error screen. Retry before surfacing the failure.
     retry: 3,
     retryDelay: (attempt) => Math.min(4_000, 500 * 2 ** attempt),
-    // A periodic snapshot keeps an open room in sync and lets the Worker purge
-    // messages whose retention window has closed.
     refetchInterval: 60_000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   })
 
-export function useSendRoomMessage() {
+/** One room's durable snapshot. Realtime broadcasts are merged on top. */
+export function useRoom(roomId: string, refetchInterval = 60_000) {
+  return useQuery({
+    queryKey: ['room', roomId],
+    queryFn: () => api<RoomSnapshot>(`/rooms/${encodeURIComponent(roomId)}`),
+    enabled: Boolean(roomId),
+    staleTime: 0,
+    // A locked private room is an expected 403, not a flaky request to retry.
+    retry: (attempt, error) => !(error instanceof ApiError && error.status === 403) && attempt < 3,
+    retryDelay: (attempt) => Math.min(4_000, 500 * 2 ** attempt),
+    // A periodic snapshot keeps an open room in sync and lets the Worker purge
+    // messages whose retention window has closed. The room shortens this while
+    // realtime is reconnecting so no manual refresh is needed.
+    refetchInterval,
+    // Keep the snapshot current while the room tab is hidden so unread counts
+    // and notifications still work if the realtime socket drops.
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+  })
+}
+
+export function useSendRoomMessage(roomId: string) {
   return useMutation({
-    mutationFn: (body: string) =>
-      api<{ message: RoomMessage; live: boolean }>('/room/messages', { method: 'POST', json: { body } }),
+    mutationFn: ({ body, attachments }: { body: string; attachments?: AttachmentInput[] }) =>
+      api<{ message: RoomMessage; live: boolean }>(`/rooms/${encodeURIComponent(roomId)}/messages`, {
+        method: 'POST',
+        json: { body, ...(attachments?.length ? { attachments } : {}) },
+      }),
+  })
+}
+
+export function useCreateRoom() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { name: string; visibility: RoomVisibility; password?: string }) =>
+      api<{ room: RoomSummary }>('/rooms', { method: 'POST', json: input }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['rooms'] })
+    },
+  })
+}
+
+export function useUnlockRoom() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ roomId, password }: { roomId: string; password: string }) =>
+      api<{ ok: true; room: RoomSummary }>(`/rooms/${encodeURIComponent(roomId)}/unlock`, {
+        method: 'POST',
+        json: { password },
+      }),
+    onSuccess: (_, input) => {
+      void client.invalidateQueries({ queryKey: ['rooms'] })
+      void client.invalidateQueries({ queryKey: ['room', input.roomId] })
+    },
   })
 }
 
@@ -280,12 +327,22 @@ export function useSetConversationProject() {
     },
   })
 }
-export const useConversation = (id: string | undefined) =>
+export const useConversation = (
+  id: string | undefined,
+  options: { refetchInterval?: number | false } = {},
+) =>
   useQuery({
     queryKey: ['conversation', id],
     queryFn: () => api<ConversationPage>(`/conversations/${id}`),
     enabled: Boolean(id),
-    staleTime: 60_000,
+    // Chat is shared across tabs and devices. A fresh read whenever the page
+    // opens or regains focus means a reply written elsewhere is visible without
+    // a browser reload; the caller adds a short idle poll while a chat is open.
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    ...(options.refetchInterval ? { refetchInterval: options.refetchInterval } : {}),
     // A missing chat and an offline read are both answers, not hiccups. Retrying
     // an offline 503 leaves the page blank while the retry is pending; show the
     // explicit offline state at once instead.
@@ -372,6 +429,22 @@ export function useMessageFeedback() {
   return useMutation({
     mutationFn: ({ id, rating }: { id: string; rating: FeedbackRating }) =>
       api<{ ok: boolean; rating: FeedbackRating }>(`/messages/${id}/feedback`, { method: 'POST', json: { rating } }),
+  })
+}
+
+export function useSetConversationReaction() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, reaction }: { id: string; reaction: string | null }) =>
+      api<{ reaction: string | null }>(`/conversations/${id}/reaction`, { method: 'PATCH', json: { reaction } }),
+    onSuccess: ({ reaction }, { id }) => {
+      client.setQueryData<ConversationPage>(['conversation', id], (old) =>
+        old ? { ...old, conversation: { ...old.conversation, reaction } } : old,
+      )
+      client.setQueryData<{ items: Conversation[] }>(['conversations'], (old) =>
+        old ? { ...old, items: old.items.map((conversation) => (conversation.id === id ? { ...conversation, reaction } : conversation)) } : old,
+      )
+    },
   })
 }
 

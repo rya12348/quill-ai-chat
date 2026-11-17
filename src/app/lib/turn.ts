@@ -123,7 +123,11 @@ export async function startTurn(
                 mime: attachment.mime,
                 size: attachment.size,
                 kind: attachment.kind,
-                ...(attachment.kind === 'image' ? { url: attachment.data } : {}),
+                ...(attachment.kind === 'image'
+                  ? { url: attachment.data }
+                  : attachment.mime === 'text/uri-list'
+                    ? { url: attachment.data }
+                    : {}),
               })),
             }
           : {}),
