@@ -15,7 +15,9 @@ for (const file of ['.env', '.env.local']) {
 }
 
 const execFileAsync = promisify(execFile)
-const MODEL = process.env.DENT_MODEL_ID?.trim() || 'deepseek-ai/deepseek-v4.1-flash'
+// NVIDIA retired deepseek-v4.1-flash on 2026-11-16. Use its current strongest
+// hosted lane by default; DENT_MODEL_ID overrides this for a pin.
+const MODEL = process.env.DENT_MODEL_ID?.trim() || 'nvidia/nemotron-3-ultra-550b-a55b'
 const ENDPOINT = 'https://integrate.api.nvidia.com/v1/chat/completions'
 const MAX_STEPS = Math.max(3, Math.min(12, Number(process.env.REPO_MAX_STEPS || 8)))
 const OUTPUT_DIR = 'bench'
@@ -190,6 +192,13 @@ test('hidden: handles an exact page boundary', () => {
   },
 ]
 
+type TokenUsage = {
+  requests: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
 type RunResult = {
   task: string
   model: string
@@ -201,8 +210,13 @@ type RunResult = {
   latencyMs: number
   lastExitCode: number
   lastOutput: string
+  usage: TokenUsage
   error?: string
   actionTrace: { step: number; action: string; ms: number; observation: string }[]
+}
+
+function emptyUsage(): TokenUsage {
+  return { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 }
 }
 
 function requireKey(): string {
@@ -211,7 +225,12 @@ function requireKey(): string {
   return key
 }
 
-async function dentComplete(messages: readonly RepoMessage[], signal?: AbortSignal): Promise<string> {
+async function dentComplete(
+  messages: readonly RepoMessage[],
+  signal?: AbortSignal,
+  usage?: TokenUsage,
+): Promise<string> {
+  if (usage) usage.requests += 1
   // DeepSeek V4.1 can take over a minute to produce its first token on NVIDIA;
   // a non-streaming request looks like a dead connection. Stream and collect
   // only the final content, never the reasoning tokens.
@@ -228,6 +247,7 @@ async function dentComplete(messages: readonly RepoMessage[], signal?: AbortSign
       temperature: 0.1,
       max_tokens: 1_600,
       stream: true,
+      stream_options: { include_usage: true },
     }),
     signal: signal ?? AbortSignal.timeout(150_000),
   })
@@ -251,7 +271,15 @@ async function dentComplete(messages: readonly RepoMessage[], signal?: AbortSign
       const payload = line.slice(5).trim()
       if (!payload || payload === '[DONE]') continue
       try {
-        const event = JSON.parse(payload) as { choices?: { delta?: { content?: string } }[] }
+        const event = JSON.parse(payload) as {
+          choices?: { delta?: { content?: string } }[]
+          usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+        }
+        if (usage && event.usage) {
+          usage.promptTokens += Number(event.usage.prompt_tokens ?? 0)
+          usage.completionTokens += Number(event.usage.completion_tokens ?? 0)
+          usage.totalTokens += Number(event.usage.total_tokens ?? 0)
+        }
         const piece = event.choices?.[0]?.delta?.content
         if (typeof piece === 'string') content += piece
       } catch {
@@ -343,12 +371,13 @@ async function runTask(task: Task): Promise<RunResult> {
   const repo = await createTaskRepo(task)
   const baseline = await repo.runTests()
   const startedAt = Date.now()
+  const usage = emptyUsage()
   try {
     const result = await runRepoVerifierLoop({
       task: task.prompt,
       files: repo.files,
       maxSteps: MAX_STEPS,
-      complete: dentComplete,
+      complete: (messages, signal) => dentComplete(messages, signal, usage),
       onEvent: (event) => {
         if (event.type === 'action') console.log(`    step ${event.step}: ${event.action.action}`)
         else if (event.type === 'error') console.log(`    step ${event.step}: ${event.message}`)
@@ -382,6 +411,7 @@ async function runTask(task: Task): Promise<RunResult> {
       latencyMs: Date.now() - startedAt,
       lastExitCode: result.lastExitCode,
       lastOutput: result.lastOutput,
+      usage,
       ...(result.error ? { error: result.error } : {}),
       actionTrace: result.actions.map((action) => ({
         step: action.step,
@@ -402,6 +432,7 @@ async function runTask(task: Task): Promise<RunResult> {
       latencyMs: Date.now() - startedAt,
       lastExitCode: 1,
       lastOutput: error instanceof Error ? error.message : String(error),
+      usage,
       error: error instanceof Error ? error.message : String(error),
       actionTrace: [],
     }
@@ -411,10 +442,10 @@ async function runTask(task: Task): Promise<RunResult> {
 }
 
 function tableRow(result: RunResult): string {
-  const status = result.solved ? 'PASS' : 'FAIL'
-  return `| ${result.task} | ${status} | ${result.steps} | ${result.toolCalls} | ${result.testRuns} | ${(
-    result.latencyMs / 1_000
-  ).toFixed(1)}s | ${result.error ? result.error.replace(/\|/g, '\\|').slice(0, 90) : '—'} |`
+  const status = result.solved ? 'PASS' : result.lastExitCode === 0 ? 'TESTS PASS / NO FINISH' : 'FAIL'
+  return `| ${result.task} | ${status} | ${result.steps} | ${result.toolCalls} | ${result.testRuns} | ${
+    result.usage.totalTokens
+  } | ${(result.latencyMs / 1_000).toFixed(1)}s | ${result.error ? result.error.replace(/\|/g, '\\|').slice(0, 90) : '—'} |`
 }
 
 async function main(): Promise<void> {
@@ -427,13 +458,17 @@ async function main(): Promise<void> {
     console.log(`running ${task.id} with Dent…`)
     const result = await runTask(task)
     results.push(result)
+    const status = result.solved ? 'PASS' : result.lastExitCode === 0 ? 'TESTS PASS / NO FINISH' : 'FAIL'
     console.log(
-      `  ${result.solved ? 'PASS' : 'FAIL'} · ${result.steps} steps · ${(result.latencyMs / 1_000).toFixed(1)}s`,
+      `  ${status} · ${result.steps} steps · ${result.usage.totalTokens} tokens · ${(
+        result.latencyMs / 1_000
+      ).toFixed(1)}s`,
     )
     await writeFile(join(OUTPUT_DIR, 'buffy-repo-results.json'), JSON.stringify(results, null, 2))
   }
 
   const passed = results.filter((result) => result.solved).length
+  const testVerified = results.filter((result) => result.lastExitCode === 0 && result.testRuns > 0).length
   const baselinePassed = results.filter((result) => result.baseline.exitCode === 0).length
   const mean = (values: number[]) => (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0)
   const lines = [
@@ -444,19 +479,26 @@ async function main(): Promise<void> {
     `Endpoint: ${ENDPOINT}`,
     `Tasks: ${results.length} · max model steps: ${MAX_STEPS}`,
     '',
-    `**Pass rate: ${passed}/${results.length} (${Math.round((passed / results.length) * 100)}%)**`,
+    `**Strict pass rate: ${passed}/${results.length} (${Math.round((passed / results.length) * 100)}%)**`,
+    `Test-verified final states: ${testVerified}/${results.length} (the final visible + hidden suite passed)`,
     '',
     `Baseline (unfixed seed repos): ${baselinePassed}/${results.length} pass`,
     `Mean model steps: ${mean(results.map((result) => result.steps)).toFixed(1)}`,
     `Mean tool calls: ${mean(results.map((result) => result.toolCalls)).toFixed(1)}`,
     `Mean test runs: ${mean(results.map((result) => result.testRuns)).toFixed(1)}`,
     `Mean latency: ${(mean(results.map((result) => result.latencyMs)) / 1_000).toFixed(1)}s`,
+    `Mean tokens: ${mean(results.map((result) => result.usage.totalTokens)).toFixed(0)}`,
+    `Total tokens: ${results.reduce((sum, result) => sum + result.usage.totalTokens, 0)}`,
     '',
-    '| Task | Result | Steps | Tool calls | Test runs | Latency | Error |',
-    '| --- | ---: | ---: | ---: | ---: | ---: | --- |',
+    '| Task | Result | Steps | Tool calls | Test runs | Tokens | Latency | Error |',
+    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |',
     ...results.map(tableRow),
     '',
-    'Each task started with failing tests, used a real temporary repository, and was scored only after both the visible and hidden verifier suites passed.',
+    'Each task started with failing tests, used a real temporary repository, and was scored only after both the visible and hidden verifier suites passed. A strict pass additionally requires an accepted finish action; a passing final test state with a timed-out finish is shown separately, not counted as a strict pass.',
+    '',
+    ...(results.some((result) => !result.solved && result.lastExitCode === 0)
+      ? ['A task marked TESTS PASS / NO FINISH had both suites green, but Dent did not return an accepted finish before the provider timeout.']
+      : []),
     '',
   ]
   await writeFile(join(OUTPUT_DIR, 'buffy-repo-latest.md'), lines.join('\n'))

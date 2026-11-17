@@ -16,7 +16,9 @@ for (const file of ['.env', '.env.local']) {
 }
 
 const execFileAsync = promisify(execFile)
-const MODEL = process.env.DENT_MODEL_ID?.trim() || 'deepseek-ai/deepseek-v4.1-flash'
+// NVIDIA retired deepseek-v4.1-flash on 2026-11-16. Use its current strongest
+// hosted lane by default; DENT_MODEL_ID overrides this for a pin.
+const MODEL = process.env.DENT_MODEL_ID?.trim() || 'nvidia/nemotron-3-ultra-550b-a55b'
 const ENDPOINT = 'https://integrate.api.nvidia.com/v1/chat/completions'
 const MAX_STEPS = Math.max(3, Math.min(12, Number(process.env.REPO_MAX_STEPS || 8)))
 const CANDIDATE_CONCURRENCY = Math.max(
@@ -259,6 +261,7 @@ function createDentComplete(usage: TokenUsage): RepoCompletion {
         temperature: 0.1,
         max_tokens: 1_600,
         stream: true,
+        stream_options: { include_usage: true },
       }),
       signal: signal ?? AbortSignal.timeout(150_000),
     })
@@ -542,6 +545,7 @@ type PriorSingle = {
   latencyMs: number
   lastExitCode: number
   testRuns: number
+  usage?: TokenUsage
 }
 
 async function readPriorSingle(): Promise<PriorSingle[]> {
@@ -598,6 +602,62 @@ async function main(): Promise<void> {
   }).length
   const bestStrict = compared.filter((result) => result.solved).length
   const bestVerified = compared.filter((result) => result.lastExitCode === 0).length
+  const singleUsage = compared.map((result) => priorByTask.get(result.task)?.usage)
+  const singleUsageRecorded =
+    singleUsage.length > 0 && singleUsage.every((usage) => Boolean(usage))
+  const singleTokenTotal = singleUsage.reduce((sum, usage) => sum + (usage?.totalTokens ?? 0), 0)
+  const singleMeanTokens = mean(singleUsage.map((usage) => usage?.totalTokens ?? 0))
+  const bestTokenTotal = compared.reduce((sum, result) => sum + result.usage.totalTokens, 0)
+  const bestMeanTokens = mean(compared.map((result) => result.usage.totalTokens))
+  const tokenMultiple = singleMeanTokens ? (bestMeanTokens / singleMeanTokens).toFixed(2) : '—'
+  const tokenRows = compared.map((result) => {
+    const single = priorByTask.get(result.task)?.usage
+    const ratio = single?.totalTokens ? (result.usage.totalTokens / single.totalTokens).toFixed(2) : '—'
+    return `| ${result.task} | ${single?.promptTokens ?? '—'} | ${single?.completionTokens ?? '—'} | ${
+      single ? single.totalTokens : 'not recorded'
+    } | ${result.usage.promptTokens} | ${result.usage.completionTokens} | ${result.usage.totalTokens} | ${ratio} |`
+  })
+  const comparisonLines = compared.length
+    ? [
+        `Compared tasks: ${compared.map((result) => result.task).join(', ')}`,
+        '',
+        'The earlier DeepSeek V4.1 Flash run is not comparable: NVIDIA retired that model on 2026-11-16. Both modes were rerun on the replacement model above.',
+        'Best-of-three ran candidates serially to avoid provider 429s; its wall latency is serial.',
+        '',
+        '| Mode | Strict pass | Test-verified | Mean wall latency | Mean candidate compute | Mean tokens |',
+        '| --- | ---: | ---: | ---: | ---: | ---: |',
+        `| Single candidate (same model) | ${singleStrict}/${compared.length} | ${singleVerified}/${compared.length} | ${(
+          mean(compared.map((result) => priorByTask.get(result.task)?.latencyMs ?? 0)) / 1_000
+        ).toFixed(1)}s | same as wall | ${singleUsageRecorded ? singleMeanTokens.toFixed(0) : 'not recorded'} |`,
+        `| Best of three | ${bestStrict}/${compared.length} | ${bestVerified}/${compared.length} | ${(
+          mean(compared.map((result) => result.latencyMs)) / 1_000
+        ).toFixed(1)}s | ${(
+          mean(
+            compared.map((result) =>
+              result.candidates.reduce((sum, candidate) => sum + candidate.latencyMs, 0),
+            ),
+          ) / 1_000
+        ).toFixed(1)}s | ${bestMeanTokens.toFixed(0)} |`,
+        '',
+        `Quality gain: ${bestStrict - singleStrict >= 0 ? '+' : ''}${bestStrict - singleStrict} strict, ${
+          bestVerified - singleVerified >= 0 ? '+' : ''
+        }${bestVerified - singleVerified} test-verified.`,
+        `Token cost: single ${singleUsageRecorded ? `${singleTokenTotal} total / ${singleMeanTokens.toFixed(0)} mean per task` : 'not recorded'}; best of three ${bestTokenTotal} total / ${bestMeanTokens.toFixed(0)} mean per task${
+          singleUsageRecorded ? ` (${tokenMultiple}× single)` : ''
+        }.`,
+        'Both modes used the same model and endpoint. Best-of-three totals include every candidate, including candidates discarded after a failure.',
+        '',
+        '### Exact tokens by task',
+        '',
+        '| Task | Single prompt | Single completion | Single total | Best prompt | Best completion | Best total | Best / single |',
+        '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+        ...tokenRows,
+        '',
+        ...(singleUsageRecorded
+          ? []
+          : ['The single-candidate artifact is missing usage for at least one task. Rerun it with the token-tracking version before comparing token cost.']),
+      ]
+    : ['No prior single-candidate artifact was available for comparison.']
 
   const lines = [
     '# Buffy Code repo verifier — best of three',
@@ -629,33 +689,9 @@ async function main(): Promise<void> {
     '| --- | --- | ---: | ---: | ---: | ---: |',
     ...results.flatMap(candidateTable),
     '',
-    '## Comparison with the earlier single-candidate run',
+    '## Comparison with the single-candidate run',
     '',
-    ...(compared.length
-      ? [
-          `Compared tasks: ${compared.map((result) => result.task).join(', ')}`,
-          '',
-          '| Mode | Strict pass | Test-verified | Mean wall latency | Mean candidate compute | Mean tokens |',
-          '| --- | ---: | ---: | ---: | ---: | ---: |',
-          `| Single candidate (prior run) | ${singleStrict}/${compared.length} | ${singleVerified}/${compared.length} | ${(
-            mean(compared.map((result) => priorByTask.get(result.task)?.latencyMs ?? 0)) / 1_000
-          ).toFixed(1)}s | same as wall | not recorded |`,
-          `| Best of three | ${bestStrict}/${compared.length} | ${bestVerified}/${compared.length} | ${(
-            mean(compared.map((result) => result.latencyMs)) / 1_000
-          ).toFixed(1)}s | ${(
-            mean(
-              compared.map((result) =>
-                result.candidates.reduce((sum, candidate) => sum + candidate.latencyMs, 0),
-              ),
-            ) / 1_000
-          ).toFixed(1)}s | ${mean(compared.map((result) => result.usage.totalTokens)).toFixed(0)} |`,
-          '',
-          `Quality gain: ${bestStrict - singleStrict >= 0 ? '+' : ''}${bestStrict - singleStrict} strict, ${
-            bestVerified - singleVerified >= 0 ? '+' : ''
-          }${bestVerified - singleVerified} test-verified.`,
-          'The prior single artifact did not record token counts; the best-of-three token total above is the measured cost of all three candidates.',
-        ]
-      : ['No prior single-candidate artifact was available for comparison.']),
+    ...comparisonLines,
     '',
     'Each candidate started from the same failing repository snapshot. A candidate was eligible only after its visible and hidden tests passed; `accept` then copied its source into the destination repository and reran the destination tests before the result was marked solved.',
     '',
@@ -664,24 +700,10 @@ async function main(): Promise<void> {
   const comparison = [
     '# Single candidate vs best of three',
     '',
-    ...(compared.length
-      ? [
-          '| Mode | Strict pass | Test-verified | Mean wall latency | Mean candidate compute | Mean tokens |',
-          '| --- | ---: | ---: | ---: | ---: | ---: |',
-          `| Single candidate (prior run) | ${singleStrict}/${compared.length} | ${singleVerified}/${compared.length} | ${(
-            mean(compared.map((result) => priorByTask.get(result.task)?.latencyMs ?? 0)) / 1_000
-          ).toFixed(1)}s | same as wall | not recorded |`,
-          `| Best of three | ${bestStrict}/${compared.length} | ${bestVerified}/${compared.length} | ${(
-            mean(compared.map((result) => result.latencyMs)) / 1_000
-          ).toFixed(1)}s | ${(
-            mean(
-              compared.map((result) =>
-                result.candidates.reduce((sum, candidate) => sum + candidate.latencyMs, 0),
-              ),
-            ) / 1_000
-          ).toFixed(1)}s | ${mean(compared.map((result) => result.usage.totalTokens)).toFixed(0)} |`,
-        ]
-      : ['No prior single-candidate artifact was available.']),
+    `Model: Dent (${MODEL})`,
+    `Best-of-three candidate concurrency: ${CANDIDATE_CONCURRENCY}`,
+    '',
+    ...comparisonLines,
     '',
   ]
   await writeFile(join(OUTPUT_DIR, COMPARISON_FILE), comparison.join('\n'))

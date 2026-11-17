@@ -18,7 +18,8 @@
     "retro": "node scripts/retro-host.mjs",
     "coding-lab": "node scripts/coding-lab.test.mjs",
     "bench:repo": "tsx scripts/buffy-repo-benchmark.ts",
-    "test": "tsx --test scripts/*.test.ts",
+    "bench:repo:best-of-three": "tsx scripts/buffy-repo-best-of-three-benchmark.ts",
+    "test": "tsx --test --experimental-test-module-mocks scripts/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
