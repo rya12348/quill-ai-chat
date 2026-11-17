@@ -362,8 +362,8 @@ const SCHEMA = [
     reset_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS rate_limits_reset ON rate_limits(reset_at)`,
-  // Aggregate first-party traffic. visitor_hash is a one-way hash of the
-  // address and user agent; raw addresses and query strings are never stored.
+  // Aggregate first-party traffic. visitor_hash is a one-way hash of a random
+  // browser id; raw addresses and query strings are never stored.
   `CREATE TABLE IF NOT EXISTS site_visits (
     day TEXT NOT NULL,
     visitor_hash TEXT NOT NULL,
@@ -397,6 +397,8 @@ const SCHEMA = [
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS http_errors_created ON http_errors(created_at)`,
+  // All-time unique counts and per-page rankings both look up visitor hashes.
+  `CREATE INDEX IF NOT EXISTS site_visits_visitor ON site_visits(visitor_hash)`,
 ]
 
 let ready: Promise<void> | undefined

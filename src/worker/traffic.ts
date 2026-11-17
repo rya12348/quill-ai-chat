@@ -1,9 +1,10 @@
-// First-party, aggregate-only traffic counts. A visitor is identified by a
-// one-way hash of the address and user agent; the raw address is never stored,
+// First-party, aggregate-only traffic counts. A visitor is a random browser
+// id kept in a first-party cookie; only a one-way hash of that id is stored,
 // and no query string or share token is kept.
 
 import { ensureSchema } from './db'
-import { clientAddress } from './rate-limit'
+
+export const VISITOR_COOKIE = 'stet_visitor'
 
 const BOT = /(?:bot|crawler|spider|headless|monitoring|uptime|preview|facebookexternalhit|slackbot|curl|wget|python-requests)/i
 
@@ -22,21 +23,25 @@ function isBot(request: Request): boolean {
   return !agent || BOT.test(agent)
 }
 
-async function visitorHash(request: Request): Promise<string> {
-  // The hash is stable so "all time visitors" means people, not page loads.
-  // It contains no readable address or browser string.
-  const source = `${clientAddress(request)}\n${request.headers.get('user-agent') ?? ''}\nstet-traffic-v1`
+/**
+ * A visitor is identified by the stable browser cookie, not by the request
+ * address. IP-based hashes split one person across networks, VPNs, IPv6
+ * privacy addresses and time. The cookie survives those changes; only its
+ * hash is persisted.
+ */
+async function visitorHash(visitorId: string): Promise<string> {
+  const source = `visitor:${visitorId}\nstet-traffic-v2`
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))
   return base64Url(new Uint8Array(digest)).slice(0, 32)
 }
 
 /** Record one anonymous page view from the app's beacon. Failures are non-fatal. */
-export async function recordTrafficVisit(db: D1Database, request: Request, path: string): Promise<void> {
+export async function recordTrafficVisit(db: D1Database, request: Request, path: string, visitorId: string): Promise<void> {
   if (isBot(request)) return
   // The beacon can be the first request after a cold start, so make sure the
   // schema exists before the first insert.
   await ensureSchema(db)
-  const visitor = await visitorHash(request)
+  const visitor = await visitorHash(visitorId)
   const at = Date.now()
   const day = dayKey(at)
   await db

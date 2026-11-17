@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { isLocalTunnelHost, trafficPath } from '../src/shared/traffic'
+import { isLocalTunnelHost, isVisitorId, trafficPath } from '../src/shared/traffic'
 
 test('keeps ordinary page paths and strips query strings', () => {
   assert.equal(trafficPath('/'), '/')
@@ -19,7 +19,14 @@ test('ignores assets, API calls and the traffic dashboard itself', () => {
   assert.equal(trafficPath('/assets/index.js'), null)
   assert.equal(trafficPath('/api/conversations'), null)
   assert.equal(trafficPath('/analytics'), null)
+  assert.equal(trafficPath('/analytics/'), null)
   assert.equal(trafficPath('//evil.example/path'), null)
+})
+
+test('accepts only stable random visitor ids', () => {
+  assert.equal(isVisitorId('7d3f7a3e-4c6e-4a3d-9f42-4f9d7f2a1b6c'), true)
+  assert.equal(isVisitorId('not-a-visitor'), false)
+  assert.equal(isVisitorId(undefined), false)
 })
 
 test('recognizes local tunnel hosts without matching lookalikes', () => {

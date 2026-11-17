@@ -28,7 +28,7 @@ function LegalShell({ title, updated, children }: { title: string; updated: stri
 
 export function Privacy() {
   return (
-    <LegalShell title="Privacy Policy" updated="16 November 2026">
+    <LegalShell title="Privacy Policy" updated="17 November 2026">
       <p>
         {BRAND} stores the data needed to run your chats and keep your account working. This page explains what is
         stored, why, and how to remove it.
@@ -38,7 +38,12 @@ export function Privacy() {
         <li>Your email address, display name and a password hash if you create an account.</li>
         <li>Your conversations, messages, attachments, projects, settings and feedback.</li>
         <li>Daily usage counts and short-lived rate-limit records used to prevent abuse.</li>
-        <li>Anonymous page-view counts and aggregate error counts. These are not tied to a conversation.</li>
+        <li>
+          Anonymous page-view counts using a random first-party browser id stored in a cookie and local storage, and
+          a one-way hash of it. Only the page path, day and aggregate count are kept; raw IP addresses and browsing
+          history are not stored. These counts are not tied to a conversation.
+        </li>
+        <li>Aggregate server error counts.</li>
       </ul>
       <h2>Why we store it</h2>
       <p>

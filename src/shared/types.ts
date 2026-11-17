@@ -778,10 +778,17 @@ export interface TrafficDay {
   views: number
 }
 
+export interface TrafficPage {
+  path: string
+  visitors: number
+  views: number
+}
+
 export interface TrafficSummary {
   today: { visitors: number; views: number }
   last7Days: { visitors: number; views: number }
   allTime: { visitors: number; views: number }
   days: TrafficDay[]
+  topPages: TrafficPage[]
   updatedAt: number
 }
