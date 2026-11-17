@@ -22,7 +22,7 @@ import { buildComplete, buildEmbed, buildReference, isProxyRequest } from '../bu
 import { canvasComplete } from '../canvas'
 import { kindFor, proofComplete, proofSignature, streamChunks } from '../proof'
 import { analysisToday, buildToday, claimGuestTurn, claimGuestUsage, guestUsageToday, id, mapConversation, mapMessage, now, parseBuild, repliesToday, researchToday, titleFrom, usageToday, utcDay } from '../db'
-import { hasConversationOverflow, refreshConversationSummary, shouldRefreshMemory } from '../memory'
+import { hasConversationOverflow, MIN_MEMORY_MESSAGES, refreshConversationSummary, shouldRefreshMemory, withPendingTurns } from '../memory'
 import { activeLanes, isLocalBridgeRequest, laneKey, orderLanes, publicComplete, publicLanes, type LaneResult } from '../public-ai'
 import { healthRows, recordProviderResult } from '../provider-health'
 import { planAndRetrieve } from '../plan'
@@ -162,7 +162,7 @@ chat.post('/', async (c) => {
     !usingApi && typeof input.model === 'string' && (DUCK_MODELS as readonly string[]).includes(input.model)
   const duck = duckRequested ? duckTurn(input.duck) : null
   if (duckRequested && (!duck || duck.model !== input.model)) {
-    return c.json({ error: 'model', message: 'The free model session expired. Send the message again.' }, 400)
+    return c.json({ error: 'model', message: 'The model session expired. Send the message again.' }, 400)
   }
   if (input.model !== undefined && input.model !== 'buffy-lite' && !duckRequested && !isModelId(input.model) && !allLanes.some((lane) => lane.model === input.model)) {
     return c.json({ error: 'model', message: 'Unknown model.' }, 400)
@@ -245,7 +245,7 @@ chat.post('/', async (c) => {
     return c.json({ error: 'attachment', message: 'Build is text-only in this version. Describe the page without attachments.' }, 400)
   }
   if (wantsCanvas && usingApi) {
-    return c.json({ error: 'canvas_unavailable', message: 'Canvas needs the free hosted models.' }, 503)
+    return c.json({ error: 'canvas_unavailable', message: 'Canvas needs the hosted models.' }, 503)
   }
   if (wantsCanvas && (attachments.length || input.dataset)) {
     return c.json({ error: 'attachment', message: 'Canvas is text-only. Describe the topic without attachments.' }, 400)
@@ -256,7 +256,7 @@ chat.post('/', async (c) => {
   const wantsAgent = input.strategy === 'agent'
   const wantsAdvisor = input.strategy === 'advisor'
   if (wantsAgent && (usingApi || !allLanes.length)) {
-    return c.json({ error: 'agent_unavailable', message: 'Agent needs the free hosted models.' }, 503)
+    return c.json({ error: 'agent_unavailable', message: 'Agent needs the hosted models.' }, 503)
   }
   if (wantsAgent && (attachments.length || input.dataset)) {
     return c.json({ error: 'attachment', message: 'Agent is text-only in this version. Describe the goal without attachments.' }, 400)
@@ -333,7 +333,7 @@ chat.post('/', async (c) => {
   const availableLanes = engineLanes.filter((lane) => !avoid.has(laneKey(lane)))
   const modeLanes = availableLanes.length ? availableLanes : engineLanes
   if (!usingApi && needsVision && !wantsResearch && !wantsAnalysis && !lanes.length) {
-    return c.json({ error: 'vision_unavailable', message: 'No free image-capable model is configured right now. Add an OpenRouter or Gemini key and try again.' }, 503)
+    return c.json({ error: 'vision_unavailable', message: 'No image-capable model is configured right now. Add an OpenRouter or Gemini key and try again.' }, 503)
   }
   if (wantsResearch && !allLanes.length) {
     return c.json({ error: 'research_unavailable', message: 'No models are configured for Research.' }, 503)
@@ -908,7 +908,13 @@ chat.post('/', async (c) => {
           .bind(owner, conversation.id, oldestRecentAt, Number(saved?.covered_through ?? 0))
           .all()
         const dropped = (uncovered.results as Record<string, unknown>[]).map(mapMessage)
-        if (shouldRefreshMemory(dropped.length)) {
+        const refresh = shouldRefreshMemory(dropped.length)
+        // A small production signal for the gap between the verbatim window and
+        // the next summary batch. Content stays out of the log.
+        if (dropped.length) {
+          console.log('memory.pending', { conversationId: conversation.id, waiting: dropped.length, batch: MIN_MEMORY_MESSAGES, refresh })
+        }
+        if (refresh) {
           const condensed = await refreshConversationSummary({
             env: c.env,
             model,
@@ -957,8 +963,10 @@ chat.post('/', async (c) => {
         .join('\n\n')
       const prompt: ChatMessage[] = [
         { role: 'system', content: system },
-        ...pending.map((message) => messageWithAttachments(message, pendingAttachments.get(message.id) ?? [])),
-        ...recent.map((message) => messageWithAttachments(message, historyAttachments.get(message.id) ?? [])),
+        ...withPendingTurns(
+          pending.map((message) => messageWithAttachments(message, pendingAttachments.get(message.id) ?? [])),
+          recent.map((message) => messageWithAttachments(message, historyAttachments.get(message.id) ?? [])),
+        ),
       ]
       // A configured key means the Freebuff API; otherwise the free hosted
       // models answer, blended when more than one is available.
@@ -1012,14 +1020,14 @@ chat.post('/', async (c) => {
         } catch (error) {
           if (controller.signal.aborted) return
           if (text.trim()) {
-            const message = error instanceof AiError ? error.message : 'The free model stopped before finishing.'
+            const message = error instanceof AiError ? error.message : 'The model stopped before finishing.'
             await send({ type: 'error', code: 'interrupted', message }).catch(() => {})
             return
           }
           duckFailed = true
           await send({
             type: 'status',
-            text: `${duck.model === 'claude-haiku-5-5' ? 'Claude' : 'ChatGPT'} is busy — switching to a free fallback…`,
+            text: `${duck.model === 'claude-haiku-5-5' ? 'Claude' : 'ChatGPT'} is busy — switching to a fallback…`,
           })
         }
         if (duckFailed) {

@@ -28,6 +28,14 @@ export function hasConversationOverflow(historyMessages: number): boolean {
   return historyMessages > MAX_CONTEXT_MESSAGES
 }
 
+/**
+ * Keep turns that have just left the verbatim window in the prompt until a
+ * summary refresh covers them. They stay before the recent window, in order.
+ */
+export function withPendingTurns<T>(pending: T[], recent: T[]): T[] {
+  return pending.length ? [...pending, ...recent] : recent
+}
+
 const SUMMARY_SYSTEM = `You maintain a compact memory of an ongoing conversation for another assistant.
 
 Merge the existing memory with the older messages into one factual summary. Preserve details that may be asked about later: names, code words, identifiers, preferences, constraints, decisions, dates, numbers, definitions, unresolved questions, and agreements. Distinguish what the user said from what the assistant claimed. Never invent facts. Do not answer the user, add advice, or mention that this is a summary. Write plain prose with short labelled lines where useful. Keep it under 500 words.`
