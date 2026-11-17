@@ -147,7 +147,7 @@ async function bb<T>(env: Env, path: string, init: RequestInit = {}): Promise<T>
     if (/maximum number of active sessions|concurrent session/i.test(detail)) {
       throw new BrowserServiceError(
         'browser_capacity',
-        'The browser provider has no free simultaneous browser slot. Close another browser or upgrade the provider plan.',
+        'The browser provider has no simultaneous browser slot. Close another browser or upgrade the provider plan.',
         503,
       )
     }
@@ -191,7 +191,7 @@ async function hb<T>(env: Env, path: string, init: RequestInit = {}): Promise<T>
     if (/maximum number of active sessions|concurrent session/i.test(detail)) {
       throw new BrowserServiceError(
         'browser_capacity',
-        'The browser provider has no free simultaneous browser slot. Close another browser or upgrade the provider plan.',
+        'The browser provider has no simultaneous browser slot. Close another browser or upgrade the provider plan.',
         503,
       )
     }
@@ -260,7 +260,7 @@ async function steel<T>(env: Env, path: string, init: RequestInit = {}): Promise
     if (/maximum number of active sessions|concurrent session|too many sessions/i.test(detail)) {
       throw new BrowserServiceError(
         'browser_capacity',
-        'The browser provider has no free simultaneous browser slot. Close another browser or upgrade the provider plan.',
+        'The browser provider has no simultaneous browser slot. Close another browser or upgrade the provider plan.',
         503,
       )
     }

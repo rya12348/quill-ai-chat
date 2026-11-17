@@ -1,6 +1,6 @@
 import { ArrowLeft, ArrowRight, Bot, Code2, ExternalLink, Globe2, Loader2, Monitor, Play, Plus, RefreshCw, Search, Square, Timer, X } from 'lucide-react'
 import { startTransition, useEffect, useRef, useState, type FormEvent } from 'react'
-import { Link, useSearchParams } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 
 import { answerVisibleFact, answerVisibleSchedule, cleanPageAnswer, directActionLead, directBrowserAction, directBrowserLead, directBrowserTask, directElementAction, directFindLink, directFormFill, directPageSearch, directQuestionAnswer, directSearchAnswer, directSearchOpen, directSiteLookup, directSiteSearch, firstContentLink, isDocumentWritingTask, isSameBrowserSite, directPageEdit, isPageEditingTask, isSimulationTask, isSpreadsheetChartTask, isSpreadsheetDataTask, looksLikeRefusal, PAGE_ANSWER_UNAVAILABLE } from '../../shared/browser'
 
@@ -521,6 +521,7 @@ const MOCK_ACCOUNT_SIMULATION = [
 
 export function Browser() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [status, setStatus] = useState<BrowserStatus>('checking')
   const [session, setSession] = useState<BrowserSessionResponse | null>(null)
   const [addressValue, setAddressValue] = useState(() => searchParams.get('url') || DEFAULT_URL)
@@ -565,6 +566,7 @@ export function Browser() {
   const [code, setCode] = useState('')
   const [devBusy, setDevBusy] = useState(false)
   const [devError, setDevError] = useState('')
+  const [askBuffyBusy, setAskBuffyBusy] = useState(false)
   const abort = useRef<AbortController | null>(null)
   const agentMemory = useRef<{ task: string; plan: string[]; notes: string[] }>({
     task: '',
@@ -1353,6 +1355,35 @@ export function Browser() {
       if (!handleSessionLoss(cause)) setDevError(messageFor(cause))
     } finally {
       setDevBusy(false)
+    }
+  }
+
+  // Hand the readable page to Buffy Chat instead of making the person copy it.
+  // The context is one-shot: Chat removes it from sessionStorage after opening.
+  const askBuffyAboutPage = async () => {
+    if (!session || askBuffyBusy) return
+    setAskBuffyBusy(true)
+    setError('')
+    try {
+      const result = await api<BrowserInspectResponse>('/browser/inspect', {
+        method: 'POST',
+        json: { selector: 'body' },
+      })
+      const text = (result.inspect.text || result.state.snapshot.text || '').replace(/\u0000/g, '').trim()
+      if (!text) throw new Error('This page has no readable text to send.')
+      sessionStorage.setItem(
+        'buffy:chat:page-context:v1',
+        JSON.stringify({
+          url: result.state.url || address,
+          title: result.state.title || view?.title || '',
+          text: text.slice(0, 12_000),
+        }),
+      )
+      navigate('/buffy?page=1')
+    } catch (cause) {
+      setError(messageFor(cause))
+    } finally {
+      setAskBuffyBusy(false)
     }
   }
 
@@ -3884,6 +3915,16 @@ export function Browser() {
         </form>
         ) : null}
         {liveView ? <div className="min-w-0 flex-1" aria-hidden="true" /> : null}
+        <button
+          type="button"
+          onClick={() => void askBuffyAboutPage()}
+          disabled={!session || askBuffyBusy}
+          title="Open Buffy Chat with this page attached"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-tile border border-line bg-surface px-2.5 text-[12.5px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {askBuffyBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Bot className="size-3.5" />}
+          <span className="hidden sm:inline">Ask Buffy</span>
+        </button>
         <Link to="/browser/agent" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-tile border border-accent/30 bg-accent/5 px-2.5 text-[12.5px] font-medium text-accent transition-colors hover:bg-accent/10">
           <Bot className="size-3.5" />
           Agent

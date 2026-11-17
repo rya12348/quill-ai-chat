@@ -1288,7 +1288,7 @@ async function plan(input: {
   const timeoutMs = deep ? 90_000 : fastRetry ? 8_000 : compactStep ? 8_000 : longForm ? 50_000 : complex ? 45_000 : 30_000
   const planDeadlineMs = deep ? 108_000 : fastRetry ? 10_000 : compactStep ? 10_000 : longForm ? 60_000 : complex ? 65_000 : 45_000
   if (!candidates.length) {
-    throw new AiError('browser_unavailable', 'No free browser-capable model is configured right now.', 503)
+    throw new AiError('browser_unavailable', 'No browser-capable model is configured right now.', 503)
   }
 
   // A short action does not need the entire 160-element page. Smaller context
@@ -1605,7 +1605,7 @@ async function answerPage(env: Env, task: string, state: BrowserSnapshot): Promi
   // was too small a margin: when they all missed, the question paid for the
   // full browser planner as well.
   const lanes = ranked.slice(0, PAGE_ANSWER_LANES)
-  if (!lanes.length) throw new AiError('browser_unavailable', 'No free browser-capable model is configured right now.', 503)
+  if (!lanes.length) throw new AiError('browser_unavailable', 'No browser-capable model is configured right now.', 503)
   const messages: ChatMessage[] = [
     {
       role: 'system',
@@ -1703,7 +1703,7 @@ async function writeText(env: Env, task: string): Promise<{ text: string; lane: 
   const quick = ranked.filter((lane) => /lightning|bolt|flash|mini|nano|gemma|gpt-oss-20b|kimi|north|qwen3\.5-9b|qwen3\.8-27b|ministral|mistral-nemo|codestral/i.test(lane.model.toLowerCase()))
   const lanes = (quick.length ? quick : ranked).slice(0, 6)
   if (!lanes.length) {
-    throw new AiError('browser_unavailable', 'No free writing model is configured right now.', 503)
+    throw new AiError('browser_unavailable', 'No writing model is configured right now.', 503)
   }
   const messages: ChatMessage[] = [
     { role: 'system', content: DOCUMENT_WRITER },
@@ -1881,7 +1881,7 @@ async function writeTable(env: Env, task: string): Promise<{ text: string; rows:
   })
   const quick = ranked.filter((lane) => /lightning|bolt|flash|mini|nano|gemma|gpt-oss-20b|kimi|north|qwen3\.5-9b|qwen3\.8-27b|ministral|mistral-nemo|codestral/i.test(lane.model.toLowerCase()))
   const lanes = (quick.length ? quick : ranked).slice(0, 4)
-  if (!lanes.length) throw new AiError('browser_unavailable', 'No free table-writing model is configured right now.', 503)
+  if (!lanes.length) throw new AiError('browser_unavailable', 'No table-writing model is configured right now.', 503)
   const sizeRule =
     size.rows || size.columns
       ? ` The person asked for exactly ${size.rows ? `${size.rows} rows total including the header` : 'an unspecified number of rows'}${size.columns ? ` and ${size.columns} columns` : ''}; obey that size exactly.`
