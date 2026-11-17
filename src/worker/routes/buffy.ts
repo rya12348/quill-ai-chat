@@ -7,7 +7,15 @@ import { AiError, type ChatMessage } from '../ai'
 import { allowsMutation, buildEnabledFor, isGuestUser, isLoopback, isOwner, privateJson } from '../auth'
 import { buildComplete, DESIGN_CONTRACT, extractPages, isInteractiveRequest, verifyPages } from '../build'
 import { laneKey, orderLanes, publicComplete, publicLanes, type LaneResult, type PublicLane } from '../public-ai'
-import { DENT_PAGE_MAX_TOKENS, dentComplete, dentPageImprovement, dentPageRepairPrompt } from '../dent'
+import {
+  DENT_PAGE_DEADLINE_MS,
+  DENT_PAGE_MAX_TOKENS,
+  dentComplete,
+  dentPageHasBudget,
+  dentPageImprovement,
+  dentPageRepairPrompt,
+  dentPageTimeout,
+} from '../dent'
 import { recordProviderResult } from '../provider-health'
 import { guestUsageKey, RATE_WINDOWS, rateLimit } from '../rate-limit'
 import type { AppContext } from '../env'
@@ -610,8 +618,9 @@ buffy.post('/code', async (c) => {
       const interactive = requireInteractive || Boolean(previous?.interactive)
       let result: { text: string; build: BuildInfo } | null = null
       if (model === DENT_MODEL) {
-        // Dent deep mode uses Dent lanes only. No timer cuts it short and no
-        // unrelated free model is quietly substituted into its result.
+        // Dent deep mode uses Dent lanes only. It gets one overall page
+        // budget, but no unrelated free model is quietly substituted into its
+        // result.
         const dentLanes = lanes.filter(isDentLane)
         if (!dentLanes.length) {
           await send('status', { text: 'Dent is not available — using the page builder…' })
@@ -622,6 +631,7 @@ buffy.post('/code', async (c) => {
             void recordProviderResult(db, user.sub, laneKey(laneResult.lane), laneResult).catch(() => {})
             if (laneResult.ok) usedLabel = laneResult.lane.label
           }
+          const dentDeadlineAt = Date.now() + DENT_PAGE_DEADLINE_MS
           try {
             let raw = ''
             for await (const piece of publicComplete(dentLanes, {
@@ -636,7 +646,7 @@ buffy.post('/code', async (c) => {
               // look like a model failure rather than a budget failure.
               maxTokens: DENT_PAGE_MAX_TOKENS,
               idleMs: 30_000,
-              timeoutMs: 120_000,
+              timeoutMs: dentPageTimeout(dentDeadlineAt, 120_000),
               onLaneResult: onDentLaneResult,
             })) {
               if (piece.type === 'text') raw += piece.text
@@ -650,9 +660,11 @@ buffy.post('/code', async (c) => {
               let verification = verifyPages(pages, { interactive })
               let repaired = false
               // A page is a program with checks, so spend one extra Dent turn
-              // only when a check failed. The candidate replaces the draft
-              // only if it removes a failure; a confident rewrite is not enough.
-              if (verification.failures.length) {
+              // only when a check failed AND the shared deadline still leaves
+              // a real repair window. A slow first draft must not buy another
+              // full timeout before the page builder gets a turn.
+              const skipRepair = verification.failures.length > 0 && !dentPageHasBudget(dentDeadlineAt)
+              if (verification.failures.length && !skipRepair) {
                 const count = verification.failures.length
                 await send('status', {
                   text: `Dent is repairing ${count} page check${count === 1 ? '' : 's'}…`,
@@ -668,7 +680,7 @@ buffy.post('/code', async (c) => {
                     temperature: 0.15,
                     maxTokens: DENT_PAGE_MAX_TOKENS,
                     idleMs: 30_000,
-                    timeoutMs: 75_000,
+                    timeoutMs: dentPageTimeout(dentDeadlineAt, 75_000),
                     onLaneResult: onDentLaneResult,
                   })) {
                     if (piece.type === 'text') repairRaw += piece.text
@@ -708,7 +720,18 @@ buffy.post('/code', async (c) => {
                   })
                 }
               }
-              result = buildFromPages(pages, interactive, usedLabel, repaired)
+              if (skipRepair) {
+                console.log('buffy.code.dent_repair_skipped', {
+                  failures: verification.failures.length,
+                  remainingMs: Math.max(0, dentDeadlineAt - Date.now()),
+                  fallback: true,
+                })
+                // The draft used the whole Dent budget and still failed its
+                // checks. Do not show a warning page as if it were the result;
+                // let the page builder take the remaining turn.
+              } else {
+                result = buildFromPages(pages, interactive, usedLabel, repaired)
+              }
             }
           } catch (error) {
             if (controller.signal.aborted) return
