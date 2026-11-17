@@ -87,7 +87,7 @@ export async function solveDuckChallenge(
   ].join('\n')
 
   const frame = document.createElement('iframe')
-  frame.title = 'Free model challenge'
+  frame.title = 'Model challenge'
   frame.setAttribute('aria-hidden', 'true')
   frame.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;border:0;visibility:hidden'
   frame.srcdoc = '<!doctype html><body><script>' + script + '</script>'
@@ -112,12 +112,12 @@ export async function solveDuckChallenge(
         resolve(data.result as Solved)
       } else if (data?.type === 'duck-error') {
         cleanup()
-        reject(new Error(typeof data.error === 'string' ? data.error : 'The free model challenge failed.'))
+        reject(new Error(typeof data.error === 'string' ? data.error : 'The model challenge failed.'))
       }
     }
     timer = window.setTimeout(() => {
       cleanup()
-      reject(new Error('The free model challenge timed out.'))
+      reject(new Error('The model challenge timed out.'))
     }, SOLVE_TIMEOUT_MS)
     window.addEventListener('message', onMessage)
     if (signal?.aborted) {
@@ -147,14 +147,29 @@ export async function solveDuckChallenge(
   return { proof, feVersion: session.feVersion, cookies: session.cookies ?? '', model }
 }
 
-/** Fetches a fresh challenge and solves it; any failure returns null so the page can use fallbacks. */
-export async function requestDuckTurn(model: DuckModel, signal?: AbortSignal): Promise<DuckTurn | null> {
-  const response = await fetch('/api/buffy/duck/challenge', {
-    headers: { accept: 'application/json' },
-    signal,
-  })
-  if (!response.ok) return null
-  const session = (await response.json().catch(() => null)) as DuckChallenge | null
-  if (!session?.challenge) return null
-  return solveDuckChallenge(session, model, signal)
+/**
+ * Fetches a fresh challenge and solves it; any failure returns null so the page
+ * can use fallbacks. The whole handshake has a short budget because a stalled
+ * challenge must never hold the visible chat hostage.
+ */
+export async function requestDuckTurn(
+  model: DuckModel,
+  signal?: AbortSignal,
+  timeoutMs = 8_000,
+): Promise<DuckTurn | null> {
+  const deadline = AbortSignal.timeout(timeoutMs)
+  const combined = signal ? AbortSignal.any([signal, deadline]) : deadline
+  try {
+    const response = await fetch('/api/buffy/duck/challenge', {
+      headers: { accept: 'application/json' },
+      signal: combined,
+    })
+    if (!response.ok) return null
+    const session = (await response.json().catch(() => null)) as DuckChallenge | null
+    if (!session?.challenge) return null
+    return await solveDuckChallenge(session, model, combined)
+  } catch (error) {
+    if (signal?.aborted) throw error
+    return null
+  }
 }

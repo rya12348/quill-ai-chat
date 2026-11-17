@@ -2,6 +2,7 @@ import { ArrowUp, Camera, Check, ChevronDown, FileText, Loader2, Paperclip, Plus
 import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 
 import { MAX_MESSAGE_CHARS } from '../../shared/config'
+import { formatTokenCount } from '../../shared/tokens'
 import type { ReasoningEffort } from '../../shared/types'
 import { cx } from '../lib/cx'
 import { ATTACHMENT_ACCEPT, clipboardFiles, formatFileSize, MAX_ATTACHMENTS, type PendingAttachment } from '../lib/attachments'
@@ -31,6 +32,7 @@ export function Composer({
   attachments,
   tools,
   replyUsage,
+  tokenCount,
   model,
   onChangeModel,
   modelPreset,
@@ -56,6 +58,8 @@ export function Composer({
   tools?: ComposerToggle[]
   /** The shared daily reply allowance shown at the bottom of the menu. */
   replyUsage?: { used: number; limit: number }
+  /** A rough token estimate for the conversation and current draft. */
+  tokenCount?: number
   /** The selected model, shown in the compact composer toolbar. */
   model?: string
   onChangeModel?: (id: string) => void
@@ -574,21 +578,32 @@ export function Composer({
             {over ? `${value.length.toLocaleString()} / ${MAX_MESSAGE_CHARS.toLocaleString()}` : ''}
           </span>
         </div>
-        {busy ? (
-          <button type="button" onClick={onStop} aria-label="Stop" className="grid size-9 place-items-center rounded-full bg-accent text-bg shadow-[0_3px_10px_-3px_rgb(168_73_20/0.5)] transition-transform active:scale-95">
-            <Square className="size-3.5 fill-current" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={onSend}
-            disabled={!canSend}
-            aria-label="Send"
-            className="grid size-9 place-items-center rounded-full bg-accent text-bg shadow-[0_3px_10px_-3px_rgb(168_73_20/0.5)] transition-[opacity,transform] hover:bg-accent-strong active:scale-95 disabled:opacity-45 disabled:shadow-none"
-          >
-            <ArrowUp className="size-4" />
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-1.5">
+          {tokenCount ? (
+            <span
+              className="text-[10.5px] tabular-nums text-faint"
+              title="Rough estimate for this conversation, including your draft. Actual usage also includes system prompts and may be higher."
+              aria-label={`Estimated ${formatTokenCount(tokenCount)} tokens`}
+            >
+              ~{formatTokenCount(tokenCount)} tok
+            </span>
+          ) : null}
+          {busy ? (
+            <button type="button" onClick={onStop} aria-label="Stop" className="grid size-9 place-items-center rounded-full bg-accent text-bg shadow-[0_3px_10px_-3px_rgb(168_73_20/0.5)] transition-transform active:scale-95">
+              <Square className="size-3.5 fill-current" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onSend}
+              disabled={!canSend}
+              aria-label="Send"
+              className="grid size-9 place-items-center rounded-full bg-accent text-bg shadow-[0_3px_10px_-3px_rgb(168_73_20/0.5)] transition-[opacity,transform] hover:bg-accent-strong active:scale-95 disabled:opacity-45 disabled:shadow-none"
+            >
+              <ArrowUp className="size-4" />
+            </button>
+          )}
+        </div>
       </div>
       <Dialog
         open={cameraOpen}

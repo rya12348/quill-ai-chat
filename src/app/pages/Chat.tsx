@@ -1,10 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
-import { Bot, Brain, Compass, Download, FileSpreadsheet, FileText, Folder, FolderX, Globe2, Hammer, Layers, Menu as MenuIcon, MessageCircle, Monitor, Search, Share2, ShieldCheck, Sparkles, type LucideIcon } from 'lucide-react'
+import { Bot, Brain, ClipboardList, Compass, Download, FileSpreadsheet, FileText, Folder, FolderX, Globe2, Hammer, Layers, Menu as MenuIcon, MessageCircle, Monitor, Search, Share2, ShieldCheck, Sparkles, type LucideIcon } from 'lucide-react'
 
 import { DEFAULT_MODEL, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, MAX_CONTEXT_MESSAGES, MODELS, SUGGESTIONS } from '../../shared/config'
 import { modelDisplayName } from '../../shared/model-display'
+import { estimateConversationTokens, estimateTokens } from '../../shared/tokens'
 import { suggestToolMode, type SuggestedToolMode } from '../../shared/agent'
 import type { Conversation, Message, ModeUsage, ReasoningEffort } from '../../shared/types'
 import { BrandArt } from '../components/BrandArt'
@@ -20,6 +21,7 @@ import { cx } from '../lib/cx'
 import { untilLabel } from '../lib/format'
 import { resolvePresetModel, type ModelChoice, type ModelPreset } from '../lib/model-presets'
 import { AttachmentError, clipboardFiles, readAttachment, type PendingAttachment } from '../lib/attachments'
+import { briefFromConversation } from '../lib/buffy-brief'
 import { buildDataset, isDataFile, readDataFile } from '../lib/dataset'
 import { getDataset, putDataset } from '../lib/dataset-store'
 import { checkConnection, useOffline } from '../lib/offline'
@@ -923,6 +925,14 @@ export function Chat() {
     if (lastUser) messages = saved.filter((m) => m.createdAt <= lastUser.createdAt)
   }
   const pendingUser = mine && turn?.userMessage && !messages.some((m) => m.id === turn.userMessage!.id) ? turn.userMessage : null
+  // Small, approximate context hint for the composer. Provider-reported usage
+  // is not available on every free lane, so count the visible conversation and
+  // the draft instead of showing a precise bill.
+  const estimatedTokens =
+    estimateConversationTokens(messages) +
+    (pendingUser ? estimateTokens(pendingUser.content) : 0) +
+    (turn?.text ? estimateTokens(turn.text) : 0) +
+    (draft ? estimateTokens(draft) : 0)
   // Time from the question to its answer, for the receipt above each reply.
   const elapsedFor = (message: Message): number | undefined => {
     const index = messages.findIndex((item) => item.id === message.id)
@@ -1153,6 +1163,22 @@ export function Chat() {
             {messages.length > 0 && (
               <button
                 type="button"
+                onClick={() => {
+                  const draft = briefFromConversation([...messages, ...(pendingUser ? [pendingUser] : [])])
+                  if (!draft.goal && !draft.plan) return
+                  navigate('/buffy', { state: { briefDraft: draft } })
+                }}
+                aria-label="Turn this chat into a build brief"
+                title="Turn this chat into a build brief in Buffy"
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-tile px-2 text-[12.5px] text-faint transition-colors hover:bg-surface-2 hover:text-fg"
+              >
+                <ClipboardList className="size-3.5" />
+                <span className="hidden sm:inline">Brief</span>
+              </button>
+            )}
+            {messages.length > 0 && (
+              <button
+                type="button"
                 onClick={exportChat}
                 aria-label="Export chat"
                 title="Export as Markdown"
@@ -1301,6 +1327,7 @@ export function Chat() {
               attachments={attachments}
               tools={composerTools}
               replyUsage={me?.usage}
+              tokenCount={estimatedTokens}
               model={model}
               onChangeModel={changeModel}
               modelPreset={modelPreset}

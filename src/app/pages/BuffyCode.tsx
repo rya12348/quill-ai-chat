@@ -4,6 +4,7 @@ import {
   ArrowUp,
   Bot,
   Check,
+  ClipboardList,
   Code2,
   Download,
   FileCode2,
@@ -19,13 +20,17 @@ import {
   Terminal,
   X,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
 
 import type { BuildInfo, BuildPage } from '../../shared/types'
-import { BUFFY_MODEL_LABELS, BUFFY_MODELS, DENT_MODEL, buffyModelSpeed, isDuckModel, normalizeBuffyModel, type BuffyModel } from '../lib/buffy-models'
+import { preferredBuffyModel } from '../lib/buffy-model-health'
+import { receiptFromBuild } from '../lib/buffy-brief'
+import { BUFFY_MODEL_LABELS, DENT_MODEL, buffyModelSpeed, isDuckModel, normalizeBuffyModel, type BuffyModel } from '../lib/buffy-models'
 import { requestDuckTurn, type DuckTurn } from '../lib/duck'
+import { useBuffyModelOptions } from '../lib/use-buffy-model-options'
 import { Markdown } from '../components/Markdown'
+import { TokenCounter } from '../components/TokenCounter'
 
 type ToolStatus = 'running' | 'done' | 'error' | 'stopped'
 type Tool = {
@@ -48,6 +53,8 @@ type WireTool = {
 const CHAT_KEY = 'buffy:code:chat:v1'
 const WORKSPACE_KEY = 'buffy:code:workspace:v1'
 const MODEL_KEY = 'buffy:code:model:v1'
+const HANDOFF_KEY = 'buffy:code:handoff:v1'
+const RECEIPT_KEY = 'buffy:code:receipt:v1'
 const SUGGESTIONS = [
   'Build a working tip calculator with a live receipt breakdown.',
   'Make a two-page site for a neighborhood coffee shop with a menu and hours.',
@@ -188,6 +195,9 @@ function ToolTimeline({ tools }: { tools: Tool[] }) {
 }
 
 export function BuffyCode() {
+  const [searchParams] = useSearchParams()
+  const location = useLocation()
+  const navigate = useNavigate()
   const [messages, setMessages] = useState<Message[]>(readMessages)
   const [input, setInput] = useState('')
   const [pending, setPending] = useState(false)
@@ -203,6 +213,7 @@ export function BuffyCode() {
       return 'claude-haiku-5-5'
     }
   })
+  const { options: selectableModels, loading: modelsLoading } = useBuffyModelOptions()
   const [build, setBuild] = useState<BuildInfo | null>(() => {
     try {
       return readBuild(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || 'null'))
@@ -221,6 +232,27 @@ export function BuffyCode() {
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
+
+  // A "Build this" handoff from Buffy Chat arrives as a ready-to-edit brief.
+  // Route state is the primary copy; session storage is the fallback for
+  // links and storage edge cases. Consume both so a refresh cannot resend it.
+  useEffect(() => {
+    const state = location.state as { handoff?: unknown } | null
+    const fromState = typeof state?.handoff === 'string' ? state.handoff.trim() : ''
+    if (!searchParams.get('handoff') && !fromState) return
+    let requested = fromState
+    try {
+      const stored = sessionStorage.getItem(HANDOFF_KEY)?.trim() ?? ''
+      sessionStorage.removeItem(HANDOFF_KEY)
+      if (!requested) requested = stored
+    } catch {
+      // Route state still carries the handoff when storage is unavailable.
+    }
+    if (!requested) return
+    setInput(requested.slice(0, 12_000))
+    navigate('/buffy/code', { replace: true, state: null })
+    window.setTimeout(() => inputRef.current?.focus(), 0)
+  }, [location.state, navigate, searchParams])
 
   useEffect(() => {
     try {
@@ -246,6 +278,13 @@ export function BuffyCode() {
       /* model choice still applies for this visit */
     }
   }, [model])
+
+  // A saved model may have gone down since the last visit. Wait for health so
+  // a temporarily empty list does not overwrite a saved model that is healthy.
+  useLayoutEffect(() => {
+    if (modelsLoading) return
+    setModel((current) => preferredBuffyModel(selectableModels, current))
+  }, [modelsLoading, selectableModels])
 
   useEffect(() => {
     if (!build) return
@@ -366,7 +405,7 @@ export function BuffyCode() {
     setInput('')
     setError('')
     setPending(true)
-    setActivity('Preparing the free coding model…')
+    setActivity('Preparing the coding model…')
     setMobileView('chat')
     setMessages((current) => [
       ...current,
@@ -392,12 +431,13 @@ export function BuffyCode() {
         } catch (error) {
           if (controller.signal.aborted) throw error
           // Do not silently replace an explicitly selected Duck model with a
-          // different hosted model. The person can retry or choose Dent.
-          throw new Error(`${BUFFY_MODEL_LABELS[model].name} could not connect. Try again or choose Dent deep mode.`)
+          // different hosted model. The person can retry or choose another
+          // working option from the picker.
+          throw new Error(`${BUFFY_MODEL_LABELS[model].name} could not connect. Try again or choose another working model.`)
         }
       }
       if (isDuckModel(model) && !duck) {
-        throw new Error(`${BUFFY_MODEL_LABELS[model].name} could not connect. Try again or choose Dent deep mode.`)
+        throw new Error(`${BUFFY_MODEL_LABELS[model].name} could not connect. Try again or choose another working model.`)
       }
       setActivity(`${BUFFY_MODEL_LABELS[model].name} is writing the project…`)
       const response = await fetch('/api/buffy/code', {
@@ -535,6 +575,7 @@ export function BuffyCode() {
     try {
       localStorage.removeItem(CHAT_KEY)
       localStorage.removeItem(WORKSPACE_KEY)
+      sessionStorage.removeItem(RECEIPT_KEY)
     } catch {
       /* storage is optional */
     }
@@ -563,6 +604,17 @@ export function BuffyCode() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
   }
 
+  const returnToBrief = () => {
+    if (!build) return
+    const receipt = receiptFromBuild(build)
+    try {
+      sessionStorage.setItem(RECEIPT_KEY, JSON.stringify(receipt))
+    } catch {
+      // Route state still carries the receipt.
+    }
+    navigate('/buffy?receipt=1', { state: { receipt } })
+  }
+
   return (
     <main className="flex min-h-0 flex-1 flex-col bg-bg text-fg">
       <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-3 border-b border-line px-4 py-2 md:px-6">
@@ -581,26 +633,31 @@ export function BuffyCode() {
           <h1 className="font-display text-[17px] font-medium leading-tight">Buffy Code</h1>
           <p className="truncate text-[12.5px] text-faint">Hosted coding agent · writes files, checks the page, runs a sandboxed preview</p>
         </div>
-        <select
-          aria-label="Choose free coding model"
-          title="Claude is the measured fast default. Dent is the deep mode and takes longer. ChatGPT is the alternate and takes longer."
-          value={model}
-          disabled={pending}
-          onChange={(event) => setModel(normalizeBuffyModel(event.target.value))}
-          className="h-8 rounded-control border border-line bg-surface px-2 text-[12px] text-muted outline-none transition-colors hover:text-fg focus:border-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {BUFFY_MODELS.map((id) => {
-            const note = id === DENT_MODEL ? 'deep mode' : id === 'claude-haiku-5-5' ? 'default' : 'alternate'
-            return (
-              <option key={id} value={id}>
-                {BUFFY_MODEL_LABELS[id].name} — {buffyModelSpeed(id).label.toLowerCase()} ({note})
-              </option>
-            )
-          })}
-        </select>
+        {!modelsLoading &&
+          (selectableModels.length > 0 ? (
+            <select
+              aria-label="Choose coding model"
+              title="Only models that are working right now are listed. Claude is the measured fast default; ChatGPT is the alternate."
+              value={model}
+              disabled={pending}
+              onChange={(event) => setModel(normalizeBuffyModel(event.target.value))}
+              className="h-8 rounded-control border border-line bg-surface px-2 text-[12px] text-muted outline-none transition-colors hover:text-fg focus:border-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {selectableModels.map((id) => {
+                const note = id === DENT_MODEL ? 'deep mode' : id === 'claude-haiku-5-5' ? 'default' : 'alternate'
+                return (
+                  <option key={id} value={id}>
+                    {BUFFY_MODEL_LABELS[id].name} — {buffyModelSpeed(id).label.toLowerCase()} ({note})
+                  </option>
+                )
+              })}
+            </select>
+          ) : (
+            <span className="text-[11.5px] text-faint">No working models</span>
+          ))}
         <span className="hidden items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-[11.5px] text-muted lg:flex">
           <span className="size-1.5 rounded-full bg-emerald-500" />
-          Free coding lanes
+          Coding lanes
         </span>
         <Link
           to="/buffy"
@@ -670,7 +727,7 @@ export function BuffyCode() {
                     ))}
                   </div>
                   <p className="mt-5 text-[11.5px] leading-relaxed text-faint">
-                    This runs on the hosted free models. It edits the project in this browser; the full local terminal bridge is available on the Buffy chat page when you are running Ink locally.
+                    This runs on the hosted models. It edits the project in this browser; the full local terminal bridge is available on the Buffy chat page when you are running Ink locally.
                   </p>
                 </div>
               ) : (
@@ -769,8 +826,11 @@ export function BuffyCode() {
                 </button>
               )}
             </form>
-            <p className="mx-auto mt-1.5 w-full max-w-[720px] text-[10.5px] text-faint">
-              Claude is fast (the default) · Dent takes longer (deep mode) · ChatGPT takes longer (alternate) · edits stay in this browser
+            <p className="mx-auto mt-1.5 flex w-full max-w-[720px] items-baseline justify-between gap-3 text-[10.5px] text-faint">
+              <span className="min-w-0 truncate">
+                Only working models are listed · edits stay in this browser
+              </span>
+              <TokenCounter messages={messages} />
             </p>
           </div>
         </section>
@@ -943,6 +1003,15 @@ export function BuffyCode() {
                   </span>
                   {build.models.length ? <span>Models used: {build.models.join(', ')}</span> : null}
                   <span>Preview runs in a sandbox; downloads are the generated HTML.</span>
+                  <button
+                    type="button"
+                    onClick={returnToBrief}
+                    className="ml-auto inline-flex items-center gap-1.5 rounded-control border border-line bg-surface px-2.5 py-1 text-[11.5px] font-medium text-muted transition-colors hover:text-fg"
+                    title="Return this build receipt to the build brief"
+                  >
+                    <ClipboardList className="size-3" />
+                    Return to brief
+                  </button>
                 </div>
                 {verification?.checks.length ? (
                   <details className="mt-1">

@@ -5,19 +5,13 @@ import { BUILD_DAILY_LIMIT, BUFFY_FREE_PROMPT, DAILY_MESSAGE_LIMIT } from '../..
 import type { BuildInfo, BuildPage } from '../../shared/types'
 import { AiError, type ChatMessage } from '../ai'
 import { allowsMutation, buildEnabledFor, isGuestUser, isLoopback, isOwner, privateJson } from '../auth'
-import { buildComplete, DESIGN_CONTRACT, extractPages, isInteractiveRequest, verifyPages } from '../build'
+import { buildComplete, DESIGN_CONTRACT, extractPages, isInteractiveRequest, requestedPageLimit, verifyPages } from '../build'
 import { laneKey, orderLanes, publicComplete, publicLanes, type LaneResult, type PublicLane } from '../public-ai'
-import {
-  DENT_PAGE_DEADLINE_MS,
-  DENT_PAGE_MAX_TOKENS,
-  dentComplete,
-  dentPageHasBudget,
-  dentPageImprovement,
-  dentPageRepairPrompt,
-  dentPageTimeout,
-} from '../dent'
-import { recordProviderResult } from '../provider-health'
+import { trivialReply } from '../blend'
+import { DENT_PAGE_MAX_TOKENS, dentPageImprovement, dentPageRepairPrompt } from '../dent'
+import { healthRows, recordProviderResult } from '../provider-health'
 import { guestUsageKey, RATE_WINDOWS, rateLimit } from '../rate-limit'
+import { loadTaskQuality } from '../lane-routing'
 import type { AppContext } from '../env'
 
 export const buffy = new Hono<AppContext>()
@@ -25,8 +19,18 @@ export const buffy = new Hono<AppContext>()
 const MAX_MESSAGES = 40
 const MAX_CHARS = 48_000
 const BRIDGE_TIMEOUT_MS = 15_000
+// A real Codebuff run can spend a while assembling context before its first
+// status event. Give it a useful grace period; the client's idle watchdog is
+// the final backstop so this can never turn into an infinite spinner.
+const BRIDGE_FIRST_CHUNK_MS = 30_000
 const FREE_BURST_LIMIT = 60
 const MAX_CODE_PROMPT = 8_000
+// One budget for Dent's whole page pass. The draft keeps its original 120s
+// window; a repair must fit in what remains and only starts with a useful slice.
+const DENT_PAGE_DEADLINE_MS = 140_000
+const DENT_PAGE_DRAFT_MS = 120_000
+const DENT_PAGE_REPAIR_MS = 75_000
+const DENT_PAGE_REPAIR_MIN_MS = 30_000
 const CODE_SYSTEM = `You are Buffy Code, a senior product engineer and front-end developer. Build the requested thing itself as one complete, polished, self-contained HTML document.
 
 Aim for the standard of a top Claude Opus 5.5 coding session: make the result complete, coherent and useful on first load, not a sketch. Your page will be checked by an independent verifier; a missing control, broken interaction or horizontal overflow is a failure.
@@ -91,9 +95,10 @@ function buildFromPages(
   pages: BuildPage[],
   interactive: boolean,
   label: string,
+  prompt: string,
   repaired = false,
 ): { text: string; build: BuildInfo } {
-  const verification = verifyPages(pages, { interactive })
+  const verification = verifyPages(pages, { interactive, question: prompt })
   return {
     text: 'The project is ready. Preview it below, then ask for a change if you want one.',
     build: {
@@ -132,7 +137,11 @@ const DUCK_MODEL_LABELS: Record<DuckModel, string> = {
   'claude-haiku-5-5': 'Claude',
 }
 
-const DUCK_TIMEOUT_MS = 12_000
+// A greeting should never wait for a browser proof, a bridge, or a provider.
+const SMALL_TALK = /^(?:hi|hello|hey|yo|thanks|thank you|bye|goodbye|how are you|what'?s up|ok(?:ay)?|cool|nice|great|got it)[.!?]*$/i
+
+const DUCK_SESSION_TIMEOUT_MS = 6_000
+const DUCK_STREAM_TIMEOUT_MS = 45_000
 const DUCK_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
 
@@ -170,6 +179,35 @@ function freeLanes(env: AppContext['Bindings']) {
   return publicLanes(env).filter((lane) => !lane.model.startsWith('buffy') && lane.billing !== 'paid')
 }
 
+/**
+ * Chat is a latency product, not a benchmark. Put a healthy, known-fast lane
+ * first and keep dead rows at the back so a stale provider cannot spend the
+ * first idle timeout before a working model is tried.
+ */
+function fastChatLanes(lanes: PublicLane[], health: Awaited<ReturnType<typeof healthRows>>): PublicLane[] {
+  const byKey = new Map(health.map((row) => [row.provider_id, row]))
+  const statusRank = (status: string | undefined) =>
+    status === 'healthy' ? 0 : status === 'unknown' || status === undefined ? 1 : status === 'degraded' ? 2 : 3
+  const speedRank = (lane: PublicLane) => {
+    const text = `${lane.model} ${lane.label}`.toLowerCase()
+    if (/gpt-oss-120b|gpt-oss-20b|codestral|gemini|qwen3\.8|qwen3\.5-(?:9b|27b)/.test(text)) return 0
+    if (/step-5|nemotron|ling|minimax|glm|dots|muse|liquid|lightning/.test(text)) return 2
+    return 1
+  }
+  return [...lanes].sort((a, b) => {
+    const ah = byKey.get(laneKey(a))
+    const bh = byKey.get(laneKey(b))
+    const aDown = ah?.status === 'down' ? 1 : 0
+    const bDown = bh?.status === 'down' ? 1 : 0
+    return (
+      aDown - bDown ||
+      speedRank(a) - speedRank(b) ||
+      statusRank(ah?.status) - statusRank(bh?.status) ||
+      (ah?.latency_ms ?? 1e9) - (bh?.latency_ms ?? 1e9)
+    )
+  })
+}
+
 /** Dent is the DeepSeek V4.1 Flash lane. It is not a Duck chat model. */
 const DENT_MODEL = 'dent' as const
 type BuffyModel = DuckModel | typeof DENT_MODEL
@@ -187,14 +225,6 @@ function requestedBuffyModel(
 function isDentLane(lane: PublicLane): boolean {
   const text = `${lane.model} ${lane.label}`.toLowerCase()
   return text.includes('deepseek') && (/v4\.1/.test(text) || text.includes('deepseek-flash') || /\bdent\b/.test(text))
-}
-
-/** Dent first, then every other free lane as a fallback. */
-function dentFirst(lanes: PublicLane[]): PublicLane[] {
-  const eligible = lanes.filter((lane) => !lane.selectedOnly)
-  const dent = eligible.filter(isDentLane)
-  if (!dent.length) return orderLanes(lanes)
-  return [...dent, ...eligible.filter((lane) => !dent.includes(lane))]
 }
 
 const BUFFY_DENT_PROMPT = `${BUFFY_FREE_PROMPT}
@@ -243,14 +273,18 @@ function cleanPreviousBuild(value: unknown): BuildInfo | undefined {
   }
 }
 
-export function mergePages(previous: BuildInfo | undefined, pages: BuildPage[]): BuildPage[] {
-  if (!previous?.pages?.length) return pages
+function mergePageList(current: BuildPage[] | undefined, pages: BuildPage[]): BuildPage[] {
+  if (!current?.length) return pages
   const generated = new Map(pages.map((page) => [page.name, page]))
-  const merged = previous.pages.map((page) => generated.get(page.name) ?? page)
+  const merged = current.map((page) => generated.get(page.name) ?? page)
   for (const page of pages) {
-    if (!previous.pages.some((existing) => existing.name === page.name)) merged.push(page)
+    if (!current.some((existing) => existing.name === page.name)) merged.push(page)
   }
   return merged.slice(0, 8)
+}
+
+export function mergePages(previous: BuildInfo | undefined, pages: BuildPage[]): BuildPage[] {
+  return mergePageList(previous?.pages, pages)
 }
 
 function mergeBuild(build: BuildInfo, previous: BuildInfo | undefined): BuildInfo {
@@ -282,15 +316,16 @@ function responseCookies(response: Response): string {
 
 /** A fresh DuckDuckGo challenge and the session cookies that belong to it. */
 async function duckSession(): Promise<DuckSession> {
+  const deadline = AbortSignal.timeout(DUCK_SESSION_TIMEOUT_MS)
   const home = await fetch(DUCK_HOME, {
     headers: { 'user-agent': DUCK_UA, accept: 'text/html,application/xhtml+xml' },
-    signal: AbortSignal.timeout(DUCK_TIMEOUT_MS),
+    signal: deadline,
   })
-  if (!home.ok) throw new AiError('unavailable', 'The free model is unavailable right now.', 503)
+  if (!home.ok) throw new AiError('unavailable', 'The model is unavailable right now.', 503)
   const html = await home.text()
   const tag = html.match(/data-version-tag=["']([^"']+)["']/)?.[1]
   const sha = html.match(/data-version-sha=["']([^"']+)["']/)?.[1]
-  if (!tag || !sha) throw new AiError('unavailable', 'The free model is unavailable right now.', 503)
+  if (!tag || !sha) throw new AiError('unavailable', 'The model is unavailable right now.', 503)
   const feVersion = `${tag}-${sha}`
   const homeCookies = responseCookies(home)
 
@@ -306,10 +341,10 @@ async function duckSession(): Promise<DuckSession> {
       referer: 'https://duck.ai/',
       ...(homeCookies ? { cookie: homeCookies } : {}),
     },
-    signal: AbortSignal.timeout(DUCK_TIMEOUT_MS),
+    signal: deadline,
   })
   const challenge = status.headers.get('x-vqd-hash-1')
-  if (!status.ok || !challenge) throw new AiError('unavailable', 'The free model is unavailable right now.', 503)
+  if (!status.ok || !challenge) throw new AiError('unavailable', 'The model is unavailable right now.', 503)
   const cookies = [homeCookies, responseCookies(status)].filter(Boolean).join('; ')
   return { challenge, feVersion, cookies }
 }
@@ -344,7 +379,7 @@ export async function* duckComplete(
   signal: AbortSignal,
   systemPrompt = BUFFY_FREE_PROMPT,
 ): AsyncGenerator<string> {
-  const deadline = AbortSignal.timeout(120_000)
+  const deadline = AbortSignal.timeout(DUCK_STREAM_TIMEOUT_MS)
   const combined = AbortSignal.any([signal, deadline])
   const signals = btoa(
     JSON.stringify({ start: Date.now(), events: [{ name: 'action', delta: 1200, trusted: true }], end: 1500 }),
@@ -434,11 +469,13 @@ export async function* duckComplete(
   if (!emitted) throw new AiError('empty', `${DUCK_MODEL_LABELS[turn.model]} returned no answer.`, 502)
 }
 
+type BridgeReplyResult = { response: Response } | { fallback: true }
+
 /** Use the local bridge only for the owner; everyone else gets the free lane. */
 async function bridgeReply(
-  c: { env: AppContext['Bindings']; req: { raw: Request }; header: (name: string, value: string) => void },
+  c: { env: AppContext['Bindings']; req: { raw: Request } },
   messages: BuffyMessage[],
-): Promise<Response | null> {
+): Promise<BridgeReplyResult | null> {
   const base = bridgeBase(c)
   if (!base) return null
   const controller = new AbortController()
@@ -454,18 +491,30 @@ async function bridgeReply(
       signal: controller.signal,
     })
     clearTimeout(timeout)
-    if (!response.ok || !response.body) return null
-    c.header('Cache-Control', 'private, no-store')
-    return new Response(response.body, {
-      headers: {
-        'content-type': 'text/event-stream; charset=utf-8',
-        'cache-control': 'private, no-store, no-transform',
-        connection: 'keep-alive',
-        'x-accel-buffering': 'no',
-      },
+    if (!response.ok || !response.body) return { fallback: true }
+    // A bridge that sends headers and then goes silent must not hold the chat
+    // open. Probe a clone for the first event; the original body stays intact
+    // for an unchanged pass-through once the agent starts talking.
+    const reader = response.clone().body!.getReader()
+    let firstTimer: ReturnType<typeof setTimeout> | undefined
+    const first = await Promise.race([
+      reader.read(),
+      new Promise<null>((resolve) => {
+        firstTimer = setTimeout(() => resolve(null), BRIDGE_FIRST_CHUNK_MS)
+      }),
+    ]).finally(() => clearTimeout(firstTimer))
+    if (!first || first.done) {
+      await Promise.allSettled([reader.cancel(), response.body.cancel()])
+      return { fallback: true }
+    }
+    // The probe branch is no longer needed; the original body stays untouched.
+    void reader.cancel().catch(() => {})
+    return { response }
+  } catch (error) {
+    console.log('buffy.bridge_failed', {
+      error: error instanceof Error ? error.message : String(error),
     })
-  } catch {
-    return null
+    return { fallback: true }
   } finally {
     clearTimeout(timeout)
     c.req.raw.signal.removeEventListener('abort', abort)
@@ -481,7 +530,7 @@ buffy.get('/status', async (c) => {
     mode: 'free' as const,
     model: 'Dent',
     chatgpt: true,
-    reason: 'Dent first, then free hosted fallbacks. ChatGPT and Claude are available in the picker; no key or project setup needed.',
+    reason: 'Dent first, then hosted fallbacks. ChatGPT and Claude are available in the picker; no key or project setup needed.',
   }
 
   if (!owner || !base) return privateJson(c, freeStatus)
@@ -489,7 +538,7 @@ buffy.get('/status', async (c) => {
   try {
     const response = await fetch(`${base}/health`, {
       headers: bridgeHeaders(c),
-      signal: AbortSignal.timeout(2_500),
+      signal: AbortSignal.timeout(1_500),
     })
     if (!response.ok) {
       const detail = await response.text().catch(() => '')
@@ -506,7 +555,7 @@ buffy.get('/status', async (c) => {
     if (!health.configured) {
       return privateJson(c, {
         ...freeStatus,
-        reason: 'The bridge is running, but CODEBUFF_API_KEY is missing. Free chat is still available.',
+        reason: 'The bridge is running, but CODEBUFF_API_KEY is missing. Chat is still available.',
       })
     }
     return privateJson(c, {
@@ -522,7 +571,7 @@ buffy.get('/status', async (c) => {
   } catch {
     return privateJson(c, {
       ...freeStatus,
-      reason: 'No bridge answered. Free chat is still available.',
+      reason: 'No bridge answered. Chat is still available.',
     })
   }
 })
@@ -533,7 +582,7 @@ buffy.get('/duck/challenge', async (c) => {
     c.header('Cache-Control', 'private, no-store')
     return c.json(session)
   } catch {
-    return c.json({ error: 'The free model is not available right now.' }, 503)
+    return c.json({ error: 'The model is not available right now.' }, 503)
   }
 })
 
@@ -559,10 +608,10 @@ buffy.post('/code', async (c) => {
   // A selected Duck model must actually be the one that runs. Do not replace
   // a missing browser proof with a different hosted model behind the user's back.
   if (model !== DENT_MODEL && !duck) {
-    return c.json({ error: 'That free model needs a fresh browser proof. Try again or choose Dent deep mode.' }, 400)
+    return c.json({ error: 'That model needs a fresh browser proof. Try again or choose Dent deep mode.' }, 400)
   }
   if (!lanes.length && !duck) {
-    return c.json({ error: 'No free coding models are available right now. Try again in a minute.' }, 503)
+    return c.json({ error: 'No coding models are available right now. Try again in a minute.' }, 503)
   }
 
   const db = c.get('db')
@@ -615,6 +664,7 @@ buffy.post('/code', async (c) => {
       await tool('tool_call', 'plan', 'create_plan', prompt.slice(0, 120), 'running')
 
       const requireInteractive = isInteractiveRequest(prompt)
+      const pageLimit = requestedPageLimit(prompt)
       const interactive = requireInteractive || Boolean(previous?.interactive)
       let result: { text: string; build: BuildInfo } | null = null
       if (model === DENT_MODEL) {
@@ -632,6 +682,7 @@ buffy.post('/code', async (c) => {
             if (laneResult.ok) usedLabel = laneResult.lane.label
           }
           const dentDeadlineAt = Date.now() + DENT_PAGE_DEADLINE_MS
+          const remainingDentMs = () => Math.max(0, dentDeadlineAt - Date.now())
           try {
             let raw = ''
             for await (const piece of publicComplete(dentLanes, {
@@ -646,24 +697,26 @@ buffy.post('/code', async (c) => {
               // look like a model failure rather than a budget failure.
               maxTokens: DENT_PAGE_MAX_TOKENS,
               idleMs: 30_000,
-              timeoutMs: dentPageTimeout(dentDeadlineAt, 120_000),
+              timeoutMs: Math.min(DENT_PAGE_DRAFT_MS, remainingDentMs()),
               onLaneResult: onDentLaneResult,
             })) {
               if (piece.type === 'text') raw += piece.text
             }
-            const generated = extractPages(raw, { requireInteractive })
+            const generated = extractPages(raw, { requireInteractive, ...(pageLimit ? { maxPages: pageLimit } : {}) })
             if (!generated.length) {
               console.log('buffy.code.dent_invalid', { label: usedLabel, chars: raw.length })
               await send('status', { text: 'Dent returned an incomplete page — using the page builder…' })
             } else {
               let pages = mergePages(previous, generated)
-              let verification = verifyPages(pages, { interactive })
+              let verification = verifyPages(pages, { interactive, question: prompt })
               let repaired = false
               // A page is a program with checks, so spend one extra Dent turn
               // only when a check failed AND the shared deadline still leaves
               // a real repair window. A slow first draft must not buy another
               // full timeout before the page builder gets a turn.
-              const skipRepair = verification.failures.length > 0 && !dentPageHasBudget(dentDeadlineAt)
+              const remainingMs = remainingDentMs()
+              const skipRepair =
+                verification.failures.length > 0 && remainingMs < DENT_PAGE_REPAIR_MIN_MS
               if (verification.failures.length && !skipRepair) {
                 const count = verification.failures.length
                 await send('status', {
@@ -680,24 +733,17 @@ buffy.post('/code', async (c) => {
                     temperature: 0.15,
                     maxTokens: DENT_PAGE_MAX_TOKENS,
                     idleMs: 30_000,
-                    timeoutMs: dentPageTimeout(dentDeadlineAt, 75_000),
+                    timeoutMs: Math.min(DENT_PAGE_REPAIR_MS, remainingDentMs()),
                     onLaneResult: onDentLaneResult,
                   })) {
                     if (piece.type === 'text') repairRaw += piece.text
                   }
-                  const repairPages = extractPages(repairRaw, { requireInteractive })
+                  const repairPages = extractPages(repairRaw, { requireInteractive, ...(pageLimit ? { maxPages: pageLimit } : {}) })
                   if (repairPages.length) {
-                    const base: BuildInfo = previous ?? {
-                      status: 'warning',
-                      kind: 'page',
-                      title: pageTitle(pages[0]!.html),
-                      html: pages[0]!.html,
-                      pages,
-                      models: [usedLabel],
-                      asOf: Date.now(),
-                    }
-                    const nextPages = mergePages(base, repairPages)
-                    const nextVerification = verifyPages(nextPages, { interactive })
+                    // Merge into the current draft, not the pre-draft project:
+                    // a repaired page must not drop the draft's other pages.
+                    const nextPages = mergePageList(pages, repairPages)
+                    const nextVerification = verifyPages(nextPages, { interactive, question: prompt })
                     if (dentPageImprovement(verification, nextVerification)) {
                       console.log('buffy.code.dent_repaired', {
                         before: count,
@@ -723,14 +769,14 @@ buffy.post('/code', async (c) => {
               if (skipRepair) {
                 console.log('buffy.code.dent_repair_skipped', {
                   failures: verification.failures.length,
-                  remainingMs: Math.max(0, dentDeadlineAt - Date.now()),
+                  remainingMs,
                   fallback: true,
                 })
                 // The draft used the whole Dent budget and still failed its
                 // checks. Do not show a warning page as if it were the result;
                 // let the page builder take the remaining turn.
               } else {
-                result = buildFromPages(pages, interactive, usedLabel, repaired)
+                result = buildFromPages(pages, interactive, usedLabel, prompt, repaired)
               }
             }
           } catch (error) {
@@ -755,9 +801,9 @@ buffy.post('/code', async (c) => {
           )) {
             raw += piece
           }
-          const generated = extractPages(raw, { requireInteractive })
+          const generated = extractPages(raw, { requireInteractive, ...(pageLimit ? { maxPages: pageLimit } : {}) })
           if (generated.length) {
-            result = buildFromPages(mergePages(previous, generated), interactive, label)
+            result = buildFromPages(mergePages(previous, generated), interactive, label, prompt)
           } else {
             console.log('buffy.code.duck_invalid', { model: duck.model, chars: raw.length })
             await send('status', { text: `${label} returned an incomplete page — using the page builder…` })
@@ -776,17 +822,34 @@ buffy.post('/code', async (c) => {
         if (!lanes.length) {
           throw new AiError(
             'busy',
-            duck ? `${DUCK_MODEL_LABELS[duck.model]} is busy right now. Try again in a moment.` : 'No free coding models are available right now. Try again in a minute.',
+            duck ? `${DUCK_MODEL_LABELS[duck.model]} is busy right now. Try again in a moment.` : 'No coding models are available right now. Try again in a minute.',
             503,
           )
         }
         await send('status', {
-          text: duck ? 'The free models did not finish — using the page builder…' : 'Writing the project with the page builder…',
+          text: duck ? 'The models did not finish — using the page builder…' : 'Writing the project with the page builder…',
         })
         try {
+          // A fresh Worker isolate has no in-memory routing history. Load the
+          // persisted health and Build ratings so the page race starts with a
+          // lane that has actually answered recently, not whichever model has
+          // the biggest name. Both reads are best-effort: a missing health
+          // table must not stop a build.
+          const [healthRowsResult, quality] = await Promise.all([
+            healthRows(db, user.sub).catch(() => []),
+            loadTaskQuality(db, user.sub, 'build').catch(() => new Map()),
+          ])
+          const health = new Map(
+            healthRowsResult.map((row) => [
+              row.provider_id,
+              { status: row.status, latencyMs: row.latency_ms ?? undefined },
+            ]),
+          )
           const outcome = await buildComplete({
             lanes,
             question: prompt,
+            health,
+            quality,
             ...(previous ? { previous } : {}),
             signal: controller.signal,
             onStatus: (text) => send('status', { text }),
@@ -859,7 +922,7 @@ buffy.post('/chat', async (c) => {
     return c.json({ error: 'That conversation is empty or too long for Buffy.' }, 400)
   }
   const suppliedDuck = duckTurn(body.duck)
-  const model = requestedBuffyModel(body.model, suppliedDuck?.model)
+  const model = requestedBuffyModel(body.model, suppliedDuck?.model, 'claude-haiku-5-5')
   const duck = model === DENT_MODEL ? null : suppliedDuck
   const lanes = freeLanes(c.env)
   if (!lanes.length && !duck) return c.json({ error: 'Buffy is not configured on this deployment.' }, 503)
@@ -867,10 +930,16 @@ buffy.post('/chat', async (c) => {
   const owner = isOwner(c.env, c.get('user'), c.req.raw)
   // A model choice means the free hosted lanes. Only a model-less request can
   // use the local Codebuff bridge; otherwise selecting Dent, ChatGPT or Claude
-  // would silently be ignored for the owner.
-  if (owner && body.model == null) {
+  // would silently be ignored for the owner. A greeting is answered locally
+  // below, so it must not wait for the bridge to assemble its tools.
+  const lastMessage = [...messages].reverse().find((message) => message.role === 'user')?.content.trim() ?? ''
+  let bridgeFallback = false
+  if (owner && body.model == null && !SMALL_TALK.test(lastMessage)) {
     const bridged = await bridgeReply(c, messages)
-    if (bridged) return bridged
+    if (bridged) {
+      if ('response' in bridged) return bridged.response
+      bridgeFallback = true
+    }
   }
 
   const db = c.get('db')
@@ -895,11 +964,26 @@ buffy.post('/chat', async (c) => {
   return streamSSE(c, async (stream) => {
     stream.onAbort(() => controller.abort())
     try {
+      const lastUser = [...messages].reverse().find((message) => message.role === 'user')?.content.trim() ?? ''
+      if (SMALL_TALK.test(lastUser)) {
+        // No status event and no provider call: a greeting is local work.
+        await stream.writeSSE({
+          data: JSON.stringify({ choices: [{ delta: { content: trivialReply(lastUser) } }] }),
+        })
+        await stream.writeSSE({ data: '[DONE]' })
+        return
+      }
       await stream.writeSSE({
         event: 'status',
         data: JSON.stringify({
           type: 'status',
-          text: duck ? `${DUCK_MODEL_LABELS[duck.model]} is thinking…` : model === DENT_MODEL ? 'Dent is thinking…' : 'Buffy is thinking…',
+          text: bridgeFallback
+            ? 'The local agent did not answer — using free chat…'
+            : duck
+            ? `${DUCK_MODEL_LABELS[duck.model]} is thinking…`
+            : model === DENT_MODEL
+              ? 'Dent is thinking…'
+              : `${DUCK_MODEL_LABELS[model as DuckModel]} is unavailable — using a fast fallback…`,
         }),
       })
       if (duck) {
@@ -928,7 +1012,7 @@ buffy.post('/chat', async (c) => {
               event: 'status',
               data: JSON.stringify({
                 type: 'status',
-                text: `${DUCK_MODEL_LABELS[duck.model]} is busy — switching to a free fallback…`,
+                text: `${DUCK_MODEL_LABELS[duck.model]} is busy — switching to a fallback…`,
               }),
             })
             .catch(() => {})
@@ -938,7 +1022,7 @@ buffy.post('/chat', async (c) => {
         await stream.writeSSE({
           data: JSON.stringify({
             error: {
-              message: `${duck ? DUCK_MODEL_LABELS[duck.model] : 'The free model'} is busy and no fallback is configured.`,
+              message: `${duck ? DUCK_MODEL_LABELS[duck.model] : 'The model'} is busy and no fallback is configured.`,
             },
           }),
         })
@@ -957,13 +1041,34 @@ buffy.post('/chat', async (c) => {
           void recordProviderResult(db, user.sub, laneKey(result.lane), result).catch(() => {})
         },
       }
-      const completion = model === DENT_MODEL
-        ? dentComplete(dentFirst(lanes), {
-            ...completionInput,
-            onStatus: (text) =>
-              stream.writeSSE({ event: 'status', data: JSON.stringify({ type: 'status', text }) }).catch(() => {}),
+      const chatHealth = await healthRows(db, user.sub).catch(() => [])
+      const healthByLane = new Map(chatHealth.map((row) => [row.provider_id, row.status]))
+      // If Dent is selected, use the actual Dent lane when it is healthy. It is
+      // currently a paid/down lane on many deployments, so do not spend 75
+      // seconds on a deep draft; fall back to the fastest healthy chat lane and
+      // say so instead of silently making the person wait.
+      const dentLanes = model === DENT_MODEL
+        ? lanes.filter((lane) => isDentLane(lane) && healthByLane.get(laneKey(lane)) !== 'down')
+        : []
+      if (model === DENT_MODEL && !dentLanes.length) {
+        await stream
+          .writeSSE({
+            event: 'status',
+            data: JSON.stringify({ type: 'status', text: "Dent's lane is unavailable — using a fast fallback…" }),
           })
-        : publicComplete(orderLanes(lanes), completionInput)
+          .catch(() => {})
+      }
+      const chatLanes = fastChatLanes(orderLanes(lanes), chatHealth)
+      const orderedChatLanes = dentLanes.length
+        ? [...dentLanes, ...chatLanes.filter((lane) => !dentLanes.includes(lane))]
+        : chatLanes
+      const completion = publicComplete(orderedChatLanes, {
+        ...completionInput,
+        // A lane that has not produced a token in three seconds is not a
+        // lightning chat lane; try the next healthy fallback immediately.
+        idleMs: 3_000,
+        timeoutMs: model === DENT_MODEL ? 30_000 : 60_000,
+      })
       for await (const piece of completion) {
         if (piece.type !== 'text') continue
         await stream.writeSSE({
