@@ -7,8 +7,8 @@ import { aiConfigured, availableModels } from '../ai'
 import { ACCOUNT_COOKIE, GUEST_COOKIE, analyzeEnabledFor, authMode, buildEnabledFor, isAccountUser, isGuestUser, isOwner, privateJson, researchEnabledFor } from '../auth'
 import { guestUsageToday, now, utcDay, usageToday } from '../db'
 import type { AppContext } from '../env'
-import { familyForLane, isLocalBridgeRequest, laneStrength, pickPickerFamilies, pickerModelDescription, pickerModelName, publicLanes } from '../public-ai'
-import { fallbackLabelFor, replacementLabels, replacementLane } from '../model-fallbacks'
+import { familyForLane, isLocalBridgeRequest, laneKey, laneStrength, pickPickerFamilies, pickerModelDescription, pickerModelName, publicLanes } from '../public-ai'
+import { fallbackForUnavailableModel, isUnavailableHealth, replacementLane } from '../model-fallbacks'
 import { healthRows, type HealthRow } from '../provider-health'
 import { guestUsageKey } from '../rate-limit'
 import { searchConfigured } from '../search'
@@ -95,6 +95,11 @@ account.get('/models', async (c) => {
   const lanes = publicLanes(c.env).filter(
     (lane) => isLocalBridgeRequest(c.req.raw) || !lane.model.startsWith('buffy'),
   )
+  const byLane = new Map(health.map((row) => [row.provider_id, row]))
+  // A lane whose last check failed must not be offered. Families are rebuilt
+  // from the remaining lanes, so a healthy sibling or the next family takes the
+  // dead row's place without exposing the substitution.
+  const workingLanes = lanes.filter((lane) => !isUnavailableHealth(byLane.get(laneKey(lane))))
   // Buffy is an extra row: keep the hosted families intact rather than letting
   // it displace one of them. The local bridge supplies Buffy Agent and Buffy;
   // a deployment without one still advertises Buffy, which the Worker runs on
@@ -112,12 +117,12 @@ account.get('/models', async (c) => {
     }))
   const buffyRows = bridgeBuffyRows.length
     ? bridgeBuffyRows
-    : lanes.length
+    : workingLanes.length
       ? [
           {
             id: 'buffy-lite',
             name: 'Buffy',
-            description: 'Buffy on the strongest free hosted models — no key or setup.',
+            description: 'Buffy on the strongest hosted models — no key or setup.',
             available: true,
             family: 'Buffy Agent',
             billing: 'free' as const,
@@ -145,17 +150,20 @@ account.get('/models', async (c) => {
     /deepseek-(?:flash|v4\.1)/i.test(lane.model) ? 'Dent' : cleanPickerName(lane.label)
   const frontierDescriptions: Record<string, string> = {
     'stepfun-ai/step-5-preview': 'Frontier reasoning for long, hard tasks.',
-    'deepseek-ai/deepseek-v4.1-flash': 'Strong free coder; behind Opus 5.5 on long-horizon agent work.',
-    'deepseek-flash': 'Strong free coder; behind Opus 5.5 on long-horizon agent work.',
+    'deepseek-ai/deepseek-v4.1-flash': 'Strong coder; behind Opus 5.5 on long-horizon agent work.',
+    'deepseek-flash': 'Strong coder; behind Opus 5.5 on long-horizon agent work.',
     'moonshotai/kimi-k3': 'Frontier reasoning, coding and agentic work.',
     'inclusionai/ling-3.2-flash:free': 'Long-context multimodal reasoning and documents.',
     'baidu/ernie-5.5-flash-preview:free': 'Strong tool use and browsing for agent work.',
     'particle-ai/particle-1:free': 'Token-efficient coding and page edits.',
   }
-  const replacement = replacementLane(lanes)
-  const replacementNames = replacementLabels(lanes)
-  const replacementFallback = replacement ? fallbackLabelFor(replacement.model, lanes, health) : undefined
-  const replacementBackups = replacementNames.filter((name) => !replacement || !replacement.label.includes(name))
+  const configuredReplacement = replacementLane(lanes)
+  const replacementFallback = configuredReplacement
+    ? fallbackForUnavailableModel(configuredReplacement.model, lanes, health)
+    : undefined
+  const replacement = configuredReplacement && !isUnavailableHealth(byLane.get(laneKey(configuredReplacement)))
+    ? configuredReplacement
+    : replacementFallback?.lane
   const items: ModelInfo[] = [
     ...buffyRows,
     ...(replacement
@@ -163,19 +171,18 @@ account.get('/models', async (c) => {
           {
             id: replacement.model,
             name: cleanPickerName(replacement.label),
-            description: `Replaces ERNIE and Particle-1.${replacementBackups.length ? ` Automatic backups: ${replacementBackups.join(', ')}.` : ''}${replacementFallback ? ` Temporarily using ${replacementFallback}.` : ''}`,
+            description: frontierDescriptions[replacement.model] ?? replacement.description,
             available: true,
             family: familyForLane(replacement),
             billing: replacement.billing ?? 'free',
             strength: laneStrength(replacement.model, replacement.url),
-            ...(replacementFallback ? { fallback: replacementFallback } : {}),
           },
         ]
       : []),
     {
       id: 'claude-haiku-5-5',
       name: 'Claude',
-      description: 'Free Claude Haiku 5.5, no key or setup.',
+      description: 'Claude Haiku 5.5, no key or setup.',
       available: true,
       family: 'Claude',
       billing: 'free',
@@ -184,18 +191,18 @@ account.get('/models', async (c) => {
     {
       id: 'gpt-6-luna',
       name: 'ChatGPT',
-      description: 'Free GPT-6 Luna, no key or setup.',
+      description: 'GPT-6 Luna, no key or setup.',
       available: true,
       family: 'ChatGPT',
       billing: 'free',
       strength: laneStrength('gpt-6-luna'),
     },
-    ...(lanes.some((lane) => lane.model === 'gemini-web')
+    ...(workingLanes.some((lane) => lane.model === 'gemini-web')
       ? [
           {
             id: 'gemini-web',
             name: 'Gemini',
-            description: 'Free Gemini 4, no key or setup.',
+            description: 'Gemini 4, no key or setup.',
             available: true,
             family: 'Gemini',
             billing: 'free' as const,
@@ -204,7 +211,7 @@ account.get('/models', async (c) => {
         ]
       : []),
     ...pickPickerFamilies(
-      lanes.filter(
+      workingLanes.filter(
         (lane) =>
           !lane.model.startsWith('buffy') &&
           lane.model !== 'gemini-web' &&
@@ -226,18 +233,14 @@ account.get('/models', async (c) => {
         // The two free frontier lanes are new enough that a borrowed alias
         // hides what they are. Show their real names and descriptions.
         const actual = /ernie-5\.5|particle-1|ling-3\.2|step-5|kimi-k3|deepseek-(?:flash|v4\.1-flash)/i.test(lane.model)
-        const fallback = fallbackLabelFor(lane.model, lanes, health)
         return {
           id: lane.model,
           name: actual ? pickerNameFor(lane) : pickerModelName(index),
-          description: actual
-            ? `${frontierDescriptions[lane.model] ?? lane.description}${fallback ? ` Temporarily using ${fallback}.` : ''}`
-            : pickerModelDescription(index),
+          description: actual ? (frontierDescriptions[lane.model] ?? lane.description) : pickerModelDescription(index),
           available: true,
           family,
           strength: laneStrength(lane.model, lane.url),
           ...(lane.billing ? { billing: lane.billing } : {}),
-          ...(fallback ? { fallback } : {}),
         }
       }),
   ]

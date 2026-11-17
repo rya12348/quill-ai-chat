@@ -32,7 +32,7 @@ test('family names collapse provider and version suffixes', () => {
     ['dots-studio/dots-3-note-preview:free', 'Dots3 Note (Kilo)', 'Dots'],
     ['liquid/lfm-3-1.7b:free', 'Liquid LFM3 1.7B (Kilo)', 'Liquid'],
     ['stealth/glyph-cluster', 'Glyph Cluster (Kilo)', 'Stealth'],
-    ['kilo-auto/free', 'Kilo Auto Free', 'Kilo'],
+    ['kilo-auto/free', 'Kilo Auto', 'Kilo'],
     ['poolside/laguna-xs-2.1', 'Laguna XS 2.1 (BlockRun)', 'Laguna'],
     ['nvidia/muse-glimmer-30b', 'Muse Glimmer 30B (BlockRun)', 'Muse'],
     ['nvidia/minimax-m3.1-flash', 'MiniMax M3.1 Flash (BlockRun)', 'MiniMax'],
@@ -79,7 +79,7 @@ test('the two strongest free models are lanes ranked above the 550B', () => {
 
 test('the picker uses the five short model names in order', () => {
   assert.deepEqual([...PICKER_MODEL_NAMES], ['Sable', 'Quill', 'Stride', 'Ink', 'Dent'])
-  assert.equal(PICKER_MODEL_DESCRIPTIONS[4], 'Strong free coder; behind Opus 5.5 on long-horizon agent work.')
+  assert.equal(PICKER_MODEL_DESCRIPTIONS[4], 'Strong coder; behind Opus 5.5 on long-horizon agent work.')
   assert.equal(new Set(PICKER_MODEL_DESCRIPTIONS).size, PICKER_MODEL_NAMES.length)
   assert.ok(PICKER_MODEL_DESCRIPTIONS.every((description) => description.endsWith('.')))
 })
@@ -111,11 +111,37 @@ test('DeepSeek 4.1 is pinned into the shortlist when its lane is configured', ()
   assert.ok(picks.some((pick) => pick.lane.model === 'deepseek-flash'))
 })
 
-test('the NVIDIA DeepSeek lane opts into the frontier harness', () => {
+test('a family with no working lane is replaced by the next working family', () => {
+  const step = lane('stepfun-ai/step-5-preview', 'Step 5 Preview (NVIDIA)')
+  const qwen = lane('qwen3.8-max', 'Qwen 3.8 Max')
+  const picks = pickPickerFamilies([step, qwen], new Map([[laneKey(step), 'down']]))
+
+  assert.deepEqual(picks.map((pick) => pick.family), ['Qwen'])
+  assert.equal(picks[0]?.lane.model, qwen.model)
+})
+
+test('the DeepSeek pin never resurrects a down lane', () => {
+  const exact = lane('deepseek-flash', 'DeepSeek V4.1 Flash')
+  const healthy = lane('@cf/deepseek-ai/deepseek-r1-distill-qwen-32b', 'DeepSeek R1 Distill 32B (Workers AI)')
+  const picks = pickPickerFamilies(
+    [exact, healthy],
+    new Map([
+      [laneKey(exact), 'down'],
+      [laneKey(healthy), 'healthy'],
+    ]),
+  )
+
+  assert.equal(picks[0]?.family, 'DeepSeek')
+  assert.equal(picks[0]?.lane.model, healthy.model)
+})
+
+test('retired NVIDIA lanes are not advertised or tried', () => {
   const lanes = publicLanes({ NVIDIA_API_KEY: 'nvidia-key' } as unknown as Env)
-  const deepseek = lanes.find((lane) => lane.model === 'deepseek-ai/deepseek-v4.1-flash')
-  assert.equal(deepseek?.frontier, true)
-  assert.notEqual(lanes.find((lane) => lane.model === 'moonshotai/kimi-k3')?.frontier, true)
+  // Kimi K3 was retired on 2026-10-15 and DeepSeek V4.1 Flash on 2026-11-16.
+  // Keeping either lane in the list makes the first build-spec call fail 410.
+  assert.equal(lanes.find((lane) => lane.model === 'deepseek-ai/deepseek-v4.1-flash'), undefined)
+  assert.equal(lanes.find((lane) => lane.model === 'moonshotai/kimi-k3'), undefined)
+  assert.ok(lanes.find((lane) => lane.model === 'stepfun-ai/step-5-preview'))
 })
 
 test('the added keyless lanes are wired into the free chain', () => {
@@ -147,7 +173,7 @@ test('the added keyless lanes are wired into the free chain', () => {
 
   assert.equal(byModel('Qwen3.6-27B')?.label, 'Qwen 3.6 27B (OVHcloud)')
   assert.equal(byModel('Qwen3.5-397B-A17B')?.label, 'Qwen 3.5 397B (OVHcloud)')
-  assert.equal(byModel('kilo-auto/free')?.label, 'Kilo Auto Free')
+  assert.equal(byModel('kilo-auto/free')?.label, 'Kilo Auto')
   assert.equal(laneSupportsVision(byModel('nvidia/nemotron-3.5-super-vl:free')!), true)
   assert.equal(laneSupportsVision(byModel('Qwen2.5-VL-72B-Instruct')!), true)
 

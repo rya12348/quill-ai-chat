@@ -64,8 +64,8 @@ const isOpenRouter = (lane: PublicLane) => {
   }
 }
 
-const isUnavailable = (row: HealthRow | undefined): boolean =>
-  Boolean(
+export function isUnavailableHealth(row: HealthRow | undefined): boolean {
+  return Boolean(
     row &&
       (row.status === 'down' ||
         row.last_error_code === 'quota' ||
@@ -73,6 +73,7 @@ const isUnavailable = (row: HealthRow | undefined): boolean =>
         row.last_error_code === 'unavailable' ||
         row.last_error_code === 'empty'),
   )
+}
 
 /**
  * Pick one healthy non-OpenRouter lane for a selected model whose exact route
@@ -90,7 +91,7 @@ export function fallbackForUnavailableModel(
   if (!exact) return undefined
   const byLane = new Map(health.map((row) => [row.provider_id, row]))
   const exactHealth = byLane.get(laneKey(exact))
-  if (!isUnavailable(exactHealth)) return undefined
+  if (!isUnavailableHealth(exactHealth)) return undefined
 
   // OpenRouter's free limit is account-wide, so another :free OpenRouter route
   // would fail in exactly the same way. A paid route must never inherit a free
@@ -100,7 +101,7 @@ export function fallbackForUnavailableModel(
       lane.model !== model &&
       lane.billing !== 'paid' &&
       !isOpenRouter(lane) &&
-      !isUnavailable(byLane.get(laneKey(lane))),
+      !isUnavailableHealth(byLane.get(laneKey(lane))),
   )
   if (!candidates.length) return undefined
 

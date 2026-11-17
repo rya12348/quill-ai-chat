@@ -62,12 +62,15 @@ const OPENROUTER_FREE_MODELS = [
 const LLM7_MODELS = ['gpt-oss:20b', 'codestral-latest', 'mistral-Nemo-Instruct-2407']
 const GROQ_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b']
 const MISTRAL_MODELS = ['mistral-large-4', 'codestral-latest', 'ministral-14b-latest']
+// Kimi K3 was retired from NVIDIA on 2026-10-15 and DeepSeek V4.1 Flash on
+// 2026-11-16. Both still appeared in the catalogue and failed in ~50 ms with
+// HTTP 410, which made the first build-spec call fail and left every build
+// without its implementation contract. Dent uses the official DeepSeek lane
+// when that key is configured; it is not silently replaced by another model.
 const NVIDIA_MODELS = [
-  'moonshotai/kimi-k3',
   'stepfun-ai/step-5-preview',
   'minimaxai/minimax-m3.1-flash',
   'nvidia/nemotron-3.5-super-vl-120b-a12b',
-  'deepseek-ai/deepseek-v4.1-flash',
   'z-ai/glm-5.3-flash',
   'nvidia/nemotron-3-ultra-550b-a55b',
   'openai/gpt-oss-20b',
@@ -292,7 +295,7 @@ function labelFor(id: string): string {
   if (lower.includes('gpt-6.1-sol')) return 'GPT-6.1 Sol'
   if (lower.includes('gpt-6.1')) return 'GPT-6.1'
   if (lower.includes('gpt-6')) return 'GPT-6'
-  if (lower.includes('openrouter/free')) return 'OpenRouter Free Router'
+  if (lower.includes('openrouter/free')) return 'OpenRouter Auto'
   if (lower.includes('claude-sonnet-5-5')) return 'Claude Sonnet 5.5'
   if (lower.includes('claude-sonnet-5')) return 'Claude Sonnet 5'
   if (lower.includes('claude-opus-5.5')) return 'Claude Opus 5.5'
@@ -349,7 +352,7 @@ function labelFor(id: string): string {
   if (lower.includes('liquid')) return 'Liquid LFM3 1.7B'
   if (lower.includes('glyph')) return 'Glyph Cluster'
   if (lower.includes('crouton')) return 'Crouton Alpha'
-  if (lower.includes('kilo-auto')) return 'Kilo Auto Free'
+  if (lower.includes('kilo-auto')) return 'Kilo Auto'
   if (lower.includes('minimax-m3.1')) return 'MiniMax M3.1 Flash'
   if (lower.includes('minimax-m3')) return 'MiniMax M3'
   if (lower.includes('minimax-m2.7')) return 'MiniMax M2.7'
@@ -450,12 +453,17 @@ export function pickPickerFamilies(
   statusById: ReadonlyMap<string, string> = new Map(),
 ): { family: string; lane: PublicLane }[] {
   const families = pickModelFamilies(lanes, statusById)
-  const visible = families.slice(0, PICKER_MODEL_LIMIT)
+  // A family with no working lane is replaced by the next strongest working
+  // family. The picker must never show a row that cannot answer.
+  const working = families.filter(({ lane }) => statusById.get(laneKey(lane)) !== 'down')
+  const visible = working.slice(0, PICKER_MODEL_LIMIT)
   // DeepSeek V4.1 is a deliberate product choice, not just whichever family
   // happened to win the strength sort. Pin the exact V4.1 lane into the
-  // shortlist whenever one is configured, replacing the last row rather than
-  // hiding it (and replacing a stronger non-4.1 DeepSeek representative too).
-  const exact = lanes.find((lane) => /(?:deepseek-flash|deepseek-v4\.1)/i.test(`${lane.model} ${lane.label}`))
+  // shortlist whenever one is configured and working, replacing the last row
+  // rather than hiding it (and replacing a stronger non-4.1 representative).
+  const exact = lanes.find(
+    (lane) => /(?:deepseek-flash|deepseek-v4\.1)/i.test(`${lane.model} ${lane.label}`) && statusById.get(laneKey(lane)) !== 'down',
+  )
   if (exact) {
     const row = { family: 'DeepSeek', lane: exact }
     const at = visible.findIndex(({ family }) => family === 'DeepSeek')
@@ -591,7 +599,7 @@ export function buffyLanes(env: Env): PublicLane[] {
       url: endpoint,
       model: 'buffy',
       label: 'Buffy Agent',
-      description: 'Your local Codebuff agent — frontier when credits are available, free fallback otherwise.',
+      description: 'Your local Codebuff agent — frontier when credits are available, model fallback otherwise.',
       billing: 'paid',
       ...shared,
     },
@@ -599,7 +607,7 @@ export function buffyLanes(env: Env): PublicLane[] {
       url: `${endpoint}${endpoint.includes('?') ? '&' : '?'}free=1`,
       model: 'buffy-lite',
       label: 'Buffy Agent',
-      description: 'Zero-credit lane on the strongest free models.',
+      description: 'Zero-credit lane on the strongest models.',
       billing: 'free',
       ...shared,
     },
@@ -626,7 +634,7 @@ export function publicLanes(env: Env): PublicLane[] {
       url: POLLINATIONS_KEYED_URL,
       model,
       label: labelFor(model),
-      description: 'Free with your Pollinations key',
+      description: 'Included with your Pollinations key',
       key: env.POLLINATIONS_API_KEY,
     })
   }
@@ -638,7 +646,7 @@ export function publicLanes(env: Env): PublicLane[] {
       url: AIHUBMIX_URL,
       model: 'coding-kimi-k3-free',
       label: labelFor('coding-kimi-k3-free'),
-      description: 'Free, no card, 100 requests/day via AIHubMix',
+      description: 'No card, 100 requests/day via AIHubMix',
       key: env.AIHUBMIX_API_KEY,
     })
   }
@@ -654,7 +662,7 @@ export function publicLanes(env: Env): PublicLane[] {
         url: DASHSCOPE_URL,
         model,
         label: labelFor(model),
-        description: 'Free 90-day trial via Alibaba Model Studio',
+        description: '90-day trial via Alibaba Model Studio',
         key: env.DASHSCOPE_API_KEY,
       })
     }
@@ -684,7 +692,7 @@ export function publicLanes(env: Env): PublicLane[] {
         url: OPENROUTER_URL,
         model: freeUltra,
         label: 'Nemotron 3 Ultra 550B',
-        description: 'Free 550B lane via your OpenRouter key',
+        description: '550B lane via your OpenRouter key',
         billing: 'free',
         key: env.OPENROUTER_API_KEY,
       })
@@ -702,7 +710,7 @@ export function publicLanes(env: Env): PublicLane[] {
         url: OPENROUTER_URL,
         model,
         label: labelFor(model),
-        description: 'Free via your OpenRouter key',
+        description: 'Included via your OpenRouter key',
         billing: 'free',
         key: env.OPENROUTER_API_KEY,
       })
@@ -715,7 +723,7 @@ export function publicLanes(env: Env): PublicLane[] {
         url: NVIDIA_URL,
         model,
         label: `${labelFor(model)} (NVIDIA)`,
-        description: 'Free with NVIDIA NIM',
+        description: 'Included with NVIDIA NIM',
         billing: 'free',
         // DeepSeek is the lane that gets the frontier treatment: same model,
         // full test-time-compute harness instead of one-shot answering.
@@ -733,7 +741,7 @@ export function publicLanes(env: Env): PublicLane[] {
       url: DEEPSEEK_URL,
       model,
       label: labelFor(model),
-      description: 'Free credit via DeepSeek',
+      description: 'Credit via DeepSeek',
       key: env.DEEPSEEK_API_KEY,
     })
   }
@@ -744,7 +752,7 @@ export function publicLanes(env: Env): PublicLane[] {
         url: LLM7_URL,
         model,
         label: labelFor(model),
-        description: 'Free with your LLM7 token',
+        description: 'Included with your LLM7 token',
         key: llm7Key,
       })
     }
@@ -756,7 +764,7 @@ export function publicLanes(env: Env): PublicLane[] {
       url: MODELSCOPE_URL,
       model,
       label: labelFor(model),
-      description: 'Free quota via ModelScope',
+      description: 'Quota via ModelScope',
       key: env.MODELSCOPE_API_KEY,
     })
   }
@@ -778,7 +786,7 @@ export function publicLanes(env: Env): PublicLane[] {
         url: GROQ_URL,
         model,
         label: `${labelFor(model)} (Groq)`,
-        description: 'Free with a Groq key',
+        description: 'Included with a Groq key',
         key: env.GROQ_API_KEY,
       })
     }
@@ -790,7 +798,7 @@ export function publicLanes(env: Env): PublicLane[] {
         url: MISTRAL_URL,
         model,
         label: labelFor(model),
-        description: 'Free with a Mistral key',
+        description: 'Included with a Mistral key',
         key: env.MISTRAL_API_KEY,
       })
     }
@@ -802,7 +810,7 @@ export function publicLanes(env: Env): PublicLane[] {
       url: GEMINI_URL,
       model,
       label: labelFor(model),
-      description: 'Free tier via Google AI Studio',
+      description: 'Included via Google AI Studio',
       key: env.GEMINI_API_KEY,
     })
   }
@@ -842,7 +850,7 @@ export function publicLanes(env: Env): PublicLane[] {
         url: SAMBANOVA_URL,
         model,
         label: `${labelFor(model)} (SambaNova)`,
-        description: 'Free tier via SambaNova',
+        description: 'Included via SambaNova',
         key: env.SAMBANOVA_API_KEY,
       })
     }
@@ -854,7 +862,7 @@ export function publicLanes(env: Env): PublicLane[] {
         url: workersAiUrl(env.CLOUDFLARE_ACCOUNT_ID),
         model,
         label: `${labelFor(model)} (Workers AI)`,
-        description: 'Free daily Workers AI allowance',
+        description: 'Daily Workers AI allowance',
         key: env.CLOUDFLARE_AI_TOKEN,
       })
     }
@@ -866,7 +874,7 @@ export function publicLanes(env: Env): PublicLane[] {
       url: ZAI_URL,
       model,
       label: labelFor(model),
-      description: 'Free with your Z.ai key',
+      description: 'Included with your Z.ai key',
       key: env.ZAI_API_KEY,
     })
   }
@@ -876,7 +884,7 @@ export function publicLanes(env: Env): PublicLane[] {
       url: OVH_URL,
       model,
       label: `${labelFor(model)} (OVHcloud)`,
-      description: 'Free, no key, via OVHcloud',
+      description: 'No key, via OVHcloud',
     })
   }
 
@@ -884,8 +892,8 @@ export function publicLanes(env: Env): PublicLane[] {
     lanes.push({
       url: KILO_URL,
       model,
-      label: model === 'kilo-auto/free' ? 'Kilo Auto Free' : `${labelFor(model)} (Kilo)`,
-      description: 'Free, no key, via Kilo; prompts may be logged',
+      label: model === 'kilo-auto/free' ? 'Kilo Auto' : `${labelFor(model)} (Kilo)`,
+      description: 'No key, via Kilo; prompts may be logged',
     })
   }
 
@@ -894,7 +902,7 @@ export function publicLanes(env: Env): PublicLane[] {
       url: BLOCKRUN_URL,
       model,
       label: `${labelFor(model)} (BlockRun)`,
-      description: 'Free, no key, via BlockRun',
+      description: 'No key, via BlockRun',
     })
   }
 
@@ -910,7 +918,7 @@ export function publicLanes(env: Env): PublicLane[] {
     url: 'https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate',
     model: GEMINI_WEB_MODEL,
     label: 'Gemini 4',
-    description: 'Free Gemini 4, no key, via Gemini web',
+    description: 'Gemini 4, no key, via Gemini web',
     billing: 'free',
     selectedOnly: true,
     skipHealth: true,
@@ -932,21 +940,21 @@ function anonymousLanes(): PublicLane[] {
       url: LLM7_URL,
       model: 'gpt-oss:20b',
       label: 'GPT-OSS 20B (LLM7)',
-      description: 'Free, no key',
+      description: 'No key',
       key: 'unused',
     },
     {
       url: LLM7_URL,
       model: 'codestral-latest',
       label: 'Codestral (LLM7)',
-      description: 'Free, no key',
+      description: 'No key',
       key: 'unused',
     },
     {
       url: LLM7_URL,
       model: 'mistral-Nemo-Instruct-2407',
       label: 'Mistral Nemo (LLM7)',
-      description: 'Free, no key',
+      description: 'No key',
       key: 'unused',
     },
     {
@@ -957,7 +965,7 @@ function anonymousLanes(): PublicLane[] {
       model: 'pollinations-gpt-oss',
       requestModel: 'openai-fast',
       label: 'GPT-OSS 20B (Pollinations)',
-      description: 'Free, no key, via Pollinations; falls back when rate-limited',
+      description: 'No key, via Pollinations; falls back when rate-limited',
       billing: 'free',
     },
   ]
@@ -1006,7 +1014,7 @@ async function laneFailure(lane: PublicLane, response: Response): Promise<AiErro
       // cannot park the lane forever, and keep the normal short wait otherwise.
       const until = resetAt > Date.now() ? Math.min(resetAt - Date.now(), 24 * 60 * 60_000) : COOLDOWN_MODEL
       cool(lane, Math.max(until, 60_000))
-      return new AiError('quota', `${lane.label} has used its free daily requests. Try another model or come back later.`, 429)
+      return new AiError('quota', `${lane.label} has used its daily requests. Try another model or come back later.`, 429)
     }
     // Free gateways often say exactly how long to wait; honor a short retry
     // instead of resting the lane for the full ten minutes.
@@ -1102,7 +1110,7 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
         buffered += piece.text
         if (isProviderLimitText(buffered)) {
           cool(lane, COOLDOWN_MODEL)
-          const failure = new AiError('quota', `${lane.label} has no free quota left right now.`, 429)
+          const failure = new AiError('quota', `${lane.label} has no quota left right now.`, 429)
           input.onLaneResult?.(failureResult(lane, failure, startedAt))
           throw failure
         }
@@ -1164,7 +1172,7 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
     }
     if (isProviderLimitText(text)) {
       cool(lane, COOLDOWN_MODEL)
-      const failure = new AiError('quota', `${lane.label} has no free quota left right now.`, 429)
+      const failure = new AiError('quota', `${lane.label} has no quota left right now.`, 429)
       input.onLaneResult?.(failureResult(lane, failure, startedAt))
       throw failure
     }
@@ -1240,7 +1248,7 @@ export async function laneText(lane: PublicLane, input: LaneInput): Promise<stri
     const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout
     try {
       const text = await geminiWebText(input.messages, signal, laneEnvs.get(lane))
-      if (isProviderLimitText(text)) throw new AiError('quota', `${lane.label} has no free quota left right now.`, 429)
+      if (isProviderLimitText(text)) throw new AiError('quota', `${lane.label} has no quota left right now.`, 429)
       input.onLaneResult?.({ lane, ok: true, latencyMs: Date.now() - startedAt })
       return text
     } catch (error) {
@@ -1339,7 +1347,7 @@ export async function laneText(lane: PublicLane, input: LaneInput): Promise<stri
   // a lane failure, never an answer, and it must not be recorded as healthy.
   if (isProviderLimitText(text)) {
     cool(lane, COOLDOWN_MODEL)
-    const failure = new AiError('quota', `${lane.label} has no free quota left right now.`, 429)
+    const failure = new AiError('quota', `${lane.label} has no quota left right now.`, 429)
     input.onLaneResult?.(failureResult(lane, failure, startedAt))
     throw failure
   }

@@ -76,7 +76,7 @@ export const MODELS = [
   { id: 'gpt-6.1-sol', name: 'Quill', description: 'Broad knowledge for research and drafts.' },
   { id: 'gemini-4-argon', name: 'Stride', description: 'A balanced all-rounder for longer documents.' },
   { id: 'kimi-k3', name: 'Ink', description: 'Long context for large documents and deep threads.' },
-  { id: 'deepseek-v4.1-flash', name: 'Dent', description: 'Strong free coder; behind Opus 5.5 on long-horizon agent work.' },
+  { id: 'deepseek-v4.1-flash', name: 'Dent', description: 'Strong coder; behind Opus 5.5 on long-horizon agent work.' },
 ] as const
 export type ModelId = (typeof MODELS)[number]['id']
 export const DEFAULT_MODEL: ModelId = 'gemini-4-argon'
@@ -89,7 +89,7 @@ export const PICKER_MODEL_DESCRIPTIONS = [
   'Broad knowledge for research and drafts.',
   'A balanced all-rounder for longer documents.',
   'Long context for large documents and deep threads.',
-  'Strong free coder; behind Opus 5.5 on long-horizon agent work.',
+  'Strong coder; behind Opus 5.5 on long-horizon agent work.',
 ] as const
 
 /** The picker is a short shortlist, not the whole fallback chain. */

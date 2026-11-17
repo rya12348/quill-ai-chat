@@ -33,7 +33,7 @@ export async function streamChat(body: ChatRequest, options: { signal: AbortSign
   if (body.model === 'claude-haiku-5-5' || body.model === 'gpt-6-luna') {
     const duck = await requestDuckTurn(body.model, options.signal)
     const label = body.model === 'claude-haiku-5-5' ? 'Claude' : 'ChatGPT'
-    if (!duck) throw new Error(`The free ${label} lane is busy right now. Try again or pick another model.`)
+    if (!duck) throw new Error(`The ${label} lane is busy right now. Try again or pick another model.`)
     payload = { ...body, duck }
   }
   const response = await fetch('/api/chat', {

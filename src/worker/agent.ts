@@ -311,7 +311,7 @@ async function writeAnswer(input: AgentIntent, context: AgentAnswerContext): Pro
           revised: reviewed.revised,
         }
       }
-      last = new AiError('empty', 'A free lane returned an unusable answer.', 502)
+      last = new AiError('empty', 'A model returned an unusable answer.', 502)
     } catch (error) {
       if (input.signal?.aborted) throw abortError()
       last = error
