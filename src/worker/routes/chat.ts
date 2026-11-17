@@ -883,6 +883,11 @@ chat.post('/', async (c) => {
       // verbatim window; an already-covered span is not summarized again.
       const recent = history.slice(-MAX_CONTEXT_MESSAGES)
       let memory = ''
+      // Turns that have left the recent window but are not in the summary yet.
+      // They stay in the prompt verbatim until a summary refresh covers them, so
+      // waiting for a batch never makes the model forget the gap.
+      let pending: Message[] = []
+      let pendingAttachments = new Map<string, StoredAttachment[]>()
       const oldestRecentAt = recent[0]?.createdAt
       // Never attach a rolling summary to a chat that still fits verbatim.
       // This also prevents an old summary from making a short chat "remember"
@@ -902,12 +907,13 @@ chat.post('/', async (c) => {
           )
           .bind(owner, conversation.id, oldestRecentAt, Number(saved?.covered_through ?? 0))
           .all()
-        if (shouldRefreshMemory(uncovered.results.length)) {
+        const dropped = (uncovered.results as Record<string, unknown>[]).map(mapMessage)
+        if (shouldRefreshMemory(dropped.length)) {
           const condensed = await refreshConversationSummary({
             env: c.env,
             model,
             existingSummary: memory,
-            messages: (uncovered.results as Record<string, unknown>[]).map(mapMessage),
+            messages: dropped,
             signal: controller.signal,
           })
           if (condensed) {
@@ -925,7 +931,16 @@ chat.post('/', async (c) => {
               .bind(conversation.id, owner, condensed, Number(last.created_at), Date.now())
               .run()
             console.log('memory.summary.updated', { conversationId: conversation.id, messages: uncovered.results.length, chars: condensed.length })
+          } else {
+            // The summarizer failed, so keep the turns visible rather than
+            // silently dropping them from the model's context.
+            pending = dropped
           }
+        } else {
+          pending = dropped
+        }
+        if (pending.length) {
+          pendingAttachments = await loadAttachmentsForMessages(db, owner, pending.map((message) => message.id))
         }
       }
 
@@ -942,6 +957,7 @@ chat.post('/', async (c) => {
         .join('\n\n')
       const prompt: ChatMessage[] = [
         { role: 'system', content: system },
+        ...pending.map((message) => messageWithAttachments(message, pendingAttachments.get(message.id) ?? [])),
         ...recent.map((message) => messageWithAttachments(message, historyAttachments.get(message.id) ?? [])),
       ]
       // A configured key means the Freebuff API; otherwise the free hosted
