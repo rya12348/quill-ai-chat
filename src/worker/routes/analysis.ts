@@ -6,7 +6,7 @@ import { Hono } from 'hono'
 
 import type { AnalysisInfo, AnalysisJob, AnalysisStatus } from '../../shared/types'
 import { isUnsafeAnalysisCode } from '../analysis'
-import { parseAnalysis } from '../db'
+import { now, parseAnalysis } from '../db'
 import type { AppContext } from '../env'
 
 export const analysis = new Hono<AppContext>()
@@ -77,8 +77,8 @@ analysis.post('/:messageId/rerun', async (c) => {
     datasetId: info.datasetId,
   }
   await db
-    .prepare(`UPDATE message_analysis SET content = ? WHERE message_id = ? AND owner_sub = ?`)
-    .bind(JSON.stringify({ info, job }), messageId, owner)
+    .prepare(`UPDATE message_analysis SET content = ?, created_at = ? WHERE message_id = ? AND owner_sub = ?`)
+    .bind(JSON.stringify({ info, job }), now(), messageId, owner)
     .run()
   return c.json({ done: false, job, analysis: info })
 })
@@ -144,8 +144,8 @@ analysis.post('/:messageId/result', async (c) => {
     ...(reason ? { reason } : {}),
   }
   await db
-    .prepare(`UPDATE message_analysis SET content = ? WHERE message_id = ? AND owner_sub = ?`)
-    .bind(JSON.stringify({ info }), messageId, owner)
+    .prepare(`UPDATE message_analysis SET content = ?, created_at = ? WHERE message_id = ? AND owner_sub = ?`)
+    .bind(JSON.stringify({ info }), now(), messageId, owner)
     .run()
 
   console.log('analysis.result', {

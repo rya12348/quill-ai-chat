@@ -1,4 +1,4 @@
-import { Brain, Check, ChevronDown, Copy, Download, ExternalLink, FileSpreadsheet, FileText, Globe2, Hammer, Layers, Link2, Maximize2, Play, RefreshCw, Shield, ShieldAlert, ShieldCheck, ShieldX, ThumbsDown, ThumbsUp, Users, X } from 'lucide-react'
+import { Brain, Check, ChevronDown, Copy, Download, ExternalLink, FileSpreadsheet, Globe2, Hammer, Layers, Link2, Maximize2, Play, RefreshCw, Shield, ShieldAlert, ShieldCheck, ShieldX, ThumbsDown, ThumbsUp, Users, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, useReducedMotion } from 'motion/react'
@@ -15,16 +15,16 @@ import { externalHttpUrl } from '../lib/external-url'
 import { useEnrollReviewDeck } from '../lib/api'
 import { isIsolatedLiveUrl, isolatedLiveUrl } from '../lib/live-preview'
 import { AgentNote } from './AgentNote'
+import { AttachmentFile, AttachmentLightbox, AttachmentThumbnail } from './AttachmentViews'
 import { Markdown } from './Markdown'
 import { InkThinking } from './InkThinking'
 import { Mark } from './Shell'
 import { useToast } from './ui'
 
-const fileSize = (bytes: number) => (bytes < 1_000 ? `${bytes} B` : bytes < 1_000_000 ? `${Math.round(bytes / 1_000)} KB` : `${(bytes / 1_000_000).toFixed(1)} MB`)
-
 export function UserMessage({ content, attachments }: { content: string; attachments?: MessageAttachment[] }) {
-  const images = (attachments ?? []).filter((attachment) => attachment.kind === 'image' && attachment.url)
+  const images = (attachments ?? []).filter((attachment) => attachment.kind === 'image' && (attachment.url || attachment.thumbnailUrl))
   const files = (attachments ?? []).filter((attachment) => attachment.kind === 'text')
+  const [lightbox, setLightbox] = useState<MessageAttachment | null>(null)
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     try {
@@ -36,49 +36,25 @@ export function UserMessage({ content, attachments }: { content: string; attachm
     }
   }
   return (
-    <div className="group flex justify-end">
-      <div className="flex min-w-0 max-w-[78%] flex-col items-end gap-2">
+    <>
+      <div className="group flex justify-end">
+        <div className="flex min-w-0 max-w-[78%] flex-col items-end gap-2">
         {images.length > 0 && (
           <div className="flex flex-wrap justify-end gap-1.5">
             {images.map((attachment) => (
-              <img
+              <AttachmentThumbnail
                 key={attachment.id}
-                src={attachment.url}
-                alt={attachment.name}
-                title={attachment.name}
-                loading="lazy"
-                className="max-h-56 max-w-[280px] rounded-[16px] border border-line bg-surface-2 object-contain"
+                attachment={attachment}
+                onOpen={() => setLightbox(attachment)}
               />
             ))}
           </div>
         )}
         {files.length > 0 && (
           <div className="flex flex-wrap justify-end gap-1.5">
-            {files.map((attachment) => {
-              const link =
-                attachment.mime === 'text/uri-list' && attachment.url && /^https?:\/\//i.test(attachment.url)
-                  ? attachment.url
-                  : null
-              return link ? (
-                <a
-                  key={attachment.id}
-                  href={link}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex max-w-[260px] items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 text-[12.5px] text-muted transition-colors hover:text-fg"
-                  title={link}
-                >
-                  <Link2 className="size-3.5 shrink-0" />
-                  <span className="truncate">{attachment.name}</span>
-                </a>
-              ) : (
-                <span key={attachment.id} className="inline-flex max-w-[260px] items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 text-[12.5px] text-muted" title={attachment.name}>
-                  <FileText className="size-3.5 shrink-0" />
-                  <span className="truncate">{attachment.name}</span>
-                  <span className="shrink-0 text-faint">{fileSize(attachment.size)}</span>
-                </span>
-              )
-            })}
+            {files.map((attachment) => (
+              <AttachmentFile key={attachment.id} attachment={attachment} align="end" />
+            ))}
           </div>
         )}
         {content.trim() && (
@@ -96,6 +72,8 @@ export function UserMessage({ content, attachments }: { content: string; attachm
         )}
       </div>
     </div>
+    <AttachmentLightbox attachment={lightbox} onClose={() => setLightbox(null)} />
+    </>
   )
 }
 

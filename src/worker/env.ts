@@ -5,6 +5,26 @@ export interface Env {
   // Attached by Freebuff Sites once provisioned (sites_add_storage). Optional so
   // the app can explain what is missing instead of crashing.
   DB?: D1Database
+  // Attachment bytes live in R2; D1 keeps only their metadata. Optional so
+  // local development still works with the legacy D1 fallback before storage
+  // is provisioned.
+  FILES?: R2Bucket
+  // "1" lifts Buffy Code's own per-turn and per-day caps, for the deployment
+  // owner only (OWNER_SUB, or an address in AGENT_OWNER_IPS when auth is off).
+  // Temporary switch; it does not lift platform limits.
+  AGENT_UNLIMITED?: string
+  /**
+   * Comma-separated model substrings the agent should try first, best first —
+   * e.g. "gpt-oss-120b,qwen3.8". A lane that is not listed keeps its normal
+   * order after the listed ones. Empty means the built-in order.
+   */
+  AGENT_LANE_PREFERENCE?: string
+  /** Comma-separated addresses that count as the owner when auth is off. */
+  AGENT_OWNER_IPS?: string
+  // Cloudflare Browser Rendering. Present when pages/wrangler.jsonc declares
+  // the binding; the coding agent's `browser` tool uses it. Not the Steel
+  // session behind /api/browser/*.
+  BROWSER?: unknown
   // Optional override: "browserbase", "hyperbrowser" or "steel". Browserbase
   // is the default when configured because it is the more reliable session path.
   BROWSER_PROVIDER?: string
@@ -29,6 +49,16 @@ export interface Env {
   BUFFY_BRIDGE_LOCAL?: string
   // Optional shared secret sent to the bridge as a bearer token.
   BUFFY_BRIDGE_TOKEN?: string
+  // Optional Vercel Sandbox. With both VERCEL_TOKEN and VERCEL_PROJECT_ID set,
+  // the coding agent runs its build/test command in a disposable microVM and
+  // reads the output (the free Hobby allowance). Without them nothing runs.
+  // VERCEL_TEAM_ID or VERCEL_TEAM_SLUG scopes a team account; SANDBOX_RUNTIME
+  // overrides the runtime image (default node24).
+  VERCEL_TOKEN?: string
+  VERCEL_PROJECT_ID?: string
+  VERCEL_TEAM_ID?: string
+  VERCEL_TEAM_SLUG?: string
+  SANDBOX_RUNTIME?: string
   // Optional Sapling API key for detector-guided rewrite selection. Kept on the
   // server; the browser never sees it.
   SAPLING_API_KEY?: string
@@ -141,6 +171,10 @@ export interface Env {
   // Worker creates and controls a remote Chrome session; no browser extension
   // is installed and nothing runs on the visitor's computer.
   BROWSERBASE_API_KEY?: string
+  // Optional Browserless token. Its CDP endpoint takes the token in the query
+  // string, and the free account is the largest of the three: about eight hours
+  // of browser time a month.
+  BROWSERLESS_API_KEY?: string
   // Optional Hyperbrowser key. When present it is preferred over Browserbase;
   // its free account includes 5,000 credits, about 50 browser hours.
   HYPERBROWSER_API_KEY?: string

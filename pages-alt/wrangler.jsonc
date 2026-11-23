@@ -1,0 +1,24 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "ink-harbor-2f9",
+  "pages_build_output_dir": "../dist/client",
+  "compatibility_date": "2026-09-29",
+  "vars": {
+    "APP_ORIGIN": "https://www.inkbrowser.dpdns.org",
+    "AGENT_UNLIMITED": "1",
+    "BROWSER_PROVIDER": "steel",
+    "RESEARCH_ENABLED": "1",
+    "ANALYZE_ENABLED": "1",
+    "BUILD_ENABLED": "1"
+  },
+  "browser": {
+    "binding": "BROWSER"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ink-live",
+      "database_id": "5916c00c-bfe1-4086-a296-eaaec2dfe147"
+    }
+  ]
+}

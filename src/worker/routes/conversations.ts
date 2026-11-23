@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 
 import { CHAT_REACTIONS } from '../../shared/config'
 import { normalizeMemory } from '../../shared/memory'
+import { attachmentObjectKeys, deleteAttachmentObjects } from '../attachment-storage'
 import { groupAttachmentMeta } from '../attachments'
 import { aiConfigured, isModelId } from '../ai'
 import { privateJson } from '../auth'
@@ -17,6 +18,22 @@ export const conversations = new Hono<AppContext>()
 function shareToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(24))
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function matchesEtag(header: string | undefined, etag: string): boolean {
+  return Boolean(
+    header?.split(',').some((candidate) => {
+      const tag = candidate.trim()
+      return tag === '*' || tag === etag || tag === `W/${etag}`
+    }),
+  )
+}
+
+/** A stable tag for the lightweight revision row, not the whole page. */
+async function revisionEtag(revision: Record<string, unknown>): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(revision)))
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `"${hex}"`
 }
 
 conversations.get('/', async (c) => {
@@ -42,6 +59,68 @@ conversations.get('/:id', async (c) => {
   const db = c.get('db')
   const owner = c.get('user').sub
   const conversationId = c.req.param('id')
+  // A cheap revision query lets an idle poll stop here with 304 instead of
+  // rebuilding every message, artifact and attachment row. The values cover
+  // every part of the page that can change independently of updated_at: title,
+  // model, project, reaction, feedback, attachments, proof and analysis.
+  const revision = await db
+    .prepare(
+      `WITH target AS (
+         SELECT * FROM conversations WHERE owner_sub = ? AND id = ?
+       )
+       SELECT
+         c.title,
+         c.model,
+         c.created_at,
+         c.updated_at,
+         pc.project_id,
+         COALESCE(pc.updated_at, 0) AS project_updated_at,
+         COALESCE(cr.reaction, '') AS reaction,
+         COALESCE(cr.updated_at, 0) AS reaction_updated_at,
+         (SELECT COUNT(*) FROM messages m
+          WHERE m.owner_sub = c.owner_sub AND m.conversation_id = c.id
+            AND NOT (m.role = 'assistant' AND m.content = '')) AS message_count,
+         (SELECT COALESCE(MAX(m.created_at), 0) FROM messages m
+          WHERE m.owner_sub = c.owner_sub AND m.conversation_id = c.id
+            AND NOT (m.role = 'assistant' AND m.content = '')) AS message_last_at,
+         (SELECT COALESCE(SUM(LENGTH(m.content)), 0) FROM messages m
+          WHERE m.owner_sub = c.owner_sub AND m.conversation_id = c.id
+            AND NOT (m.role = 'assistant' AND m.content = '')) AS message_bytes,
+         (SELECT COUNT(*) FROM message_feedback f
+          JOIN messages m ON m.id = f.message_id AND m.owner_sub = f.owner_sub
+          WHERE m.owner_sub = c.owner_sub AND m.conversation_id = c.id) AS feedback_count,
+         (SELECT COALESCE(MAX(f.created_at), 0) FROM message_feedback f
+          JOIN messages m ON m.id = f.message_id AND m.owner_sub = f.owner_sub
+          WHERE m.owner_sub = c.owner_sub AND m.conversation_id = c.id) AS feedback_last_at,
+         (SELECT COUNT(*) FROM message_attachments a
+          WHERE a.owner_sub = c.owner_sub AND a.conversation_id = c.id) AS attachment_count,
+         (SELECT COALESCE(MAX(a.created_at), 0) FROM message_attachments a
+          WHERE a.owner_sub = c.owner_sub AND a.conversation_id = c.id) AS attachment_last_at,
+         (SELECT COALESCE(SUM(a.size), 0) FROM message_attachments a
+          WHERE a.owner_sub = c.owner_sub AND a.conversation_id = c.id) AS attachment_bytes,
+         (SELECT COUNT(*) FROM message_proof p
+          JOIN messages m ON m.id = p.message_id AND m.owner_sub = p.owner_sub
+          WHERE m.owner_sub = c.owner_sub AND m.conversation_id = c.id) AS proof_count,
+         (SELECT COALESCE(MAX(p.created_at), 0) FROM message_proof p
+          JOIN messages m ON m.id = p.message_id AND m.owner_sub = p.owner_sub
+          WHERE m.owner_sub = c.owner_sub AND m.conversation_id = c.id) AS proof_last_at,
+         (SELECT COUNT(*) FROM message_analysis a
+          JOIN messages m ON m.id = a.message_id AND m.owner_sub = a.owner_sub
+          WHERE m.owner_sub = c.owner_sub AND m.conversation_id = c.id) AS analysis_count,
+         (SELECT COALESCE(MAX(a.created_at), 0) FROM message_analysis a
+          JOIN messages m ON m.id = a.message_id AND m.owner_sub = a.owner_sub
+          WHERE m.owner_sub = c.owner_sub AND m.conversation_id = c.id) AS analysis_last_at
+       FROM target c
+       LEFT JOIN project_conversations pc ON pc.conversation_id = c.id AND pc.owner_sub = c.owner_sub
+       LEFT JOIN conversation_reactions cr ON cr.conversation_id = c.id AND cr.owner_sub = c.owner_sub`,
+    )
+    .bind(owner, conversationId)
+    .first<Record<string, unknown>>()
+  if (!revision) return c.json({ error: 'Not found.' }, 404)
+  const etag = await revisionEtag(revision)
+  c.header('Cache-Control', 'private, no-store')
+  c.header('ETag', etag)
+  if (matchesEtag(c.req.header('if-none-match'), etag)) return c.body(null, 304)
   // Read the chat first. The orphan cleanup used to share this batch, and one
   // D1 failure there (a lost session commit token) made an existing chat answer
   // "Not found." — a readable chat must never depend on cleanup succeeding.
@@ -356,6 +435,10 @@ conversations.delete('/:id', async (c) => {
   const db = c.get('db')
   const owner = c.get('user').sub
   const conversationId = c.req.param('id')
+  const attachmentRows = await db
+    .prepare(`SELECT id FROM message_attachments WHERE owner_sub = ? AND conversation_id = ?`)
+    .bind(owner, conversationId)
+    .all<{ id: string }>()
   await db.batch([
     db.prepare(`DELETE FROM message_reasoning WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
     db.prepare(`DELETE FROM message_sources WHERE owner_sub = ? AND message_id IN (SELECT id FROM messages WHERE owner_sub = ? AND conversation_id = ?)`).bind(owner, owner, conversationId),
@@ -379,5 +462,6 @@ conversations.delete('/:id', async (c) => {
     db.prepare(`DELETE FROM messages WHERE owner_sub = ? AND conversation_id = ?`).bind(owner, conversationId),
     db.prepare(`DELETE FROM conversations WHERE owner_sub = ? AND id = ?`).bind(owner, conversationId),
   ])
+  await deleteAttachmentObjects(c.env.FILES, attachmentRows.results.flatMap((row) => attachmentObjectKeys('chat', row.id)))
   return privateJson(c, { ok: true, at: now() })
 })

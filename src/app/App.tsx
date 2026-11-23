@@ -1,5 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from 'react'
+
+import { Butter } from './pages/Butter'
+import { ButterDive } from './pages/ButterDive'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
 import { BacktickNewTab } from './components/BacktickNewTab'
@@ -13,18 +16,19 @@ import { usePageTraffic } from './lib/traffic'
 import { Analytics } from './pages/Analytics'
 import { Browser } from './pages/Browser'
 import { BrowserAgent } from './pages/BrowserAgent'
+import { BrowserView } from './pages/BrowserView'
 import { Buffy } from './pages/Buffy'
 import { BuffyCode } from './pages/BuffyCode'
 import { Chat } from './pages/Chat'
 import { Humanizer } from './pages/Humanizer'
 import { Privacy, Terms } from './pages/Legal'
 import { Library } from './pages/Library'
-import { ProxyPage } from './pages/Proxy'
 import { Review } from './pages/Review'
 import { Room } from './pages/Room'
 import { Settings } from './pages/Settings'
 import { SharedChat } from './pages/SharedChat'
 import { SetupNeeded, SignIn } from './pages/SignIn'
+import { WebBrowser } from './pages/WebBrowser'
 
 // PDF libraries are large and only needed on the PDF tools page. Keep them out
 // of the initial chat bundle so opening Ink does not download them first.
@@ -94,12 +98,17 @@ function Gate() {
   }
   if (me.error instanceof ApiError && me.error.status === 401) return <SignIn />
   if (me.error) {
-    const retryable =
-      !(me.error instanceof ApiError) ||
-      me.error.code === 'offline' ||
-      me.error.status === 0 ||
-      me.error.status === 503
-    return <SetupNeeded message={me.error.message} onRetry={retryable ? () => void me.refetch() : undefined} />
+    const status = me.error instanceof ApiError ? me.error.status : 0
+    // A 5xx is the server having a bad moment, not a setup problem: offer the
+    // retry instead of a dead end the person has to reload the tab to escape.
+    const retryable = !(me.error instanceof ApiError) || me.error.code === 'offline' || status === 0 || status === 503 || status >= 500
+    return (
+      <SetupNeeded
+        message={me.error.message}
+        onRetry={retryable ? () => void me.refetch() : undefined}
+        database={/database binding/i.test(me.error.message)}
+      />
+    )
   }
   return (
     <>
@@ -107,6 +116,9 @@ function Gate() {
       <Routes>
         <Route path="browser" element={<Browser />} />
         <Route path="browser/agent" element={<BrowserAgent />} />
+        {/* The cloud browser alone. Only the AI Agent opens this viewer; the
+            Apps tiles and the Browser/Unblocker proxy never touch it. */}
+        <Route path="browser/live" element={<BrowserView />} />
         <Route path="live" element={<Navigate to="/browser" replace />} />
         <Route element={<Shell />}>
           <Route index element={<Chat />} />
@@ -124,8 +136,17 @@ function Gate() {
               </Suspense>
             }
           />
-          <Route path="proxy" element={<ProxyPage />} />
+          {/* The Browser tool lives at /math; /proxy stays for older links. */}
+          <Route path="math" element={<WebBrowser />} />
+          <Route path="proxy" element={<WebBrowser />} />
+          {/* A shortcut carries its site in the path, so it survives a dropped
+              query string and can never fall back to Google. */}
+          <Route path="proxy/*" element={<WebBrowser />} />
           <Route path="review" element={<Review />} />
+          {/* The dive is the front door, the way krillion.io is: the party
+              sits one step in, at /butter/party. */}
+          <Route path="butter" element={<ButterDive />} />
+          <Route path="butter/party" element={<Butter />} />
           <Route path="room" element={<Room />} />
           <Route path="settings" element={<Settings />} />
         </Route>

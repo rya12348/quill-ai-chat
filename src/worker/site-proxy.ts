@@ -1,3 +1,6 @@
+import { rewritePokiUrls } from './poki-game'
+import { attachSessionCookies, captureSessionCookies } from './proxy-session'
+
 // Live-site builds are fetched on the server and shown from Ink's origin.
 // This is a real proxy, not a screenshot or replay: the page's own HTML and
 // scripts run, isolated in a sandboxed iframe with no cookies or same-origin
@@ -15,6 +18,8 @@ const PRIVATE_HOST = /^(?:localhost|.*\.localhost|.*\.local|.*\.internal|.*\.hom
 // space. The Worker cannot inspect the DNS answer, so refuse the known helpers.
 const PRIVATE_DNS_SUFFIX = /(?:^|\.)(?:nip\.io|sslip\.io|xip\.io|localtest\.me|lvh\.me|vcap\.me)$/i
 const TRANSIENT_REDIRECTS = new Set([301, 302, 303, 307, 308])
+const SITE_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
 
 export class SiteError extends Error {
   constructor(
@@ -183,7 +188,7 @@ h1{font-size:clamp(2rem,6vw,3.4rem);line-height:1.02;letter-spacing:-.04em;margi
 form{display:flex;gap:8px;max-width:580px;margin:0 0 28px}input{flex:1;min-width:0;border:1px solid #d8d1c4;border-radius:10px;padding:10px 12px;font:inherit;background:#fffdf8;color:inherit}button{border:0;border-radius:10px;padding:10px 16px;font:inherit;font-weight:600;background:#24221d;color:#fffdf8;cursor:pointer}
 ol{list-style:none;margin:0;padding:0;display:grid;gap:12px}li{border:1px solid #e4ded2;border-radius:14px;background:#fffdf8;padding:16px 18px}li p{margin:0 0 6px;color:#6f695f;font-size:14px}li p.meta{color:#9a9386;font-size:11px;letter-spacing:.04em;text-transform:uppercase}
 li h2{font-size:18px;line-height:1.25;margin:0 0 6px;letter-spacing:-.01em}a{color:#157a55;text-decoration-thickness:1px;text-underline-offset:2px}.escape{margin:26px 0 0;font-size:13px;color:#817b70}
-</style></head><body><main><header><p class="eyebrow">Web results</p><h1>${escapeHtml(query)}</h1><p class="lede">${results.length ? `Live results fetched through the proxy. Google's own result page requires JavaScript and is not available to a server-side fetch, so these are live web results.` : `The live search returned no results. Try another search.`}</p></header><form action="${escapeHtml(action)}" method="get"><input name="q" value="${escapeHtml(query)}" aria-label="Search again"><button type="submit">Search</button></form><ol>${items}</ol></main></body></html>`
+</style></head><body><main><header><p class="eyebrow">Web results</p><h1>${escapeHtml(query)}</h1>${results.length ? '' : '<p class="lede">The live search returned no results. Try another search.</p>'}</header><form action="${escapeHtml(action)}" method="get"><input name="q" value="${escapeHtml(query)}" aria-label="Search again"><button type="submit">Search</button></form><ol>${items}</ol></main></body></html>`
 }
 
 function privateHost(hostname: string): boolean {
@@ -191,30 +196,36 @@ function privateHost(hostname: string): boolean {
   if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1)
   if (!host || PRIVATE_HOST.test(host) || PRIVATE_DNS_SUFFIX.test(host)) return true
   if (host.includes(':')) {
-    return (
-      host === '::' ||
-      host === '::1' ||
-      host.startsWith('fc') ||
-      host.startsWith('fd') ||
-      host.startsWith('fe8') ||
-      host.startsWith('fe9') ||
-      host.startsWith('fea') ||
-      host.startsWith('feb') ||
-      host.startsWith('::ffff:')
-    )
+    if (host === '::' || host === '::1') return true
+    if (/^f[cd][0-9a-f]{0,2}:/.test(host)) return true // fc00::/7 unique local
+    if (/^fe[89ab][0-9a-f]?:/.test(host)) return true // fe80::/10 link local
+    if (/^ff[0-9a-f]{0,2}:/.test(host)) return true // ff00::/8 multicast
+    if (host.startsWith('::ffff:')) return true // IPv4-mapped
+    if (host.startsWith('64:ff9b:')) return true // NAT64 back to IPv4
+    if (host.startsWith('2002:')) return true // 6to4 wraps an IPv4 address
+    return false
   }
   if (/^[0-9.]+$/.test(host)) {
     const parts = host.split('.')
     if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part) || Number(part) > 255)) return true
-    const first = Number(parts[0])
-    const second = Number(parts[1])
+    const [first, second, third] = parts.map(Number)
+    // Every reserved, private or special-use IPv4 range. URL parsing already
+    // normalises decimal, octal and hex forms (2130706433, 0x7f.0.0.1) to dots,
+    // so this list is the complete check rather than an approximation.
     return (
-      first === 0 ||
-      first === 10 ||
-      first === 127 ||
-      (first === 169 && second === 254) ||
-      (first === 172 && second >= 16 && second <= 31) ||
-      (first === 192 && second === 168)
+      first === 0 || // this network
+      first === 10 || // private
+      first === 127 || // loopback
+      first >= 224 || // multicast, reserved, broadcast
+      (first === 100 && second >= 64 && second <= 127) || // carrier-grade NAT
+      (first === 169 && second === 254) || // link local, cloud metadata
+      (first === 172 && second >= 16 && second <= 31) || // private
+      (first === 192 && second === 0 && (third === 0 || third === 2)) || // IETF, TEST-NET-1
+      (first === 192 && second === 168) || // private
+      (first === 192 && second === 88 && third === 99) || // 6to4 relay anycast
+      (first === 198 && (second === 18 || second === 19)) || // benchmarking
+      (first === 198 && second === 51 && third === 100) || // TEST-NET-2
+      (first === 203 && second === 0 && third === 113) // TEST-NET-3
     )
   }
   // A single-label host can be an intranet name; public sites use a dot.
@@ -280,22 +291,26 @@ export type SiteAsset = {
   contentType: string
 }
 
-export async function fetchSiteAsset(target: string, abort?: AbortSignal): Promise<SiteAsset> {
+export async function fetchSiteAsset(
+  target: string,
+  abort?: AbortSignal,
+  token?: string,
+): Promise<SiteAsset> {
   let current = normalizeSiteUrl(target)
   if (!current) throw new SiteError(400, 'That asset is not on a public website.')
   const signal = abort ? AbortSignal.any([abort, AbortSignal.timeout(FETCH_TIMEOUT)]) : AbortSignal.timeout(FETCH_TIMEOUT)
   try {
     for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
-      const response = await fetch(current, {
-        redirect: 'manual',
-        signal,
-        headers: {
-          accept: '*/*',
-          'accept-language': 'en-US,en;q=0.9',
-          'user-agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-        },
+      const headers = new Headers({
+        accept: '*/*',
+        'accept-language': 'en-US,en;q=0.9',
+        'user-agent': SITE_USER_AGENT,
       })
+      // An asset that the site serves only to a signed-in visitor (a session
+      // token in a cookie, a consent flag) needs the same jar the page uses.
+      if (token) attachSessionCookies(token, new URL(current), headers)
+      const response = await fetch(current, { redirect: 'manual', signal, headers })
+      if (token) captureSessionCookies(token, new URL(current), response)
       if (TRANSIENT_REDIRECTS.has(response.status)) {
         const location = response.headers.get('location')
         await response.body?.cancel()
@@ -342,6 +357,7 @@ const BLOCKED_REQUEST_HEADERS = new Set([
   'connection',
   'content-length',
   'cookie',
+  'forwarded',
   'host',
   'keep-alive',
   'origin',
@@ -350,11 +366,20 @@ const BLOCKED_REQUEST_HEADERS = new Set([
   'referer',
   'te',
   'trailer',
+  'via',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
   'transfer-encoding',
   'upgrade',
 ])
 
-export async function fetchSiteRequest(target: string, request: Request): Promise<SiteResponse> {
+export async function fetchSiteRequest(
+  target: string,
+  request: Request,
+  token?: string,
+): Promise<SiteResponse> {
   const next = normalizeSiteUrl(target)
   if (!next) throw new SiteError(400, 'That address is not on a public website.')
   let method = request.method.toUpperCase()
@@ -381,7 +406,20 @@ export async function fetchSiteRequest(target: string, request: Request): Promis
     // Redirects are followed manually so a public URL cannot bounce the Worker
     // into loopback, metadata or private address space.
     for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
+      // Present the site its own origin as the Referer. Hotlink protection then
+      // treats the preview as a normal visitor instead of a hotlink, and no part
+      // of Ink's address reaches the target.
+      headers.set('referer', new URL(current).origin + '/')
+      // The browser labels a page's own request with its origin, and a site that
+      // checks it refuses anything else: krillion's quota API answers 403 to a
+      // request with no origin at all, which surfaced to the reader as "access
+      // beacon offline" and no game. Supply the site's own origin, exactly what
+      // the browser would have sent without the preview in between.
+      if (method !== 'GET' && method !== 'HEAD') headers.set('origin', new URL(current).origin)
+      else headers.delete('origin')
+      if (token) attachSessionCookies(token, new URL(current), headers)
       const response = await fetch(current, { method, headers, body, redirect: 'manual', signal })
+      if (token) captureSessionCookies(token, new URL(current), response)
       if (TRANSIENT_REDIRECTS.has(response.status)) {
         const location = response.headers.get('location')
         await response.body?.cancel()
@@ -422,6 +460,79 @@ export async function fetchSiteRequest(target: string, request: Request): Promis
   }
 }
 
+/**
+ * The same request, unanswered until the body is read. Games, video, Wasm and
+ * large downloads cannot be buffered: the Worker has a 128 MB memory ceiling
+ * and the reader waits for the whole file before seeing a frame. This path
+ * forwards Range, keeps 206 and its validators, and hands the upstream stream
+ * straight back, so a media element can seek and a Unity build can start on its
+ * first bytes.
+ */
+export type SiteStream = {
+  stream: ReadableStream<Uint8Array> | null
+  status: number
+  headers: Headers
+  contentType: string
+}
+
+export async function fetchSiteStream(target: string, request: Request, token?: string): Promise<SiteStream> {
+  const next = normalizeSiteUrl(target)
+  if (!next) throw new SiteError(400, 'That address is not on a public website.')
+  const method = request.method.toUpperCase()
+  if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(method)) {
+    throw new SiteError(405, 'That request method is not allowed.')
+  }
+  const headers = new Headers()
+  request.headers.forEach((value, name) => {
+    const key = name.toLowerCase()
+    if (BLOCKED_REQUEST_HEADERS.has(key) || key.startsWith('sec-')) return
+    headers.set(key, value)
+  })
+  if (!headers.has('user-agent')) headers.set('user-agent', SITE_USER_AGENT)
+  const body =
+    method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer()
+  if (body && body.byteLength > MAX_ASSET_BYTES) throw new SiteError(413, 'That request is too large to preview.')
+  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(FETCH_TIMEOUT)])
+  let current = next
+  try {
+    for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
+      headers.set('referer', new URL(current).origin + '/')
+      if (method === 'GET' || method === 'HEAD') headers.delete('origin')
+      else headers.set('origin', new URL(current).origin)
+      if (token) attachSessionCookies(token, new URL(current), headers)
+      const response = await fetch(current, { method, headers, body, redirect: 'manual', signal })
+      if (token) captureSessionCookies(token, new URL(current), response)
+      if (TRANSIENT_REDIRECTS.has(response.status)) {
+        const location = response.headers.get('location')
+        await response.body?.cancel()
+        if (!location) throw new SiteError(502, 'The site sent an incomplete redirect.')
+        let redirectUrl: URL
+        try {
+          redirectUrl = new URL(location, current)
+        } catch {
+          throw new SiteError(502, 'The site sent an invalid redirect.')
+        }
+        const redirected = normalizeSiteUrl(redirectUrl.href)
+        if (!redirected) throw new SiteError(400, 'The site redirected to a non-public address.')
+        current = redirected
+        continue
+      }
+      const empty = method === 'HEAD' || response.status === 204 || response.status === 304
+      return {
+        stream: empty ? null : response.body,
+        status: response.status,
+        headers: response.headers,
+        contentType: response.headers.get('content-type') ?? 'application/octet-stream',
+      }
+    }
+    throw new SiteError(502, 'The site redirected too many times.')
+  } catch (error) {
+    if (error instanceof SiteError) throw error
+    if (signal.aborted) throw new SiteError(504, 'That request took too long.')
+    throw new SiteError(502, 'That request could not be completed.')
+  }
+}
+
 function encodeText(text: string): ArrayBuffer {
   const bytes = new TextEncoder().encode(text)
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
@@ -447,7 +558,7 @@ export function rewriteAssetContent(
     return body
   }
   if (type.includes('text/css')) {
-    const css = decoder.decode(body)
+    const css = rewritePokiUrls(decoder.decode(body), new URL(proxyUrl).origin)
     const rewriteUrl = (raw: string): string => {
       try {
         return assetProxyPath(proxyUrl, new URL(raw, target).href) ?? raw
@@ -468,7 +579,7 @@ export function rewriteAssetContent(
     // Vite's preload helper turns its map entries ("assets/...") into URLs
     // with `"/" + dep`. That resolves against the page's original <base>, so
     // patch the helper to make the URL absolute on the proxy origin instead.
-    let js = decoder.decode(body)
+    let js = rewritePokiUrls(decoder.decode(body), new URL(proxyUrl).origin)
     // FreezeNova's game.js sends an embedded frame to its ad wrapper. Keep the
     // leaderboard helpers, but drop the redirect so the game itself stays up.
     if (/\/assets\/scripts\/game\.js$/i.test(target.pathname)) {
@@ -762,15 +873,24 @@ function googleLandingFallback(raw: string): string | undefined {
   if (!/^google\.[a-z.]+$/i.test(host)) return undefined
   if (url.pathname !== '/' && url.pathname !== '/webhp') return undefined
   if (url.searchParams.has('q')) return undefined
-  const search = new URL('/search', url).href
+  // The capability URL is only known to the route that serves this page, so the
+  // form posts to a placeholder it fills in. Without it the search form would
+  // submit straight to google.com and leave the proxy.
+  const search = '__ink_proxy_search__'
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Google</title><style>
-html,body{height:100%}body{margin:0;background:#fff;color:#202124;font:16px/1.5 Arial,Helvetica,sans-serif}main{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;padding:48px 20px;text-align:center}.logo{font-size:clamp(4rem,14vw,6.5rem);font-weight:500;letter-spacing:-.09em;line-height:1;user-select:none}.logo span:nth-child(1){color:#4285f4}.logo span:nth-child(2){color:#ea4335}.logo span:nth-child(3){color:#fbbc05}.logo span:nth-child(4){color:#4285f4}.logo span:nth-child(5){color:#34a853}.logo span:nth-child(6){color:#ea4335}form{width:min(100%,584px);margin-top:34px}.search{display:flex;align-items:center;gap:12px;border:1px solid #dfe1e5;border-radius:999px;padding:8px 18px;background:#fff;box-shadow:0 1px 6px rgba(32,33,36,.15)}.search:focus-within{box-shadow:0 1px 8px rgba(32,33,36,.22)}.search svg{flex:none;color:#9aa0a6}input{flex:1;min-width:0;border:0;outline:0;padding:10px 0;background:transparent;color:inherit;font:16px Arial,Helvetica,sans-serif}.buttons{display:flex;justify-content:center;gap:11px;margin-top:30px}button{border:1px solid #f8f9fa;border-radius:4px;background:#f8f9fa;color:#3c4043;padding:10px 16px;font:14px Arial,Helvetica,sans-serif;cursor:pointer}button:hover{border-color:#dadce0;box-shadow:0 1px 1px rgba(0,0,0,.1)}.note{max-width:540px;margin:34px 0 0;color:#5f6368;font:12.5px/1.6 Arial,Helvetica,sans-serif}.note strong{color:#3c4043}
-</style></head><body><main><div class="logo" aria-label="Google"><span>G</span><span>o</span><span>o</span><span>g</span><span>l</span><span>e</span></div><form action="${escapeHtml(search)}" method="get" role="search"><label class="search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><input name="q" type="search" placeholder="Search Google" aria-label="Search Google" autocomplete="off" autofocus></label><div class="buttons"><button type="submit">Google Search</button></div></form><p class="note"><strong>Live preview note:</strong> Google blocks automated page fetches, so this landing page is served locally. A search still opens inside the preview.</p></main></body></html>`
+html,body{height:100%}body{margin:0;background:#fff;color:#202124;font:16px/1.5 Arial,Helvetica,sans-serif}main{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;padding:48px 20px;text-align:center}.logo{font-size:clamp(4rem,14vw,6.5rem);font-weight:500;letter-spacing:-.09em;line-height:1;user-select:none}.logo span:nth-child(1){color:#4285f4}.logo span:nth-child(2){color:#ea4335}.logo span:nth-child(3){color:#fbbc05}.logo span:nth-child(4){color:#4285f4}.logo span:nth-child(5){color:#34a853}.logo span:nth-child(6){color:#ea4335}form{width:min(100%,584px);margin-top:34px}.search{display:flex;align-items:center;gap:12px;border:1px solid #dfe1e5;border-radius:999px;padding:8px 18px;background:#fff;box-shadow:0 1px 6px rgba(32,33,36,.15)}.search:focus-within{box-shadow:0 1px 8px rgba(32,33,36,.22)}.search svg{flex:none;color:#9aa0a6}input{flex:1;min-width:0;border:0;outline:0;padding:10px 0;background:transparent;color:inherit;font:16px Arial,Helvetica,sans-serif}.buttons{display:flex;justify-content:center;gap:11px;margin-top:30px}button,.buttons a{border:1px solid #f8f9fa;border-radius:4px;background:#f8f9fa;color:#3c4043;padding:10px 16px;font:14px Arial,Helvetica,sans-serif;cursor:pointer;text-decoration:none;display:inline-block}button:hover,.buttons a:hover{border-color:#dadce0;box-shadow:0 1px 1px rgba(0,0,0,.1)}
+</style></head><body data-ink-landing><main><div class="logo" aria-label="Google"><span>G</span><span>o</span><span>o</span><span>g</span><span>l</span><span>e</span></div><form action="${escapeHtml(search)}" method="get" role="search"><label class="search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><input name="q" type="search" placeholder="Search Google" aria-label="Search Google" autocomplete="off" autofocus></label><div class="buttons"><button type="submit">Google Search</button></div></form></main></body></html>`
 }
 
 export async function fetchSitePage(target: string, abort?: AbortSignal): Promise<SitePage> {
   let current = normalizeSiteUrl(target)
   if (!current) throw new SiteError(400, 'That address is not a public website.')
+  // Google's home page is a script app. The preview strips its scripts (they
+  // fight the proxied location), which leaves a Google page whose search box
+  // does nothing. Serve the preview's own Google page instead, so a search from
+  // it opens the preview's result list.
+  const googleHome = googleLandingFallback(current)
+  if (googleHome) return { html: googleHome, finalUrl: 'https://www.google.com/', title: 'Google' }
   const signal = abort ? AbortSignal.any([abort, AbortSignal.timeout(FETCH_TIMEOUT)]) : AbortSignal.timeout(FETCH_TIMEOUT)
   try {
     for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
@@ -780,6 +900,7 @@ export async function fetchSitePage(target: string, abort?: AbortSignal): Promis
         headers: {
           accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1',
           'accept-language': 'en-US,en;q=0.9',
+          referer: new URL(current).origin + '/',
           'user-agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
         },
@@ -876,6 +997,45 @@ const RESOURCE_ATTRIBUTES: Record<string, string[]> = {
   script: ['src'],
   link: ['href'],
   img: ['src'],
+  source: ['src'],
+  video: ['src', 'poster'],
+  audio: ['src'],
+  track: ['src'],
+  embed: ['src'],
+  input: ['src'],
+}
+
+/**
+ * A srcset holds several comma-separated candidates. Only a comma followed by
+ * whitespace is a separator here: a CDN resize path can contain a comma inside
+ * the URL itself, and splitting on it turns one working image into two 404s.
+ */
+function proxySrcset(
+  value: string,
+  finalUrl: string,
+  proxyUrl: string,
+  appOrigin: string,
+): string {
+  return value
+    .split(/,(\s+)/)
+    .map((part) => {
+      if (!part || /^\s+$/.test(part)) return part
+      const match = /^(\s*)(\S+)([\s\S]*)$/.exec(part)
+      if (!match) return part
+      const [, lead, raw, descriptor] = match
+      if (!raw || /^(?:data:|blob:|javascript:|#)/i.test(raw)) return part
+      let target: URL
+      try {
+        target = new URL(raw, finalUrl)
+      } catch {
+        return part
+      }
+      if (target.protocol !== 'http:' && target.protocol !== 'https:') return part
+      if (appOrigin && target.origin === appOrigin) return part
+      const proxied = assetProxyPath(proxyUrl, target.href)
+      return proxied ? `${lead}${escapeHtml(proxied)}${descriptor}` : part
+    })
+    .join('')
 }
 
 /**
@@ -884,14 +1044,83 @@ const RESOURCE_ATTRIBUTES: Record<string, string[]> = {
  * though the document itself was proxied, and a sandboxed document may be
  * blocked by CORS for fonts, images and media as well as scripts and CSS.
  */
+/**
+ * Verification widgets (Cloudflare Turnstile, hCaptcha, reCAPTCHA) and Cloudflare's
+ * own /cdn-cgi/ challenge runtime can only work on the origin that issued them.
+ * Their frame carries its own scripts, storage and postMessage handshake, and the
+ * sitekey is bound to a hostname; served through Ink's proxy the frame becomes an
+ * Ink document that fails its own origin check, which is what "the captcha will
+ * not load" looks like. These URLs are therefore left exactly as the site wrote
+ * them: the proxy passes the page through, it does not get to re-home a challenge.
+ */
+function isChallengeUrl(raw: string, base: string): boolean {
+  let url: URL
+  try {
+    url = new URL(raw, base)
+  } catch {
+    return false
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+  const host = url.hostname.toLowerCase()
+  const path = url.pathname.toLowerCase()
+  if (path.startsWith('/cdn-cgi/')) return true
+  if (host === 'challenges.cloudflare.com') return true
+  if (host === 'hcaptcha.com' || host.endsWith('.hcaptcha.com')) return true
+  if (host === 'recaptcha.net' || host.endsWith('.recaptcha.net')) return true
+  if (host === 'recaptcha.google.com') return true
+  if ((host === 'www.google.com' || host === 'www.gstatic.com') && path.startsWith('/recaptcha')) return true
+  return false
+}
+
 function proxyAssetTags(html: string, finalUrl: string, proxyUrl: string): string {
-  return html.replace(/<(script|link|img)\b[^>]*>/gi, (tag: string, tagName: string) => {
+  // An asset that is already on this origin (a Poki CDN URL rewritten a moment
+  // ago, for instance) must be left alone. Wrapping it again produced a
+  // `/p/https/<app>/api/poki-cdn/…` URL that the fetch route then rejected.
+  const appOrigin = (() => {
+    try {
+      return new URL(proxyUrl).origin
+    } catch {
+      return ''
+    }
+  })()
+  // A nested frame is a whole document, not an asset: it must come back through
+  // the same token's proxy so its own scripts, styles and cookie jar match the
+  // page around it. Left alone, `./index.html` inside an ad wrapper resolves
+  // against the real host and the frame never joins the session.
+  const withFrames = html.replace(/<(iframe|frame)\b[^>]*>/gi, (tag: string) =>
+    tag.replace(/(\bsrc\s*=\s*)(["'])([^"']*)\2/i, (match: string, prefix: string, quote: string, raw: string) => {
+      if (!raw || /^(?:about:|data:|blob:|javascript:|#)/i.test(raw)) return match
+      let target: URL
+      try {
+        target = new URL(raw, finalUrl)
+      } catch {
+        return match
+      }
+      if (target.protocol !== 'http:' && target.protocol !== 'https:') return match
+      if (appOrigin && target.origin === appOrigin) return match
+      // A verification frame is not an asset of this page: re-homing it breaks it.
+      if (isChallengeUrl(raw, finalUrl)) return match
+      return `${prefix}${quote}${escapeHtml(`${proxyUrl}?url=${encodeURIComponent(target.href)}`)}${quote}`
+    }),
+  )
+  return withFrames.replace(/<(script|link|img|source|video|audio|track|embed|input)\b[^>]*>/gi, (tag: string, tagName: string) => {
     const name = tagName.toLowerCase()
+    // A prefetched or preloaded alternate must keep its own rewrite path.
+    if (name === 'input') {
+      const typeMatch = /\btype\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag)
+      const type = (typeMatch?.[1] ?? typeMatch?.[2] ?? typeMatch?.[3] ?? '').toLowerCase()
+      if (type !== 'image') return tag
+    }
     if (name === 'link') {
       const relMatch = /\brel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag)
       const rel = (relMatch?.[1] ?? relMatch?.[2] ?? relMatch?.[3] ?? '').toLowerCase()
       if (!/(?:^|\s)(?:stylesheet|modulepreload|preload)(?:\s|$)/.test(rel)) return tag
     }
+    const withSrcset = /\bsrcset\s*=/i.test(tag)
+      ? tag.replace(/(\bsrcset\s*=\s*)(["'])([^"']*)\2/i, (_match: string, prefix: string, quote: string, raw: string) =>
+          `${prefix}${quote}${proxySrcset(raw, finalUrl, proxyUrl, appOrigin)}${quote}`,
+        )
+      : tag
     return (RESOURCE_ATTRIBUTES[name] ?? []).reduce((out, attribute) => {
       const pattern = new RegExp(`(\\b${attribute}\\s*=\\s*)(["'])([^"']*)\\2`, 'i')
       return out.replace(pattern, (match: string, prefix: string, quote: string, raw: string) => {
@@ -903,13 +1132,11 @@ function proxyAssetTags(html: string, finalUrl: string, proxyUrl: string): strin
           return match
         }
         if (target.protocol !== 'http:' && target.protocol !== 'https:') return match
-        // Unity's build files are large, public CDN assets and allow CORS. Load
-        // them directly so a game does not depend on the page/asset fetch path.
-        if (/\/(?:Build|StreamingAssets)\//i.test(target.pathname)) return tag
+        if (appOrigin && target.origin === appOrigin) return match
         const proxied = assetProxyPath(proxyUrl, target.href)
         return proxied ? `${prefix}${quote}${escapeHtml(proxied)}${quote}` : match
       })
-    }, tag)
+    }, withSrcset)
   })
 }
 
@@ -990,8 +1217,121 @@ var gameHosts=${JSON.stringify(options.gameHosts ?? [])};
 var parentNav=${options.parentNavigation ? 'true' : 'false'};
 var appOrigin=new URL(proxy).origin;
 var moved=false;
-function isProxy(url){return url.origin===appOrigin&&(url.pathname.indexOf('/api/web-proxy/')===0||url.pathname.indexOf('/api/poki-game/')===0)}
+// Diagnostics. A sandboxed frame is invisible to the page that shows it, so a
+// frame that stalls leaves nothing to read: no console, no DOM, no status. That
+// is what a Unity game does when its loader never runs. Report every failure
+// and the engine's state a few seconds in, to the parent, which can show it.
+var diagToken=(function(){try{return new URL(proxy).pathname.split('/')[3]||''}catch(error){return ''}})();
+function diag(kind,detail){
+  var payload={type:'stet:preview-diagnostic',kind:kind,href:location.href,detail:detail,at:Date.now()};
+  // A game frame can block its own main thread, so the message channel and the
+  // console may both be unreadable. The Worker keeps the last reports per token
+  // and answers them over GET, which works even then.
+  try{
+    if(diagToken&&navigator.sendBeacon){
+      navigator.sendBeacon(appOrigin+'/api/web-proxy/'+diagToken+'/diag',new Blob([JSON.stringify(payload)],{type:'text/plain'}));
+    }
+  }catch(error){}
+  try{console.warn('[ink-diag]',kind,JSON.stringify(detail))}catch(error){}
+  try{if(window.parent!==window)window.parent.postMessage(payload,'*')}catch(error){}
+  // A game frame is a grandchild of the page that shows it, so one level up
+  // stops at the wrapper. The top window is where the Browser page listens.
+  try{if(window.top&&window.top!==window&&window.top!==window.parent)window.top.postMessage(payload,'*')}catch(error){}
+}
+try{
+  diag('frame-ready',{frames:document.querySelectorAll('iframe').length,scripts:document.querySelectorAll('script[src]').length});
+}catch(error){}
+window.addEventListener('error',function(event){
+  var el=event.target;
+  if(el&&el!==window&&el.tagName){
+    var src='';
+    try{src=el.currentSrc||el.src||el.href||''}catch(error){}
+    diag('resource-error',{tag:String(el.tagName),src:String(src).slice(-120)});
+    return;
+  }
+  diag('uncaught-error',{message:String(event.message||'').slice(0,160),file:String(event.filename||'').slice(-90),line:event.lineno||0});
+},true);
+try{
+  var nativeFetchDiag=window.fetch;
+  if(typeof nativeFetchDiag==='function')window.fetch=function(input,init){
+    var label=typeof input==='string'?input:(input&&input.url)||'';
+    return nativeFetchDiag.apply(this,arguments).then(function(response){
+      if(response&&!response.ok)diag('fetch-status',{url:String(label).slice(-120),status:response.status});
+      return response;
+    },function(error){
+      diag('fetch-failed',{url:String(label).slice(-120),error:String((error&&error.message)||error).slice(0,90)});
+      throw error;
+    });
+  }
+}catch(error){}
+try{
+  var nativeOpenDiag=XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open=function(method,url){
+    var result=nativeOpenDiag.apply(this,arguments);
+    try{
+      this.addEventListener('loadend',function(){
+        if(this.status>=400||this.status===0)diag('xhr-status',{url:String(url).slice(-120),status:this.status});
+      });
+    }catch(error){}
+    return result;
+  };
+}catch(error){}
+function unityState(){
+  var canvas=null;
+  try{canvas=document.getElementById('unity-canvas')}catch(error){return null}
+  if(!canvas)return null;
+  var scripts=[];
+  try{
+    var list=document.querySelectorAll('script[src]');
+    for(var i=0;i<list.length&&i<8;i++)scripts.push(String(list[i].getAttribute('src')).slice(-46));
+  }catch(error){}
+  return {canvas:[canvas.width,canvas.height],engine:typeof window.createUnityInstance,scripts:scripts,ready:document.readyState};
+}
+setTimeout(function(){
+  var state=unityState();
+  if(state)diag(state.engine==='undefined'?'unity-stall':'unity-engine',state);
+},6000);
+setTimeout(function(){
+  var state=unityState();
+  if(state)diag('unity-late',state);
+},14000);
+function isProxy(url){if(url.origin!==appOrigin)return false;var path=url.pathname;return path.indexOf('/api/web-proxy/')===0||path.indexOf('/api/poki-game/')===0||path.indexOf('/api/poki-play/')===0||path.indexOf('/api/poki-cdn/')===0}
 function isGame(url){for(var i=0;i<gameHosts.length;i++)if(url.hostname===gameHosts[i])return true;return false}
+// A game's address in the service worker's proxy. A game belongs there: the
+// capability frame gives its document an opaque origin, and a page it copies
+// into a frame resolves its own build scripts against the portal instead of
+// the game, so the engine never starts.
+function servicePath(href){
+  var encoded='';
+  for(var i=0;i<href.length;i++){encoded+=(i%2)?String.fromCharCode(href.charCodeAt(i)^2):href.charAt(i)}
+  return '/service/'+encodeURIComponent(encoded)
+}
+// A frame holding a copied game document names its real address in its own
+// base tag and loader. Replace the copy with a real load of that address.
+function rescue(frame){
+  var doc=null;
+  try{doc=frame.contentWindow&&frame.contentWindow.document}catch(error){return}
+  if(!doc)return;
+  try{if(typeof frame.contentWindow.createUnityInstance!=='undefined')return}catch(error){}
+  var canvas=null;
+  try{canvas=doc.getElementById('unity-canvas')}catch(error){return}
+  if(!canvas)return;
+  var base=doc.querySelector('base[href]');
+  if(!base||!base.getAttribute('href'))return;
+  var loader=null;
+  var list=doc.querySelectorAll('script[src]');
+  for(var i=0;i<list.length;i++){if(/game\.loader\.js/.test(list[i].getAttribute('src')||'')){loader=list[i];break}}
+  if(!loader)return;
+  var href=base.getAttribute('href');
+  if(href.charAt(href.length-1)!=='/')href+='/'
+  var rel=loader.getAttribute('src')||'';
+  while(rel.slice(0,2)==='./')rel=rel.slice(2);
+  while(rel.charAt(0)==='/')rel=rel.slice(1);
+  var address=href+rel;
+  var path=servicePath(address);
+  if(frame.getAttribute('src')===path)return;
+  frame.setAttribute('src',path);
+}
 function play(url){
   if(!parentNav||moved)return false;
   moved=true;
@@ -1022,10 +1362,14 @@ function fix(frame){
   if(url.protocol!=='http:'&&url.protocol!=='https:')return;
   if(isProxy(url))return;
   // FreezeNova's pre.html is an ad wrapper; its sibling index.html is the
-  // actual game. Start the game without waiting for the ad callback.
-  if(url.pathname.slice(-9)==='/pre.html')url.pathname=url.pathname.slice(0,-9)+'/index.html';
+  // actual game. Start the game without waiting for the ad callback, and load
+  // that real address through the service worker's proxy rather than the
+  // capability frame, so the game document is the document the browser runs.
+  var wrapper=url.pathname.slice(-9)==='/pre.html';
+  if(wrapper)url.pathname=url.pathname.slice(0,-9)+'/index.html';
   var game=isGame(url);
   var target=(game&&gameStart?gameStart:proxy)+'?url='+encodeURIComponent(url.href);
+  if(wrapper)target=servicePath(url.href);
   if(frame.getAttribute('src')===target)return;
   allowFrame(frame);
   if(game&&play(target))return;
@@ -1045,6 +1389,16 @@ try{new MutationObserver(function(records){
 }).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src','sandbox']})}catch(error){}
 document.addEventListener('DOMContentLoaded',function(){scan(document.documentElement)},{once:true});
 scan(document.documentElement);
+// A player that copied a game's HTML into its frame leaves an inert document:
+// point the frame at the game's real address through the service worker.
+setTimeout(function(){
+  var frames=document.querySelectorAll('iframe');
+  for(var i=0;i<frames.length;i++){try{rescue(frames[i])}catch(error){}}
+},6000);
+setTimeout(function(){
+  var frames=document.querySelectorAll('iframe');
+  for(var i=0;i<frames.length;i++){try{rescue(frames[i])}catch(error){}}
+},11000);
 // Some game wrappers keep a deferred iframe empty while an ad callback is
 // outstanding. Start the real frame if the site has not done so in time.
 setTimeout(function(){
@@ -1056,9 +1410,11 @@ setTimeout(function(){
     if(!raw||/^(?:about:|data:|blob:|javascript:)/i.test(raw))continue;
     var deferred;try{deferred=new URL(raw,document.baseURI)}catch(error){continue}
     if(deferred.protocol!=='http:'&&deferred.protocol!=='https:')continue;
-    if(deferred.pathname.slice(-9)==='/pre.html')deferred.pathname=deferred.pathname.slice(0,-9)+'/index.html';
-    var target=(isGame(deferred)&&gameStart?gameStart:proxy)+'?url='+encodeURIComponent(deferred.href);
-    frame.setAttribute('src',target);
+    var wasWrapper=deferred.pathname.slice(-9)==='/pre.html';
+    if(wasWrapper)deferred.pathname=deferred.pathname.slice(0,-9)+'/index.html';
+    var deferredTarget=(isGame(deferred)&&gameStart?gameStart:proxy)+'?url='+encodeURIComponent(deferred.href);
+    if(wasWrapper)deferredTarget=servicePath(deferred.href);
+    frame.setAttribute('src',deferredTarget);
     frame.style.pointerEvents='auto';
     allowFrame(frame);
   }
@@ -1101,7 +1457,11 @@ ${navigate}
 function isHttp(url){return url.protocol==='http:'||url.protocol==='https:'}
 function isProxy(url){return url.href===proxy||url.href.indexOf(proxy+'?')===0}
 function open(url){
-  if(!isHttp(url)||isProxy(url))return;
+  if(!isHttp(url))return;
+  // A capability URL is already inside the preview: go there. Returning here
+  // used to swallow the preview's own search form, whose action is exactly
+  // such a URL, so submitting it looked like nothing happened.
+  if(isProxy(url)){go(url.href);return}
   var target=url;
   // A page that navigates to its own relative path resolves against the
   // preview's origin. Map that path back to the original site before proxying.
@@ -1323,7 +1683,12 @@ function stripGameAdScripts(html: string): string {
  * that and let the injected navigation shim handle clicks and the search form.
  */
 function stripSearchScripts(html: string): string {
-  return html.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '').replace(/<script\b[^>]*\/>/gi, '')
+  // Google's own scripts fight the proxied location, so they go. The locally
+  // served landing page's search wiring is marked and has to survive: without
+  // it the search box is inert.
+  return html
+    .replace(/<script\b(?![^>]*data-ink-search)[^>]*>[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<script\b(?![^>]*data-ink-search)[^>]*\/>/gi, '')
 }
 
 /**
@@ -1341,22 +1706,40 @@ var appOrigin=new URL(proxy).origin;
 function proxied(raw){
   var url;try{url=new URL(raw,document.baseURI)}catch(error){return raw}
   if(url.protocol!=='http:'&&url.protocol!=='https:')return raw;
-  // Unity build files are public and CORS-enabled; their data files can be
-  // larger than a buffered preview response, so let the browser fetch them.
-  var path=url.pathname.toLowerCase();
-  if(path.indexOf('/build/')>=0||path.indexOf('/streamingassets/')>=0)return raw;
-  if(url.pathname.indexOf('/api/web-proxy/')===0||url.pathname.indexOf('/api/poki-game/')===0)return raw;
+  // Cloudflare's /cdn-cgi/ runtime and the challenge vendors' own endpoints stay
+  // on their real origin. Routed through the gateway they arrive with Ink's
+  // Origin and no credentials, which is exactly what a challenge refuses.
+  var ch=url.hostname.toLowerCase(),cp=url.pathname.toLowerCase();
+  if(cp.indexOf('/cdn-cgi/')===0)return raw;
+  if(ch==='challenges.cloudflare.com')return raw;
+  if(ch==='hcaptcha.com'||ch.slice(-12)==='.hcaptcha.com')return raw;
+  if(ch==='recaptcha.net'||ch.slice(-12)==='.recaptcha.net')return raw;
+  if(ch==='recaptcha.google.com')return raw;
+  if((ch==='www.google.com'||ch==='www.gstatic.com')&&cp.indexOf('/recaptcha')===0)return raw;
+  if(url.origin===appOrigin&&(url.pathname.indexOf('/api/web-proxy/')===0||url.pathname.indexOf('/api/poki-game/')===0||url.pathname.indexOf('/api/poki-play/')===0||url.pathname.indexOf('/api/poki-cdn/')===0))return raw;
   if(url.origin===appOrigin)url=new URL(url.pathname+url.search+url.hash,siteOrigin);
   return proxy+'/net?url='+encodeURIComponent(url.href);
+}
+// This document runs in a sandbox, so its origin is opaque ("null") and even a
+// call to the gateway is cross-origin. A credentialed cross-origin request
+// cannot be answered with 'access-control-allow-origin: *', so one failure in
+// the site's own auth check broke its boot, leaving games on their loader.
+// Browser credentials are pointless here: this token's cookies are kept in a
+// server-side jar and the gateway attaches them to each upstream request.
+function uncredentialed(init){
+  var next={};
+  if(init)for(var key in init)next[key]=init[key];
+  next.credentials='omit';
+  return next;
 }
 var nativeFetch=window.fetch;
 if(typeof nativeFetch==='function'){
   window.fetch=function(input,init){
     try{
-      if(typeof input==='string'||input instanceof URL)return nativeFetch.call(this,proxied(String(input)),init);
+      if(typeof input==='string'||input instanceof URL)return nativeFetch.call(this,proxied(String(input)),uncredentialed(init));
       if(input&&typeof input.url==='string'){
         var next=proxied(input.url);
-        if(next!==input.url)return nativeFetch.call(this,new Request(next,input),init);
+        if(next!==input.url)return nativeFetch.call(this,new Request(next,input),uncredentialed(init));
       }
     }catch(error){}
     return nativeFetch.apply(this,arguments);
@@ -1367,12 +1750,58 @@ try{
   XMLHttpRequest.prototype.open=function(method,url){
     var args=Array.prototype.slice.call(arguments);
     args[1]=proxied(url);
-    return nativeOpen.apply(this,args);
+    var result=nativeOpen.apply(this,args);
+    try{this.withCredentials=false}catch(error){}
+    return result;
   };
 }catch(error){}
 try{
   var nativeBeacon=navigator.sendBeacon;
   if(typeof nativeBeacon==='function')navigator.sendBeacon=function(url,data){return nativeBeacon.call(navigator,proxied(url),data)};
+}catch(error){}
+// Poki's thumbnails, fonts and SDK files load from Poki hostnames, and its app
+// builds most of those tags at runtime. A filtered network blocks them by name
+// even though the page itself is proxied, so every Poki-family URL is pointed
+// at this origin's asset route as the element appears.
+var pokiHost=/(^|\.)poki\.(?:com|io)$|(^|\.)poki-cdn\.com$/i;
+function pokiAsset(raw){
+  var url;try{url=new URL(raw,document.baseURI)}catch(error){return raw}
+  if(url.protocol!=='http:'&&url.protocol!=='https:')return raw;
+  if(!pokiHost.test(url.hostname))return raw;
+  if(url.origin===appOrigin&&url.pathname.indexOf('/api/poki-cdn/')===0)return raw;
+  // Absolute on the app origin: the page's own <base> would otherwise send a
+  // root-relative path back to the site's host and the rewrite would repeat.
+  return appOrigin+'/api/poki-cdn/'+url.hostname+url.pathname+url.search;
+}
+function rewritePokiNode(root){
+  if(!root||root.nodeType!==1)return;
+  var list=[root];
+  try{if(root.querySelectorAll)list=list.concat(Array.prototype.slice.call(root.querySelectorAll('img,source,link'))) }catch(error){}
+  for(var i=0;i<list.length;i++){
+    var el=list[i];
+    if(!el.getAttribute)continue;
+    var src=el.getAttribute('src');
+    if(src){var next=pokiAsset(src);if(next!==src)el.setAttribute('src',next)}
+    if(el.tagName==='LINK'){var href=el.getAttribute('href');if(href){var out=pokiAsset(href);if(out!==href)el.setAttribute('href',out)}}
+    var srcset=el.getAttribute('srcset');
+    if(srcset){
+      var parts=srcset.split(',');
+      for(var j=0;j<parts.length;j++){var bits=parts[j].trim().split(/\\s+/);if(bits[0])bits[0]=pokiAsset(bits[0]);parts[j]=bits.join(' ')}
+      var joined=parts.join(', ');
+      if(joined!==srcset)el.setAttribute('srcset',joined);
+    }
+  }
+}
+try{
+  new MutationObserver(function(records){
+    for(var i=0;i<records.length;i++){
+      var record=records[i];
+      if(record.type==='attributes')rewritePokiNode(record.target);
+      else for(var j=0;j<record.addedNodes.length;j++)rewritePokiNode(record.addedNodes[j]);
+    }
+  }).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src','srcset','href']});
+  document.addEventListener('DOMContentLoaded',function(){rewritePokiNode(document.documentElement)},{once:true});
+  rewritePokiNode(document.documentElement);
 }catch(error){}
 })()</script>`
   if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${script}`)
@@ -1386,6 +1815,35 @@ function addHistoryShim(html: string, historyUrl: string): string {
   if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${shim}`)
   if (/<html(?:\s[^>]*)?>/i.test(html)) return html.replace(/<html(?:\s[^>]*)?>/i, (root) => `${root}<head>${shim}</head>`)
   return `${shim}${html}`
+}
+
+/**
+ * A bot-check interstitial (Cloudflare's "Just a moment…", an hCaptcha or
+ * reCAPTCHA challenge page) is not a page the proxy can render past: the check is
+ * bound to the site's own hostname and to a cookie/nonce set on it, while the
+ * proxied document is sandboxed with an opaque origin and none of that site's
+ * storage. Detect it so the frame can explain itself instead of spinning on a
+ * widget that can never complete here.
+ */
+export function isChallengeWall(html: string): boolean {
+  const head = html.slice(0, 80_000)
+  if (/\/cdn-cgi\/challenge-platform|__cf_chl|cf_chl_opt|cf_chl_jschl_tk/i.test(head)) return true
+  if (/\bid=["']challenge-(form|stage|body|running)["']/i.test(head)) return true
+  if (/Just a moment\.\.\./i.test(head) && /cloudflare|challenge|verify you are human/i.test(head)) return true
+  // Turnstile embedded in a normal page (api.js plus a widget div) is not a wall:
+  // the page itself is fine and only the widget is origin-bound.
+  return false
+}
+
+export function renderChallengePage(target: string): string {
+  let display = target
+  try { display = new URL(target).host } catch { /* keep the raw string */ }
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Verification wall</title><style>
+:root{color-scheme:light}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f6f4ef;color:#24221d;font:15px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;padding:32px}
+main{max-width:640px}h1{font-size:22px;line-height:1.3;margin:0 0 12px}.eyebrow{margin:0 0 6px;font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:#817b70}
+p{margin:0 0 12px}.host{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#eae6dc;padding:2px 6px;border-radius:4px}
+.note{margin-top:18px;padding:12px 14px;border-left:3px solid #c9b98a;background:#fbf9f3;border-radius:0 6px 6px 0;color:#4a463e;font-size:14px}
+</style></head><body><main><p class="eyebrow">Verification wall</p><h1>This page needs a human check that a proxy cannot pass</h1><p><span class="host">${escapeHtml(display)}</span> answered with a bot check (Cloudflare Turnstile, hCaptcha or reCAPTCHA) instead of the page.</p><p>That check is bound to the site's own address and to a cookie set on it. Ink shows the page from its own origin, sandboxed, with none of that site's storage - so the challenge can never complete here. It spins, or leaves an empty box.</p><div class="note"><p><strong>What works:</strong> open the site in a normal browser tab, where the check has the origin and cookie it expects. Ink passes pages through; it does not complete site verifications, and working around one would be defeating the site's own bot control.</p><p>This is not a network block and not a bug in the proxy.</p></div></main></body></html>`
 }
 
 export function renderProxyPage(
@@ -1422,8 +1880,6 @@ export function renderProxyPage(
   // frames. Keep them native instead of shadowing them with memory shims.
   const withStorage = nativeStorage ? addHistoryShim(withFullscreen, historyUrl) : addSandboxShims(withFullscreen, historyUrl)
   const withNetwork = addNetworkShim(withStorage, proxyUrl, origin)
-  return addLoadingState(
-    addNavigation(withNetwork, origin, app.href, parentNavigation),
-    target.hostname.replace(/^www\./, ''),
-  )
+  const withNav = addNavigation(withNetwork, origin, app.href, parentNavigation)
+  return addLoadingState(withNav, target.hostname.replace(/^www\./, ''))
 }

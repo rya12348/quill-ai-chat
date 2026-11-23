@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import type { Env } from '../src/worker/env'
 import { PICKER_MODEL_DESCRIPTIONS, PICKER_MODEL_NAMES } from '../src/shared/config'
-import { familyForLane, laneKey, laneStrength, laneSupportsVision, pickModelFamilies, pickPickerFamilies, publicLanes } from '../src/worker/public-ai'
+import { familyForLane, laneKey, laneStrength, laneSupportsVision, pickModelFamilies, pickPickerFamilies, publicLanes, thinkingSwitchAllowed } from '../src/worker/public-ai'
 
 const lane = (model: string, label: string, url = 'https://free.example/v1/chat/completions') => ({
   model,
@@ -120,6 +120,16 @@ test('a family with no working lane is replaced by the next working family', () 
   assert.equal(picks[0]?.lane.model, qwen.model)
 })
 
+test('the DeepSeek pin prefers the free lane over an unusable paid copy', () => {
+  const paid = {
+    ...lane('deepseek/deepseek-v4.1-flash', 'DeepSeek V4.1 Flash', 'https://openrouter.ai/api/v1/chat/completions'),
+    billing: 'paid' as const,
+  }
+  const free = lane('DeepSeek-V4.1-Flash-1017', 'DeepSeek V4.1 Flash (OVHcloud)', 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions')
+  const [pick] = pickPickerFamilies([paid, free])
+  assert.equal(pick?.lane.model, free.model)
+})
+
 test('the DeepSeek pin never resurrects a down lane', () => {
   const exact = lane('deepseek-flash', 'DeepSeek V4.1 Flash')
   const healthy = lane('@cf/deepseek-ai/deepseek-r1-distill-qwen-32b', 'DeepSeek R1 Distill 32B (Workers AI)')
@@ -142,6 +152,22 @@ test('retired NVIDIA lanes are not advertised or tried', () => {
   assert.equal(lanes.find((lane) => lane.model === 'deepseek-ai/deepseek-v4.1-flash'), undefined)
   assert.equal(lanes.find((lane) => lane.model === 'moonshotai/kimi-k3'), undefined)
   assert.ok(lanes.find((lane) => lane.model === 'stepfun-ai/step-5-preview'))
+
+  // Measured on a live free NIM key on 2026-11-20: GLM-5.3 Flash returned an
+  // empty body and GPT-OSS 20B returned content: null, so both read as dropped
+  // calls to an agent step loop.
+  for (const model of ['z-ai/glm-5.3-flash', 'openai/gpt-oss-20b']) {
+    assert.equal(lanes.find((lane) => lane.model === model), undefined, `${model} must not be offered`)
+  }
+
+  // Gemma 4 31B is the only NVIDIA id whose image answer arrives as content;
+  // Nemotron 3.5 Super VL streams scratchpad reasoning instead, which cannot
+  // parse as an agent step, and Step 5 Preview returns nothing for a picture.
+  const vision = lanes
+    .filter((lane) => lane.url.includes('api.nvidia.com') && laneSupportsVision(lane))
+    .map((lane) => lane.model)
+    .sort()
+  assert.deepEqual(vision, ['google/gemma-4-31b-it'])
 })
 
 test('the added keyless lanes are wired into the free chain', () => {
@@ -151,6 +177,7 @@ test('the added keyless lanes are wired into the free chain', () => {
   for (const model of [
     'gpt-oss-120b',
     'gpt-oss-20b',
+    'DeepSeek-V4.1-Flash-1017',
     'Qwen3.5-397B-A17B',
     'Qwen3.5-9B',
     'Qwen3.6-27B',
@@ -173,6 +200,7 @@ test('the added keyless lanes are wired into the free chain', () => {
 
   assert.equal(byModel('Qwen3.6-27B')?.label, 'Qwen 3.6 27B (OVHcloud)')
   assert.equal(byModel('Qwen3.5-397B-A17B')?.label, 'Qwen 3.5 397B (OVHcloud)')
+  assert.equal(byModel('DeepSeek-V4.1-Flash-1017')?.label, 'DeepSeek V4.1 Flash (OVHcloud)')
   assert.equal(byModel('kilo-auto/free')?.label, 'Kilo Auto')
   assert.equal(laneSupportsVision(byModel('nvidia/nemotron-3.5-super-vl:free')!), true)
   assert.equal(laneSupportsVision(byModel('Qwen2.5-VL-72B-Instruct')!), true)
@@ -181,6 +209,35 @@ test('the added keyless lanes are wired into the free chain', () => {
   for (const family of ['Laguna', 'Muse', 'Dots', 'Liquid', 'Kilo', 'Stealth']) {
     assert.ok(families.has(family), family)
   }
+})
+
+/**
+ * Workers AI ids are the easiest kind to copy out of a catalogue and never call.
+ * The previous list had eleven and six of them failed on a live free account:
+ * GLM-5.3 needs Workers Paid, and GLM-5.3-flash, DeepSeek R1 Distill 32B,
+ * DeepSeek V4 Flash and Nemotron 3 120B were deprecated the day they were listed.
+ * Gemma 4 26B answered with null content, which reads as an empty reply.
+ */
+test('every Workers AI lane is one that answers on the free plan', () => {
+  const lanes = publicLanes({
+    CLOUDFLARE_ACCOUNT_ID: 'acct',
+    CLOUDFLARE_AI_TOKEN: 'tok',
+  } as unknown as Env)
+  const ai = lanes.filter((lane) => lane.url.includes('api.cloudflare.com'))
+
+  assert.deepEqual(ai.map((lane) => lane.model).sort(), [
+    '@cf/meta/llama-4-scout-17b-16e-instruct',
+    '@cf/mistralai/mistral-small-3.1-24b-instruct',
+    '@cf/openai/gpt-oss-120b',
+    '@cf/openai/gpt-oss-20b',
+    '@cf/qwen/qwen3.8-27b',
+  ])
+  for (const lane of ai) assert.equal(lane.billing, 'free', lane.model)
+  // Exactly one accepted an image part on a live account.
+  assert.deepEqual(
+    ai.filter(laneSupportsVision).map((lane) => lane.model),
+    ['@cf/meta/llama-4-scout-17b-16e-instruct'],
+  )
 })
 
 test('the keyless Pollinations lane stays honestly labeled GPT-OSS', () => {
@@ -220,6 +277,25 @@ test('Alibaba lanes require an explicit key', () => {
   assert.equal(lanes.some((lane) => lane.url.includes('dashscope-intl.aliyuncs.com')), false)
 })
 
+/**
+ * Measured on a live free key, 2026-11-20: NIM returns an empty body when the
+ * thinking switch is combined with streaming. Every chat/build/agent call
+ * streams, so this one field made the strongest free lanes dead in production
+ * while a curl without it answered fine.
+ */
+test('the thinking switch is never sent to NIM on a streaming request', () => {
+  const nvidia = 'https://integrate.api.nvidia.com/v1/chat/completions'
+  const kilo = 'https://api.kilo.ai/api/gateway/chat/completions'
+  const blockrun = 'https://blockrun.ai/api/v1/chat/completions'
+
+  assert.equal(thinkingSwitchAllowed(nvidia, true), false, 'streaming NIM must not get the switch')
+  assert.equal(thinkingSwitchAllowed(nvidia, false), true, 'a non-streaming NIM call still can')
+  // Kilo and BlockRun answer normally with it while streaming, so they keep it.
+  assert.equal(thinkingSwitchAllowed(kilo, true), true)
+  assert.equal(thinkingSwitchAllowed(blockrun, true), true)
+  assert.equal(thinkingSwitchAllowed('not a url', true), false)
+})
+
 test('a free NVIDIA key adds Step 5 Preview and the other free NIM lanes', () => {
   const env = { NVIDIA_API_KEY: 'nvapi-key' } as unknown as Env
   const lanes = publicLanes(env).filter((lane) => lane.url.includes('integrate.api.nvidia.com'))
@@ -228,7 +304,9 @@ test('a free NVIDIA key adds Step 5 Preview and the other free NIM lanes', () =>
   assert.equal(step.label, 'Step 5 Preview (NVIDIA)')
   assert.equal(familyForLane(step), 'Step')
   assert.equal(laneStrength(step.model, step.url), 98)
-  assert.equal(laneSupportsVision(step), true)
+  // Text yes, pictures no: Step 5 Preview returned an empty body when sent an
+  // image part on a live key, so it must not be chosen to answer a screenshot.
+  assert.equal(laneSupportsVision(step), false)
   assert.ok(lanes.some((lane) => lane.model === 'minimaxai/minimax-m3.1-flash'))
   assert.ok(lanes.some((lane) => lane.model === 'nvidia/nemotron-3.5-super-vl-120b-a12b'))
 })
@@ -242,12 +320,18 @@ test('a free AIHubMix key adds the zero-cost Kimi K3 lane', () => {
   assert.equal(familyForLane(kimi), 'Kimi')
 })
 
-test('Workers AI DeepSeek R1 stays in the DeepSeek family', () => {
-  const env = { CLOUDFLARE_ACCOUNT_ID: 'account', CLOUDFLARE_AI_TOKEN: 'token' } as unknown as Env
-  const deepseek = publicLanes(env).find((lane) => lane.model === '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b')
-  assert.ok(deepseek)
-  assert.equal(deepseek.label, 'DeepSeek R1 Distill 32B (Workers AI)')
-  assert.equal(familyForLane(deepseek), 'DeepSeek')
+test('a Workers AI DeepSeek id still belongs to the DeepSeek family', () => {
+  // DeepSeek R1 Distill 32B was deprecated on 2026-11-20 and is no longer
+  // offered as a lane, so the naming rule is pinned on a synthetic row: an @cf
+  // DeepSeek id must never be absorbed into Qwen, whose weights the distill is
+  // built on.
+  const workersAi = {
+    url: 'https://api.cloudflare.com/client/v4/accounts/acct/ai/v1/chat/completions',
+    model: '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
+    label: 'DeepSeek R1 Distill 32B (Workers AI)',
+    description: '',
+  }
+  assert.equal(familyForLane(workersAi), 'DeepSeek')
 })
 
 test('a healthy lane outranks a stronger failed one', () => {

@@ -1,0 +1,31 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "ink-live",
+	"main": "dist/ai_chat/index.js",
+	"compatibility_date": "2026-09-29",
+	"assets": {
+		"binding": "ASSETS",
+		"directory": "./dist/client",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": [
+			"/api/*",
+			"/auth/*"
+		]
+	},
+	"vars": {
+		"BROWSER_PROVIDER": "steel",
+		"RESEARCH_ENABLED": "1",
+		"ANALYZE_ENABLED": "1",
+		"BUILD_ENABLED": "1"
+	},
+	"observability": {
+		"enabled": true
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "ink-live",
+			"database_id": "df4d81ee-6640-495f-9f74-82ecddcbfa73"
+		}
+	]
+}

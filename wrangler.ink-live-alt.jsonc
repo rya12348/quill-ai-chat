@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ink-live-alt",
+  "main": "dist/ai_chat/index.js",
+  "compatibility_date": "2026-09-29",
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/auth/*"]
+  },
+  "vars": {
+    "APP_ORIGIN": "https://ink-live-alt.cadoffryan.workers.dev",
+    "BROWSER_PROVIDER": "steel",
+    "RESEARCH_ENABLED": "1",
+    "ANALYZE_ENABLED": "1",
+    "BUILD_ENABLED": "1"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ink-live",
+      "database_id": "5916c00c-bfe1-4086-a296-eaaec2dfe147"
+    }
+  ],
+  "observability": { "enabled": true }
+}

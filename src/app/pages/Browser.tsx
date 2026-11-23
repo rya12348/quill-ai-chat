@@ -825,6 +825,10 @@ export function Browser() {
         // the background just to refresh metadata; each frame costs a Worker
         // request against the site's daily hosting allowance.
         if (!liveView) schedule(350)
+        // A live viewer that has not connected yet is not covering the screen,
+        // so the fallback still needs frames or the pane sits on a frozen
+        // picture while "Connecting live view…" spins.
+        else if (!liveReady) schedule(1_500)
         return
       }
       checking = true
@@ -864,10 +868,10 @@ export function Browser() {
         }
       } finally {
         checking = false
-        // One warm frame is enough while the provider's live viewer owns the
-        // screen. The snapshot path keeps polling, but at a sustainable pace
-        // instead of several requests a second.
+        // One warm frame is enough once the provider's live viewer owns the
+        // screen. Until it connects, keep the fallback fresh instead.
         if (!liveView) schedule(1_200)
+        else if (!liveReady) schedule(1_500)
       }
     }
     void tick(true)
@@ -886,7 +890,7 @@ export function Browser() {
       document.removeEventListener('visibilitychange', onVisibility)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.sessionId, screenNonce, liveView])
+  }, [session?.sessionId, screenNonce, liveView, liveReady])
 
   useEffect(() => {
     const element = logRef.current

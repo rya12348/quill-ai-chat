@@ -19,7 +19,7 @@ export function normalizeBuffyModel(value: unknown): BuffyModel {
 }
 
 export function buffyModelSpeed(model: BuffyModel): (typeof MODEL_SPEED_LABELS)[keyof typeof MODEL_SPEED_LABELS] {
-  return modelSpeed(model) ?? MODEL_SPEED_LABELS.longer
+  return modelSpeed(model) ?? MODEL_SPEED_LABELS.fast
 }
 
 export function isDuckModel(model: BuffyModel): model is DuckModel {

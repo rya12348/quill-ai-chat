@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 
 import { MODELS } from '../../shared/config'
 import type { SharedConversation, SharedMessage } from '../../shared/types'
+import { contentDisposition, readAttachmentBytes, readAttachmentThumbnail } from '../attachment-storage'
 import { groupAttachmentMeta } from '../attachments'
 import { mapMessage, requireDb } from '../db'
 import type { AppContext, Env } from '../env'
@@ -53,7 +54,7 @@ shares.get('/:token', async (c) => {
       )
       .bind(share.owner_sub, share.conversation_id),
     db
-      .prepare(`SELECT id, message_id, name, mime, size, kind FROM message_attachments WHERE owner_sub = ? AND conversation_id = ? ORDER BY message_id, position, created_at`)
+      .prepare(`SELECT id, message_id, name, mime, size, kind, CASE WHEN mime = 'text/uri-list' THEN data END AS url FROM message_attachments WHERE owner_sub = ? AND conversation_id = ? ORDER BY message_id, position, created_at`)
       .bind(share.owner_sub, share.conversation_id),
   ])
   const conversation = conversationResult.results[0] as Record<string, unknown> | undefined
@@ -106,27 +107,27 @@ shares.get('/:token/attachments/:id', async (c) => {
   const row = await c
     .get('db')
     .prepare(
-      `SELECT a.mime, a.data FROM message_attachments a
+      `SELECT a.id, a.name, a.mime, a.kind, a.data, a.r2_key FROM message_attachments a
        JOIN conversation_shares s
          ON s.conversation_id = a.conversation_id AND s.owner_sub = a.owner_sub
-       WHERE s.token = ? AND a.id = ? AND a.kind = 'image'`,
+       WHERE s.token = ? AND a.id = ?`,
     )
     .bind(c.req.param('token'), c.req.param('id'))
-    .first<{ mime: string; data: string }>()
+    .first<{ id: string; name: string; mime: string; kind: string; data: string; r2_key: string | null }>()
   if (!row) return c.json({ error: 'not_found' }, 404)
-  let bytes: Uint8Array
-  try {
-    const binary = atob(row.data)
-    bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
-  } catch {
-    return c.json({ error: 'not_found' }, 404)
-  }
-  return new Response(bytes.buffer as ArrayBuffer, {
+  const download = c.req.query('download') === '1'
+  if (row.kind !== 'image' && !download) return c.json({ error: 'not_found' }, 404)
+  const thumbnail = row.kind === 'image' && c.req.query('thumb') === '1'
+  const loaded = thumbnail
+    ? await readAttachmentThumbnail(c.env.FILES, 'chat', row)
+    : await readAttachmentBytes(c.env.FILES, row).then((bytes) => (bytes ? { bytes, mime: row.mime } : null))
+  if (!loaded) return c.json({ error: 'not_found' }, 404)
+  return new Response(loaded.bytes.buffer as ArrayBuffer, {
     headers: {
-      'content-type': row.mime,
-      'content-length': String(bytes.byteLength),
+      'content-type': loaded.mime,
+      'content-length': String(loaded.bytes.byteLength),
       'cache-control': 'private, no-store',
-      'content-disposition': 'inline',
+      'content-disposition': contentDisposition(row.name, !download),
       'x-content-type-options': 'nosniff',
     },
   })

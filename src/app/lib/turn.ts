@@ -124,7 +124,7 @@ export async function startTurn(
                 size: attachment.size,
                 kind: attachment.kind,
                 ...(attachment.kind === 'image'
-                  ? { url: attachment.data }
+                  ? { url: attachment.data, thumbnailUrl: attachment.thumbnail ?? attachment.data }
                   : attachment.mime === 'text/uri-list'
                     ? { url: attachment.data }
                     : {}),

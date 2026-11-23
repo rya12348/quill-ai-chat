@@ -1,4 +1,4 @@
-import { BookOpen, Folder, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
+import { BookOpen, ChevronDown, Folder, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 
@@ -8,7 +8,17 @@ import { useCreateProject, useDeleteProject, useProjects, useRenameProject, useU
 import { cx } from '../lib/cx'
 import { Button, ConfirmDialog, Dialog, Input, inputClass, Menu, useToast } from './ui'
 
-export function ProjectNav({ selectedId, totalChats }: { selectedId: string | null; totalChats: number }) {
+export function ProjectNav({
+  selectedId,
+  totalChats,
+  chatsOpen,
+  onToggleChats,
+}: {
+  selectedId: string | null
+  totalChats: number
+  chatsOpen: boolean
+  onToggleChats: () => void
+}) {
   const { data } = useProjects()
   const projects = data?.items ?? []
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -36,10 +46,14 @@ export function ProjectNav({ selectedId, totalChats }: { selectedId: string | nu
           <Plus />
         </Button>
       </div>
-      <ul className="space-y-0.5" aria-label="Projects">
+      <ul className="scrollbar-thin max-h-44 space-y-0.5 overflow-y-auto" aria-label="Projects">
         <li>
           <Link
             to="/"
+            onClick={onToggleChats}
+            aria-expanded={chatsOpen}
+            aria-controls="sidebar-chat-history"
+            title={chatsOpen ? 'Hide chat history' : 'Show chat history'}
             className={cx(
               'flex h-9 items-center gap-2 rounded-control px-3 text-[14px] transition-colors',
               !selectedId ? 'bg-surface-2/60 font-medium text-fg' : 'text-muted hover:bg-surface-2/50 hover:text-fg',
@@ -48,6 +62,7 @@ export function ProjectNav({ selectedId, totalChats }: { selectedId: string | nu
             <Folder className="size-3.5 shrink-0" />
             <span className="min-w-0 flex-1 truncate">All chats</span>
             <span className="text-[12px] tabular-nums text-faint">{totalChats}</span>
+            <ChevronDown className={cx('size-3.5 shrink-0 text-faint transition-transform', chatsOpen && 'rotate-180')} />
           </Link>
         </li>
         {projects.map((project) => (

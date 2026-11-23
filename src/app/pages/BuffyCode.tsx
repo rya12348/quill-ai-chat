@@ -18,12 +18,14 @@ import {
   Square,
   Tablet,
   Terminal,
+  Undo2,
   X,
 } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
 
 import type { BuildInfo, BuildPage } from '../../shared/types'
+import { normalizeWorkspace, workspacePages } from '../../shared/workspace'
 import { preferredBuffyModel } from '../lib/buffy-model-health'
 import { receiptFromBuild } from '../lib/buffy-brief'
 import { BUFFY_MODEL_LABELS, DENT_MODEL, buffyModelSpeed, isDuckModel, normalizeBuffyModel, type BuffyModel } from '../lib/buffy-models'
@@ -53,6 +55,7 @@ type WireTool = {
 const CHAT_KEY = 'buffy:code:chat:v1'
 const WORKSPACE_KEY = 'buffy:code:workspace:v1'
 const MODEL_KEY = 'buffy:code:model:v1'
+const MODE_KEY = 'buffy:code:mode:v1'
 const HANDOFF_KEY = 'buffy:code:handoff:v1'
 const RECEIPT_KEY = 'buffy:code:receipt:v1'
 const SUGGESTIONS = [
@@ -64,9 +67,19 @@ const SUGGESTIONS = [
 const TOOL_TITLES: Record<string, string> = {
   read_files: 'Read workspace',
   create_plan: 'Plan the build',
-  write_file: 'Write project files',
+  write_file: 'Write file',
   run_preview: 'Open the preview',
   run_file_change_hooks: 'Run page checks',
+  run_command: 'Run command',
+  edit_file: 'Edit project files',
+  list_files: 'List files',
+  read_file: 'Read file',
+  search_files: 'Search files',
+  patch_file: 'Patch file',
+  fetch_url: 'Read page',
+  web_search: 'Web search',
+  notes: 'Notes',
+  sandbox: 'Sandbox',
 }
 
 function toolTitle(name: string): string {
@@ -129,12 +142,38 @@ function readBuild(value: unknown): BuildInfo | null {
     Array.isArray((raw.verification as { checks?: unknown }).checks)
       ? raw.verification
       : undefined
+  // The file list is the real project; without it a saved build reprints pages
+  // on the next turn instead of editing files.
+  const files = normalizeWorkspace((raw as { files?: unknown }).files)
+  const sandboxRaw = (raw as { sandbox?: unknown }).sandbox
+  const sandbox =
+    sandboxRaw && typeof sandboxRaw === 'object' &&
+    ['pass', 'fail', 'error', 'skipped'].includes(String((sandboxRaw as { status?: unknown }).status))
+      ? (sandboxRaw as BuildInfo['sandbox'])
+      : undefined
+  // A task result is not a page. Keeping the kind is what stops a terminal
+  // transcript from being re-labelled as a website on the way in.
+  const kind: BuildInfo['kind'] = raw.kind === 'task' ? 'task' : 'page'
+  const steps = Array.isArray((raw as { steps?: unknown }).steps)
+    ? (raw as { steps: NonNullable<BuildInfo['steps']> }).steps
+        .filter(
+          (step) =>
+            Boolean(step) &&
+            typeof step === 'object' &&
+            typeof (step as { label?: unknown }).label === 'string' &&
+            ((step as { status?: unknown }).status === 'done' || (step as { status?: unknown }).status === 'error'),
+        )
+        .slice(0, 40)
+    : []
   return {
     status: raw.status === 'ready' ? 'ready' : 'warning',
-    kind: 'page',
+    kind,
+    ...(steps.length ? { steps } : {}),
     title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim().slice(0, 140) : 'Buffy project',
     html: raw.html,
     ...(pages.length ? { pages } : {}),
+    ...(files.length ? { files } : {}),
+    ...(sandbox ? { sandbox } : {}),
     ...(raw.interactive === true ? { interactive: true } : {}),
     models: Array.isArray(raw.models) ? raw.models.filter((model): model is string => typeof model === 'string').slice(0, 4) : [],
     asOf: Number.isFinite(Number(raw.asOf)) ? Number(raw.asOf) : Date.now(),
@@ -169,7 +208,18 @@ function ToolTimeline({ tools }: { tools: Tool[] }) {
             <div className="flex items-center gap-2">
               <ToolIcon name={tool.name} />
               <span className="shrink-0 text-[12px] font-medium text-fg">{toolTitle(tool.name)}</span>
-              {tool.detail ? (
+              {tool.detail && /^https?:\/\//i.test(tool.detail) ? (
+                // A page the agent read is a place the person can go too.
+                <a
+                  href={tool.detail}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-accent underline-offset-2 hover:underline"
+                  title={tool.detail}
+                >
+                  {tool.detail}
+                </a>
+              ) : tool.detail ? (
                 <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-faint" title={tool.detail}>
                   {tool.detail}
                 </span>
@@ -214,6 +264,15 @@ export function BuffyCode() {
     }
   })
   const { options: selectableModels, loading: modelsLoading } = useBuffyModelOptions()
+  // Build is the default. Agent mode is opt-in per turn, and the choice sticks
+  // for the next visit because it is a way of working, not a one-off.
+  const [mode, setMode] = useState<'build' | 'agent'>(() => {
+    try {
+      return localStorage.getItem(MODE_KEY) === 'agent' ? 'agent' : 'build'
+    } catch {
+      return 'build'
+    }
+  })
   const [build, setBuild] = useState<BuildInfo | null>(() => {
     try {
       return readBuild(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || 'null'))
@@ -221,11 +280,51 @@ export function BuffyCode() {
       return null
     }
   })
+  // Set by "New": the browser is empty on purpose, so the restore below must
+  // not fill it with the project the person just left.
+  const [fresh, setFresh] = useState(false)
+  const [history, setHistory] = useState(0)
+  const [undoing, setUndoing] = useState(false)
   const [selectedPage, setSelectedPage] = useState('index.html')
+  const [selectedFile, setSelectedFile] = useState('')
   const [panel, setPanel] = useState<'preview' | 'code'>('preview')
   const [mobileView, setMobileView] = useState<'chat' | 'workspace'>('chat')
   const [viewport, setViewport] = useState<'desktop' | 'tablet' | 'phone'>('desktop')
   const [previewError, setPreviewError] = useState('')
+  /** The live browser viewport, pushed down the stream while the agent works. */
+  const [liveShot, setLiveShot] = useState<{ src: string; url: string } | null>(null)
+  /**
+   * The address of the agent's browser, streamed by the provider.
+   *
+   * When it is set the pane is that browser — the same session the agent is
+   * clicking in — instead of a picture of it taken after the fact. A provider
+   * without a live view leaves it empty and the screenshot is the fallback.
+   */
+  const [agentLive, setAgentLive] = useState('')
+  /**
+   * Whether this turn announced a live view.
+   *
+   * A player address belongs to one session and that session expires, so a URL
+   * left from an earlier turn is a dead frame that also wins over a fresh
+   * screenshot. A turn clears it up front and a screenshot with no live event
+   * clears it again, which leaves the picture as the honest fallback.
+   */
+  const sawLive = useRef(false)
+  /**
+   * What the agent is on right now: the page it opened, or the file it wrote.
+   *
+   * The page arrives as a handle, never an address — BrowserView resolves it from
+   * `?s=`, so nothing here names the site.
+   */
+  const [agentView, setAgentView] = useState<
+    { kind: 'page'; handle: string } | { kind: 'artifact'; path: string } | null
+  >(null)
+  /**
+   * A page the agent wrote this turn, before the turn's build arrives. Without
+   * it the pane keeps showing the previous turn's project while the agent is
+   * writing a new page, which reads as "it built nothing".
+   */
+  const [agentDraft, setAgentDraft] = useState<{ path: string; html: string; at: number } | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const abortRef = useRef<AbortController | null>(null)
@@ -270,6 +369,39 @@ export function BuffyCode() {
       /* a large build can exceed local storage; it still renders for this visit */
     }
   }, [build])
+
+  // The worker keeps the project too. When this browser has no copy (a new
+  // device, cleared storage), restore it so the workspace is not empty and the
+  // next request edits the real files instead of starting over.
+  useEffect(() => {
+    if (build || fresh) return
+    let alive = true
+    void fetch('/api/buffy/code/workspace', { credentials: 'same-origin' })
+      .then((response) =>
+        response.ok ? (response.json() as Promise<{ files?: unknown; title?: unknown; history?: unknown }>) : null,
+      )
+      .then((data) => {
+        if (!alive || !data) return
+        setHistory(Number(data.history) || 0)
+        const files = normalizeWorkspace(data.files)
+        const pages = workspacePages(files)
+        if (!pages.length) return
+        setBuild({
+          status: 'ready',
+          kind: 'page',
+          title: typeof data.title === 'string' && data.title.trim() ? data.title.trim().slice(0, 140) : 'Buffy project',
+          html: pages[0]!.html,
+          ...(pages.length > 1 ? { pages } : {}),
+          files,
+          models: [],
+          asOf: Date.now(),
+        })
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [build, fresh])
 
   useEffect(() => {
     try {
@@ -405,6 +537,10 @@ export function BuffyCode() {
     setInput('')
     setError('')
     setPending(true)
+    // A new turn gets a new browser session: the last turn's player address is
+    // dead the moment that session ends.
+    sawLive.current = false
+    setAgentLive('')
     setActivity('Preparing the coding model…')
     setMobileView('chat')
     setMessages((current) => [
@@ -425,7 +561,10 @@ export function BuffyCode() {
 
     try {
       let duck: DuckTurn | null = null
-      if (isDuckModel(model)) {
+      // Agent mode runs on hosted lanes only: a Duck proof is single-use, and the
+      // loop needs a completion per step.
+      const wantsDuck = mode !== 'agent' && isDuckModel(model)
+      if (wantsDuck) {
         try {
           duck = await requestDuckTurn(model, controller.signal)
         } catch (error) {
@@ -436,14 +575,35 @@ export function BuffyCode() {
           throw new Error(`${BUFFY_MODEL_LABELS[model].name} could not connect. Try again or choose another working model.`)
         }
       }
-      if (isDuckModel(model) && !duck) {
+      if (wantsDuck && !duck) {
         throw new Error(`${BUFFY_MODEL_LABELS[model].name} could not connect. Try again or choose another working model.`)
       }
-      setActivity(`${BUFFY_MODEL_LABELS[model].name} is writing the project…`)
+      setActivity(
+        mode === 'agent'
+          ? 'Agent mode: working in a sandbox…'
+          : `${BUFFY_MODEL_LABELS[model].name} is writing the project…`,
+      )
+      // A round that stops on its budget hands back a ledger instead of ending
+      // the task: the next request brings a fresh subrequest allowance and a
+      // fresh clock, so a long job is no longer killed by one invocation's cap.
+      // The cap matches AGENT_MAX_ROUNDS on the server, which enforces it too.
+      const MAX_ROUNDS = 8
+      let round = 0
+      let resume: { round: number; ledger: string[] } | null = null
+      let nextResume: { round: number; ledger: string[] } | null = null
+      while (true) {
       const response = await fetch('/api/buffy/code', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt, model, ...(build ? { previous: build } : {}), ...(duck ? { duck } : {}) }),
+        body: JSON.stringify({
+          prompt,
+          model,
+          ...(mode === 'agent' ? { mode: 'agent' as const } : {}),
+          ...(build ? { previous: build } : {}),
+          ...(build?.files?.length ? { workspace: build.files } : {}),
+          ...(duck ? { duck } : {}),
+          ...(resume ? { resume } : {}),
+        }),
         signal: controller.signal,
       })
       if (!response.ok) {
@@ -480,11 +640,78 @@ export function BuffyCode() {
             }
             continue
           }
+          if (event === 'shot') {
+            try {
+              const parsed = JSON.parse(rawData) as { src?: string; url?: string }
+              if (parsed.src) {
+                // A picture and no live view in this turn: show the picture.
+                if (!sawLive.current) setAgentLive('')
+                setLiveShot({ src: parsed.src, url: parsed.url || '' })
+                // Watching is the point: open the pane on the page it is using.
+                setPanel('preview')
+                setMobileView('workspace')
+              }
+            } catch {
+              /* a malformed frame should not end the turn */
+            }
+            continue
+          }
+          if (event === 'live') {
+            try {
+              const parsed = JSON.parse(rawData) as { url?: unknown }
+              if (typeof parsed.url === 'string' && /^https:\/\//i.test(parsed.url)) {
+                sawLive.current = true
+                setAgentLive(parsed.url)
+              }
+            } catch {
+              /* a frame that does not parse is not worth breaking the turn over */
+            }
+          }
+          if (event === 'view') {
+            try {
+              const parsed = JSON.parse(rawData) as {
+                kind?: unknown
+                handle?: unknown
+                path?: unknown
+                html?: unknown
+              }
+              if (parsed.kind === 'page' && typeof parsed.handle === 'string' && parsed.handle) {
+                setAgentView({ kind: 'page', handle: parsed.handle })
+                setPanel('preview')
+                setMobileView('workspace')
+              } else if (parsed.kind === 'artifact') {
+                const path = typeof parsed.path === 'string' ? parsed.path : ''
+                setAgentView({ kind: 'artifact', path })
+                if (typeof parsed.html === 'string' && parsed.html.trim()) {
+                  setAgentDraft({ path, html: parsed.html, at: Date.now() })
+                }
+                setPanel('preview')
+                setMobileView('workspace')
+              }
+            } catch {
+              /* a malformed frame should not end the turn */
+            }
+            continue
+          }
           if (event === 'tool') {
             try {
               updateTool(JSON.parse(rawData) as WireTool)
             } catch {
               /* a malformed tool event should not end the build */
+            }
+            continue
+          }
+          if (event === 'continue') {
+            try {
+              const parsed = JSON.parse(rawData) as { round?: unknown; ledger?: unknown }
+              const ledger = Array.isArray(parsed.ledger)
+                ? parsed.ledger.filter((line): line is string => typeof line === 'string' && Boolean(line.trim())).slice(-40)
+                : []
+              const next = Number(parsed.round)
+              // A malformed continuation ends the task instead of looping on it.
+              if (ledger.length && Number.isFinite(next)) nextResume = { round: next, ledger }
+            } catch {
+              /* fall through: the turn simply ends here */
             }
             continue
           }
@@ -495,11 +722,35 @@ export function BuffyCode() {
               if (next) {
                 const nextPages = pagesFor(next)
                 setBuild(next)
+                // The turn is over: its build is the page now, not the draft.
+                setAgentDraft(null)
+                // Every turn can add one undo step; ask what the worker has.
+                void fetch('/api/buffy/code/workspace', { credentials: 'same-origin' })
+                  .then((response) => (response.ok ? (response.json() as Promise<{ history?: unknown }>) : null))
+                  .then((data) => {
+                    if (data) setHistory(Number(data.history) || 0)
+                  })
+                  .catch(() => {})
+                // Keep the open file if it still exists; otherwise open the first
+                // page, or the first file when the turn produced no page at all.
+                const nextFiles = next.files ?? []
+                const firstOpen = nextPages[0]?.name || nextFiles[0]?.path || 'index.html'
                 setSelectedPage((current) =>
-                  nextPages.some((item) => item.name === current) ? current : nextPages[0]?.name || 'index.html',
+                  nextPages.some((item) => item.name === current) || nextFiles.some((file) => file.path === current)
+                    ? current
+                    : firstOpen,
                 )
-                setPanel('preview')
-                setMobileView('workspace')
+                // Show what the turn actually produced. A page goes to the
+                // preview, code goes to the file view, and nothing at all leaves
+                // the transcript where it is. Staying in the chat is how a turn
+                // that wrote real files looked like it happened behind a curtain.
+                if (nextPages.length) {
+                  setPanel('preview')
+                  setMobileView('workspace')
+                } else if (nextFiles.length) {
+                  setPanel('code')
+                  setMobileView('workspace')
+                }
               }
             } catch {
               /* the final build event is validated above */
@@ -526,6 +777,12 @@ export function BuffyCode() {
             throw error
           }
         }
+      }
+      if (!nextResume || round >= MAX_ROUNDS - 1) break
+      round += 1
+      resume = nextResume
+      nextResume = null
+      setActivity(`Round ${round + 1} of ${MAX_ROUNDS}: carrying on…`)
       }
       if (!accumulated) update('Buffy Code finished without a message. Check the project panel.')
     } catch (thrown) {
@@ -559,10 +816,52 @@ export function BuffyCode() {
 
   const stop = () => abortRef.current?.abort()
 
+  // The worker keeps the state each turn replaced. Undo puts the newest of
+  // those back, so one bad turn never means rebuilding the project by hand.
+  const undo = async () => {
+    if (!build || undoing) return
+    setUndoing(true)
+    try {
+      const response = await fetch('/api/buffy/code/revert', { method: 'POST', credentials: 'same-origin' })
+      if (!response.ok) {
+        setError(response.status === 404 ? 'Nothing to undo yet.' : 'Could not undo that change.')
+        return
+      }
+      const data = (await response.json()) as { files?: unknown; title?: unknown; history?: unknown }
+      const files = normalizeWorkspace(data.files)
+      const pages = workspacePages(files)
+      if (!pages.length) return
+      setBuild({
+        status: 'ready',
+        kind: 'page',
+        title:
+          typeof data.title === 'string' && data.title.trim() ? data.title.trim().slice(0, 140) : 'Buffy project',
+        html: pages[0]!.html,
+        ...(pages.length > 1 ? { pages } : {}),
+        files,
+        models: [],
+        asOf: Date.now(),
+      })
+      setSelectedPage(pages[0]!.name)
+      setSelectedFile('')
+      setPanel('preview')
+      setReloadKey((key) => key + 1)
+      setError('')
+      setHistory(Number(data.history) || 0)
+    } catch {
+      setError('Could not undo that change.')
+    } finally {
+      setUndoing(false)
+    }
+  }
+
   const reset = () => {
     abortRef.current?.abort()
+    setFresh(true)
     setMessages([])
     setBuild(null)
+    setAgentDraft(null)
+    setHistory(0)
     setSelectedPage('index.html')
     setPanel('preview')
     setInput('')
@@ -571,6 +870,8 @@ export function BuffyCode() {
     setPreviewError('')
     setReloadKey(0)
     setElapsed(0)
+    sawLive.current = false
+    setAgentLive('')
     setPending(false)
     try {
       localStorage.removeItem(CHAT_KEY)
@@ -579,12 +880,23 @@ export function BuffyCode() {
     } catch {
       /* storage is optional */
     }
+    // The worker keeps the project too, so a new chat has to be cleared there;
+    // otherwise the next turn edits the project this button just left behind.
+    void fetch('/api/buffy/code/reset', { method: 'POST', credentials: 'same-origin' }).catch(() => {
+      /* offline: the visit still starts empty */
+    })
     setMobileView('chat')
     window.setTimeout(() => inputRef.current?.focus(), 0)
   }
 
   const pages = build ? pagesFor(build) : []
   const page = pages.find((item) => item.name === selectedPage) ?? pages[0]
+  const files = build?.files ?? []
+  const activeFile =
+    files.find((file) => file.path === selectedFile) ??
+    files.find((file) => file.path === selectedPage) ??
+    files.find((file) => file.path.endsWith(`/${selectedPage}`)) ??
+    files[0]
   const verification = build?.verification
   const passed = verification?.checks.filter((item) => item.status === 'pass').length ?? 0
   const totalChecks = verification?.checks.length ?? 0
@@ -633,6 +945,38 @@ export function BuffyCode() {
           <h1 className="font-display text-[17px] font-medium leading-tight">Buffy Code</h1>
           <p className="truncate text-[12.5px] text-faint">Hosted coding agent · writes files, checks the page, runs a sandboxed preview</p>
         </div>
+        <div
+          className="flex h-8 items-center rounded-control border border-line bg-surface p-0.5"
+          role="group"
+          aria-label="Buffy Code mode"
+        >
+          {(['build', 'agent'] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              disabled={pending}
+              aria-pressed={mode === value}
+              title={
+                value === 'build'
+                  ? 'Build a page or project'
+                  : 'Agent mode: runs commands in a sandbox and does the task'
+              }
+              onClick={() => {
+                setMode(value)
+                try {
+                  localStorage.setItem(MODE_KEY, value)
+                } catch {
+                  /* private mode can refuse storage */
+                }
+              }}
+              className={`h-7 rounded-[7px] px-2 text-[11.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                mode === value ? 'bg-fg text-bg' : 'text-muted hover:text-fg'
+              }`}
+            >
+              {value === 'build' ? 'Build' : 'Agent'}
+            </button>
+          ))}
+        </div>
         {!modelsLoading &&
           (selectableModels.length > 0 ? (
             <select
@@ -666,6 +1010,16 @@ export function BuffyCode() {
           <Bot className="size-3.5" />
           Chat
         </Link>
+        <button
+          type="button"
+          onClick={() => void undo()}
+          disabled={!build || !history || undoing}
+          title={history ? `Undo the last change (${history} step${history === 1 ? '' : 's'} saved)` : 'Nothing to undo'}
+          className="inline-flex h-8 items-center gap-1.5 rounded-control px-2.5 text-[13px] text-muted transition-colors hover:bg-surface hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Undo2 className="size-3.5" />
+          Undo
+        </button>
         <button
           type="button"
           onClick={reset}
@@ -933,7 +1287,65 @@ export function BuffyCode() {
             </div>
           </div>
 
-          {build && page ? (
+          {liveShot ? (
+            <div className="flex min-h-0 flex-1 flex-col border-b border-line bg-[#0b0d10]">
+              <div className="flex shrink-0 items-center gap-2 px-4 py-1.5 font-mono text-[11px] text-white/60">
+                <Play className="size-3" />
+                Live browser
+                {agentView?.kind === 'page' ? (
+                  <a
+                    href={`/browser/live?s=${encodeURIComponent(agentView.handle)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-emerald-400 underline decoration-dotted underline-offset-2 hover:text-emerald-300"
+                  >
+                    open the page
+                  </a>
+                ) : null}
+                {pending ? (
+                  <span className="ml-auto flex items-center gap-1 text-emerald-400">
+                    <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
+                    updating…
+                  </span>
+                ) : null}
+              </div>
+              {agentLive ? (
+                <iframe
+                  key={agentLive}
+                  src={agentLive}
+                  title="The page the agent is using, live"
+                  className="min-h-[320px] w-full flex-1 border-0 bg-white"
+                  allow="clipboard-read; clipboard-write; fullscreen"
+                />
+              ) : (
+                <img
+                  src={liveShot.src}
+                  alt="The page the agent is looking at"
+                  className="min-h-[320px] w-full flex-1 object-contain"
+                />
+              )}
+            </div>
+          ) : null}
+          {agentDraft && panel === 'preview' ? (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-1.5 font-mono text-[11px] text-faint">
+                <FileCode2 className="size-3.5" />
+                {agentDraft.path}
+                <span className="ml-auto rounded-tile bg-emerald-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-emerald-700">
+                  just written
+                </span>
+              </div>
+              <iframe
+                key={`draft-${agentDraft.path}-${agentDraft.at}`}
+                title={`The page the agent just wrote — ${agentDraft.path}`}
+                srcDoc={agentDraft.html}
+                sandbox="allow-scripts allow-forms allow-pointer-lock allow-popups allow-modals allow-downloads"
+                referrerPolicy="no-referrer"
+                className="h-full min-h-[420px] w-full border-0 bg-white"
+              />
+            </div>
+          ) : null}
+          {!agentDraft && build && page && (!liveShot || (build.files?.length ?? 0) > 0) ? (
             <>
               {pages.length > 1 ? (
                 <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-3 py-1.5">
@@ -989,6 +1401,30 @@ export function BuffyCode() {
                       className="h-full min-h-[420px] w-full border-0 bg-white"
                     />
                   </div>
+                ) : files.length ? (
+                  <div className="flex h-full min-h-[420px] w-full">
+                    <div className="scrollbar-thin w-[168px] shrink-0 overflow-auto border-r border-white/10 bg-[#0a0e14] p-2">
+                      <p className="px-2 pb-1.5 pt-1 text-[10px] uppercase tracking-wide text-[#6b7684]">
+                        {files.length} file{files.length === 1 ? '' : 's'}
+                      </p>
+                      {files.map((file) => (
+                        <button
+                          key={file.path}
+                          type="button"
+                          onClick={() => setSelectedFile(file.path)}
+                          title={file.path}
+                          className={`block w-full truncate rounded px-2 py-1 text-left font-mono text-[11px] transition-colors ${
+                            file.path === activeFile?.path ? 'bg-white/10 text-white' : 'text-[#8b98a9] hover:text-white'
+                          }`}
+                        >
+                          {file.path}
+                        </button>
+                      ))}
+                    </div>
+                    <pre className="scrollbar-thin min-w-0 flex-1 overflow-auto bg-[#0d1117] p-4 font-mono text-[11.5px] leading-relaxed text-[#d6deeb]">
+                      <code>{activeFile?.content ?? page.html}</code>
+                    </pre>
+                  </div>
                 ) : (
                   <pre className="scrollbar-thin h-full min-h-[420px] w-full overflow-auto bg-[#0d1117] p-4 font-mono text-[11.5px] leading-relaxed text-[#d6deeb]">
                     <code>{page.html}</code>
@@ -1001,6 +1437,17 @@ export function BuffyCode() {
                     <Check className="size-3 text-emerald-500" />
                     {verification ? `${passed}/${totalChecks} page checks passed` : 'Page checks not available'}
                   </span>
+                  {build.sandbox && build.sandbox.status !== 'skipped' ? (
+                    <span
+                      className={`inline-flex items-center gap-1 ${
+                        build.sandbox.status === 'pass' ? 'text-emerald-600' : 'text-amber-600'
+                      }`}
+                      title={build.sandbox.reason || build.sandbox.output.slice(0, 400)}
+                    >
+                      {build.sandbox.status === 'pass' ? <Check className="size-3" /> : <AlertCircle className="size-3" />}
+                      Sandbox {build.sandbox.status === 'pass' ? 'passed' : build.sandbox.status}: {build.sandbox.command}
+                    </span>
+                  ) : null}
                   {build.models.length ? <span>Models used: {build.models.join(', ')}</span> : null}
                   <span>Preview runs in a sandbox; downloads are the generated HTML.</span>
                   <button
@@ -1013,6 +1460,14 @@ export function BuffyCode() {
                     Return to brief
                   </button>
                 </div>
+                {build.sandbox?.output ? (
+                  <details className="mt-1">
+                    <summary className="cursor-pointer text-muted hover:text-fg">Show sandbox output</summary>
+                    <pre className="scrollbar-thin mt-1.5 max-h-56 overflow-auto rounded-control bg-[#0d1117] p-3 font-mono text-[11px] leading-relaxed text-[#d6deeb]">
+                      <code>{build.sandbox.output}</code>
+                    </pre>
+                  </details>
+                ) : null}
                 {verification?.checks.length ? (
                   <details className="mt-1">
                     <summary className="cursor-pointer text-muted hover:text-fg">Show all checks</summary>
@@ -1034,7 +1489,7 @@ export function BuffyCode() {
                 ) : null}
               </div>
             </>
-          ) : (
+          ) : liveShot ? null : (
             <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center">
               <span className="grid size-12 place-items-center rounded-tile border border-line bg-surface text-faint">
                 <Code2 className="size-5" />

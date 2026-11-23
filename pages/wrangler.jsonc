@@ -4,11 +4,15 @@
   "pages_build_output_dir": "../dist/client",
   "compatibility_date": "2026-09-29",
   "vars": {
-    "APP_ORIGIN": "https://ink.7394.jo3.org",
+    "APP_ORIGIN": "https://www.inkbrowser.dpdns.org",
+    "AGENT_UNLIMITED": "1",
     "BROWSER_PROVIDER": "steel",
     "RESEARCH_ENABLED": "1",
     "ANALYZE_ENABLED": "1",
     "BUILD_ENABLED": "1"
+  },
+  "browser": {
+    "binding": "BROWSER"
   },
   "d1_databases": [
     {
@@ -21,10 +25,14 @@
     "preview": {
       "vars": {
         "APP_ORIGIN": "",
+        "AGENT_UNLIMITED": "1",
         "BROWSER_PROVIDER": "steel",
         "RESEARCH_ENABLED": "1",
         "ANALYZE_ENABLED": "1",
         "BUILD_ENABLED": "1"
+      },
+      "browser": {
+        "binding": "BROWSER"
       },
       "d1_databases": [
         {

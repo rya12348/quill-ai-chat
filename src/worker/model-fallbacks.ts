@@ -18,6 +18,10 @@ const OPENROUTER_HOST = 'openrouter.ai'
 const FALLBACK_PREFERENCES: Record<string, RegExp[]> = {
   'baidu/ernie-5.5-flash-preview:free': [/nemotron-3-ultra/i, /command-a-plus/i, /qwen3\.8/i],
   'particle-ai/particle-1:free': [/nemotron-3-ultra/i, /command-a-plus/i, /qwen3\.8/i],
+  // AIHubMix's free Kimi allowance is only 100 requests/day. When it is spent,
+  // keep the Kimi selection useful with a strong hosted lane until it resets.
+  'coding-kimi-k3-free': [/step-5/i, /deepseek-v4\.1/i, /nemotron-3-ultra/i, /qwen3\.8/i],
+  'moonshotai/kimi-k3': [/step-5/i, /deepseek-v4\.1/i, /nemotron-3-ultra/i, /qwen3\.8/i],
 }
 
 // One shared replacement for the two quota-bound OpenRouter rows. The primary
@@ -100,6 +104,10 @@ export function fallbackForUnavailableModel(
     (lane) =>
       lane.model !== model &&
       lane.billing !== 'paid' &&
+      // A selected-only row (the local bridge or Gemini web) is never a silent
+      // substitute for another model.
+      !lane.selectedOnly &&
+      !lane.skipHealth &&
       !isOpenRouter(lane) &&
       !isUnavailableHealth(byLane.get(laneKey(lane))),
   )

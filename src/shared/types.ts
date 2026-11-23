@@ -48,6 +48,8 @@ export interface AttachmentInput {
   kind: AttachmentKind
   /** Base64 image data URL for images; decoded text for text files. */
   data: string
+  /** A small browser-generated image preview, kept out of the prompt. */
+  thumbnail?: string
 }
 
 /** Attachment metadata stored with a message. Image bytes stay on the server. */
@@ -59,6 +61,10 @@ export interface MessageAttachment {
   kind: AttachmentKind
   /** Set for images (served bytes) and links (the attached web address). */
   url?: string
+  /** A smaller image representation; falls back to url for older attachments. */
+  thumbnailUrl?: string
+  /** Authenticated route that returns the original stored file. */
+  downloadUrl?: string
 }
 
 export interface Source {
@@ -171,6 +177,18 @@ export type AnalysisJob = {
   datasetId: string
 }
 
+/** One executed action in a Buffy Code agent-mode turn. */
+export interface TaskStep {
+  tool: string
+  /** A person-readable one-liner, such as `run_command: npm test`. */
+  label: string
+  status: 'done' | 'error'
+  /** Trimmed output, for the timeline. */
+  detail: string
+  ms: number
+  call: number
+}
+
 /** The sandbox reports what happened when it ran the analysis code. */
 export type AnalysisRunResult = {
   ok: boolean
@@ -213,9 +231,16 @@ export interface BuildVerification {
 
 /** A generated page, or a live site shown through the preview proxy. */
 export interface BuildInfo {
+  /** The multi-file workspace behind this project, when it has one. */
+  files?: { path: string; content: string }[]
   status: 'ready' | 'warning'
-  /** A self-contained page, or a live page fetched through the proxy. */
-  kind?: 'page' | 'embed'
+  /** A self-contained page, a live page fetched through the proxy, or an agent task. */
+  kind?: 'page' | 'embed' | 'task'
+  /**
+   * Agent mode: what it did, in order. A task result carries these instead of a
+   * page, which is why `kind: 'task'` never has to pretend to be a website.
+   */
+  steps?: TaskStep[]
   title: string
   /** The generated document. For a live site this is a small download note. */
   html: string
@@ -227,6 +252,15 @@ export interface BuildInfo {
   proxyUrl?: string
   /** A game or tool whose scripts should start as soon as it renders. */
   interactive?: boolean
+  /** What a real build/test run in the sandbox reported, when one was configured. */
+  sandbox?: {
+    status: 'pass' | 'fail' | 'error' | 'skipped'
+    command: string
+    output: string
+    exitCode: number | null
+    durationMs: number
+    reason?: string
+  }
   models: string[]
   asOf: number
   reason?: string
@@ -387,6 +421,13 @@ export interface BrowserSessionResponse {
   expiresAt?: number
   /** Provider-hosted interactive viewer, used for the low-latency live pane. */
   liveUrl?: string
+  /**
+   * The shape of the streamed screen, when it is not the page's own viewport.
+   *
+   * A headful session streams its whole window, chrome included, so the pane has
+   * to keep the window's aspect or every pointer lands somewhere else.
+   */
+  window?: { width: number; height: number }
   state: BrowserViewState
 }
 
@@ -762,14 +803,59 @@ export interface RoomSummary {
   createdAt: number
   /** True when this account created the room. */
   createdByMe: boolean
-  /** Public rooms are always open; private rooms open after a password check. */
+  /** Public rooms are always open; private rooms open after a password or invite. */
   unlocked: boolean
+  /** True when this account joined through an invite link rather than the password. */
+  invited?: boolean
 }
 
 /** The rooms shown when chat opens: private rooms first, then public rooms. */
 export interface RoomList {
   items: RoomSummary[]
   defaultRoomId: string
+}
+
+/** One person in the durable Ink directory. */
+export interface RoomPerson {
+  /** Public, stable Ink tag shown under the person's name. */
+  id: string
+  /** Current chat name, including a name the person changed. */
+  name: string
+  guest: boolean
+  online: boolean
+  /** Whether the viewer saved this person for quick room invites. */
+  saved: boolean
+  /** True when the viewer gave this person a private nickname. */
+  renamed?: boolean
+  /** The person's own chat name, so a rename can still be searched or reset. */
+  originalName?: string
+}
+
+/** Everyone Ink has seen, available for direct room invitations. */
+export interface RoomPeople {
+  items: RoomPerson[]
+  asOf: number
+}
+
+/** An unseen direct invitation to a private room. */
+export interface RoomInvite {
+  roomId: string
+  roomName: string
+  invitedAt: number
+  inviterName: string
+}
+
+export interface RoomInvites {
+  items: RoomInvite[]
+  asOf: number
+}
+
+/** One emoji reaction attached to a room message. */
+export interface RoomReaction {
+  reaction: string
+  count: number
+  /** Whether the person reading this snapshot added that reaction. */
+  mine: boolean
 }
 
 /** A message in a room. */
@@ -779,9 +865,13 @@ export interface RoomMessage {
   body: string
   /** Images, files and links shared with the room. */
   attachments?: MessageAttachment[]
+  /** Reactions from everyone in the room, grouped by emoji. */
+  reactions?: RoomReaction[]
   authorName: string
   /** A short one-way tag; the account id is never sent to the browser. */
   authorId: string
+  /** A subtle owner marker; never sent for ordinary room members. */
+  authorOwner?: boolean
   createdAt: number
 }
 
@@ -794,7 +884,19 @@ export interface RoomSnapshot {
   messages: RoomMessage[]
   /** Lets the browser label its own messages without exposing account ids. */
   viewerId: string
+  /** The current name this person's messages show to everyone in the room. */
+  viewerName: string
+  /** Whether the reader's own name should carry the owner marker. */
+  viewerOwner?: boolean
   asOf: number
+}
+
+/** The name shown beside a person's room messages. */
+export interface RoomProfile {
+  name: string
+  viewerId: string
+  /** Set when the name applies to another person in the room. */
+  targetId?: string
 }
 
 /** A new message in a room this account can access. */

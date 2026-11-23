@@ -1,18 +1,22 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router'
 
 import { ROOM_ID, ROOM_MESSAGE_TTL_MS } from '../../shared/config'
-import type { RoomActivity, RoomActivityItem, RoomMessage } from '../../shared/types'
+import type { RoomActivity, RoomActivityItem, RoomInvite, RoomInvites, RoomMessage } from '../../shared/types'
 import { api } from '../lib/api'
-import { addAttention, clearAttention, setAttentionCount } from '../lib/attention'
+import { addAttention, clearAttention, setAttentionCount, setInviteAttention } from '../lib/attention'
 import { cx } from '../lib/cx'
 import { ensureBrowserNotificationPermission, getNotificationSettings, useNotificationSettings } from '../lib/notifications'
 import { startNotificationTabs, waitForVisibleNotificationTab, withNotificationClaim } from '../lib/notification-tabs'
 
 const INCOMING_EVENT = 'ink:room:incoming'
 const POLL_INTERVAL_MS = 10_000
+
+/** Routes that fill the window, where a room notice has nowhere to appear. */
+const BROWSING_ROUTES = new Set(['/browser/live', '/math', '/proxy'])
 const NOTICE_LIFETIME_MS = 7_000
 
 type IncomingDetail = {
@@ -28,6 +32,7 @@ export function announceRoomMessages(messages: RoomMessage[], roomName?: string)
 
 type Notice = {
   messageId: string
+  kind?: 'message' | 'invite'
   room: string
   roomName: string
   authorName: string
@@ -57,6 +62,7 @@ function latestPerRoom(items: { message: RoomMessage; roomName?: string }[]): { 
 
 export function RoomNotifications() {
   const location = useLocation()
+  const client = useQueryClient()
   const settings = useNotificationSettings()
   const [notices, setNotices] = useState<Notice[]>([])
   const seen = useRef(new Set<string>())
@@ -80,10 +86,11 @@ export function RoomNotifications() {
 
   const deliver = useCallback(
     async (messages: RoomMessage[], fallbackRoomName?: string) => {
-      const now = Date.now()
       const fresh = messages.filter((message) => {
         if (!message || typeof message.id !== 'string' || !message.room) return false
-        if (message.createdAt + ROOM_MESSAGE_TTL_MS <= now) return false
+        // The server already applies the room retention cutoff. Do not compare
+        // against the browser clock here: a clock ahead of the server would
+        // otherwise discard every valid message as expired.
         if (seen.current.has(message.id)) return false
         seen.current.add(message.id)
         window.setTimeout(() => seen.current.delete(message.id), ROOM_MESSAGE_TTL_MS + 60_000)
@@ -168,6 +175,110 @@ export function RoomNotifications() {
     [],
   )
 
+  const deliverInvites = useCallback(async (invites: RoomInvite[]) => {
+    if (!invites.length) return
+    const visible = document.visibilityState === 'visible'
+    const preferences = getNotificationSettings()
+    const shown: string[] = []
+    for (const invite of invites) {
+      const key = `invite:${invite.roomId}:${invite.invitedAt}`
+      if (seen.current.has(key)) continue
+      if (visible) {
+        if (!preferences.inApp) continue
+        const notice: Notice = {
+          messageId: key,
+          kind: 'invite',
+          room: invite.roomId,
+          roomName: invite.roomName,
+          authorName: invite.inviterName,
+          body: 'Open the room to join.',
+          createdAt: invite.invitedAt,
+        }
+        await withNotificationClaim(key, () => {
+          seen.current.add(key)
+          window.setTimeout(() => seen.current.delete(key), 5 * 60_000)
+          setNotices((current) => [...current.filter((item) => item.room !== notice.room), notice].slice(-3))
+          const existing = timers.current.get(notice.messageId)
+          if (existing) window.clearTimeout(existing)
+          timers.current.set(
+            notice.messageId,
+            window.setTimeout(() => {
+              setNotices((current) => current.filter((item) => item.messageId !== notice.messageId))
+              timers.current.delete(notice.messageId)
+            }, NOTICE_LIFETIME_MS),
+          )
+        })
+        shown.push(invite.roomId)
+        continue
+      }
+
+      if (!preferences.browser) continue
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') continue
+      if (await waitForVisibleNotificationTab()) continue
+      await withNotificationClaim(key, () => {
+        seen.current.add(key)
+        window.setTimeout(() => seen.current.delete(key), 5 * 60_000)
+        try {
+          const native = new Notification(`Invited to ${invite.roomName}`, {
+            body: `${invite.inviterName} invited you to a private room.`,
+            tag: `ink-invite-${invite.roomId}`,
+            icon: '/icons/icon-192.png',
+          })
+          native.onclick = () => {
+            window.focus()
+            native.close()
+            window.location.assign(`/room?room=${encodeURIComponent(invite.roomId)}`)
+          }
+        } catch {
+          /* permission and platform support can change at runtime */
+        }
+      })
+      shown.push(invite.roomId)
+    }
+    if (shown.length) {
+      await api('/rooms/invites/seen', { method: 'POST', json: { roomIds: shown } }).catch(() => undefined)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (BROWSING_ROUTES.has(location.pathname)) return
+    let cancelled = false
+    let inFlight = false
+    const poll = async () => {
+      if (cancelled || inFlight) return
+      inFlight = true
+      try {
+        const invites = await api<RoomInvites>('/rooms/invites')
+        if (cancelled) return
+        // The title and app badge are the fallback that works with browser
+        // notifications blocked. Count only while the tab is hidden; once the
+        // person returns, the in-app notice or room list takes over.
+        const hidden = document.visibilityState !== 'visible'
+        const preferences = getNotificationSettings()
+        setInviteAttention(hidden && preferences.inApp ? invites.items.map((invite) => invite.roomId) : [])
+        if (!invites.items.length) return
+        void client.invalidateQueries({ queryKey: ['rooms'] })
+        await deliverInvites(invites.items)
+      } catch {
+        /* a dropped poll recovers on the next interval */
+      } finally {
+        inFlight = false
+      }
+    }
+    const first = window.setTimeout(() => void poll(), 1_800)
+    const interval = window.setInterval(() => void poll(), 15_000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void poll()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      cancelled = true
+      window.clearTimeout(first)
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [client, deliverInvites, location.pathname])
+
   useEffect(() => {
     const incoming = (event: Event) => {
       const detail = (event as CustomEvent<IncomingDetail>).detail
@@ -190,24 +301,33 @@ export function RoomNotifications() {
 
   useEffect(() => {
     if (!settings.inApp && !settings.browser) return
+    // The browser owns the whole window, so a notice could not be seen there.
+    // Polling anyway spends requests and bandwidth while a game streams.
+    if (BROWSING_ROUTES.has(location.pathname)) return
     let cancelled = false
     let inFlight = false
-    // Start at now: old room history is not a new notification.
-    let cursor = Date.now()
+    // The browser clock may be ahead of or behind the Worker. Leave the cursor
+    // unset until the first response establishes it from the server's asOf.
+    let cursor: number | null = null
+    let baseline = false
 
     const poll = async () => {
       if (cancelled || inFlight) return
       inFlight = true
       try {
-        const activity = await api<RoomActivity>(`/rooms/activity?after=${cursor}`)
+        const activity = await api<RoomActivity>(`/rooms/activity?after=${cursor ?? Date.now()}`)
         if (cancelled) return
-        // Keep a small overlap so a message committed just after the snapshot
-        // is still picked up. Seen ids make the repeat harmless.
+        if (!baseline) {
+          // This response is only a clock baseline. Ignore its items so old
+          // room history is not replayed, then continue from server time.
+          baseline = true
+          cursor = activity.asOf
+          return
+        }
         const last = activity.items.at(-1)
-        cursor = Math.max(
-          cursor,
-          activity.items.length >= 50 && last ? last.createdAt : activity.asOf - 2_000,
-        )
+        // If the server returned a full page, continue from its newest message;
+        // otherwise use the server timestamp for the next poll.
+        cursor = activity.items.length >= 50 && last ? last.createdAt : activity.asOf
         await deliver(activity.items)
       } catch {
         /* a dropped poll recovers on the next interval */
@@ -228,7 +348,7 @@ export function RoomNotifications() {
       window.clearInterval(interval)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [deliver, settings.browser, settings.inApp])
+  }, [deliver, settings.browser, settings.inApp, location.pathname])
 
   useEffect(() => {
     const onVisible = () => {
@@ -276,8 +396,12 @@ export function RoomNotifications() {
               onClick={() => dismiss(notice.messageId)}
               className="block py-3 pl-4 pr-10 transition-colors hover:bg-surface-2/70"
             >
-              <span className="block text-[12.5px] font-semibold text-accent">New message in {notice.roomName}</span>
-              <span className="mt-0.5 block truncate text-[13.5px] font-medium text-fg">{notice.authorName}</span>
+              <span className="block text-[12.5px] font-semibold text-accent">
+                {notice.kind === 'invite' ? `Invited to ${notice.roomName}` : `New message in ${notice.roomName}`}
+              </span>
+              <span className="mt-0.5 block truncate text-[13.5px] font-medium text-fg">
+                {notice.kind === 'invite' ? `${notice.authorName} invited you` : notice.authorName}
+              </span>
               <span className="mt-0.5 line-clamp-2 block text-[13px] leading-relaxed text-muted">{notice.body}</span>
             </Link>
             <button

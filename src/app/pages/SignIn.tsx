@@ -153,7 +153,7 @@ export function SignIn() {
   )
 }
 
-export function SetupNeeded({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function SetupNeeded({ message, onRetry, database }: { message: string; onRetry?: () => void; database?: boolean }) {
   return (
     <div className="grid min-h-dvh place-items-center p-6">
       <div className="max-w-md text-center">
@@ -166,9 +166,12 @@ export function SetupNeeded({ message, onRetry }: { message: string; onRetry?: (
         </p>
         {onRetry ? (
           <button type="button" onClick={onRetry} className="mt-4 inline-flex h-10 items-center justify-center rounded-control border border-line-strong bg-surface px-4 text-[14px] font-medium text-fg transition-colors hover:bg-surface-2">Try again</button>
-        ) : (
+        ) : database ? (
+          // Only claim the database is missing when the server said so. Any
+          // other failure used to land on this line, which told people to
+          // redeploy instead of letting them retry.
           <p className="mt-4 text-[13px] text-faint">The site is missing its database binding. Ask the site owner to attach D1 storage named DB and redeploy.</p>
-        )}
+        ) : null}
       </div>
     </div>
   )

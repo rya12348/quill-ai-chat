@@ -468,3 +468,330 @@ html.dark .prose-chat pre {
     transform: none;
   }
 }
+
+/* Butter Party runs on the same pixel terminal face as the arcade it is
+   modelled on; the file is self-hosted so the page never calls a third party. */
+@font-face {
+  font-family: 'VT323';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/vt323.woff2') format('woff2');
+}
+
+.font-pixel {
+  font-family: 'VT323', ui-monospace, 'Courier New', monospace;
+  letter-spacing: 0.02em;
+}
+
+@keyframes puffer-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+@keyframes puffer-pop {
+  0% { transform: scale(1); filter: brightness(2); }
+  35% { transform: scale(1.22) rotate(-3deg); filter: brightness(3); }
+  70% { transform: scale(0.94) rotate(2deg); filter: brightness(1.4); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+
+@keyframes butter-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-9px); }
+}
+@keyframes butter-sweep {
+  to { transform: rotate(360deg); }
+}
+@keyframes butter-swim {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-3px) rotate(2deg); }
+}
+@keyframes butter-float {
+  0%, 100% { transform: translateY(-6px); }
+  50% { transform: translateY(-12px); }
+}
+@keyframes butter-fly {
+  0% { transform: translate(-50%, -50%) scale(1); }
+  45% { transform: translate(-50%, -62%) scale(1.18) rotate(-8deg); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+@keyframes butter-chip {
+  from { opacity: 0; transform: translate(-50%, 6px) scale(0.85); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+@keyframes butter-dizzy {
+  0%, 100% { transform: rotate(-12deg) translateY(2px); }
+  50% { transform: rotate(10deg) translateY(-3px); }
+}
+@keyframes butter-sink {
+  to { transform: translate(10px, 34px) rotate(168deg); filter: grayscale(1) brightness(0.55); opacity: 0.75; }
+}
+@keyframes butter-pop {
+  0% { filter: brightness(3); transform: scale(1.5) rotate(-180deg); }
+  60% { transform: scale(1.05) rotate(-300deg); }
+  100% { transform: rotate(-360deg); }
+}
+@keyframes bubble-rise {
+  0% { transform: translateY(0) translateX(0); opacity: 0.05; }
+  15% { opacity: 0.32; }
+  50% { transform: translateY(-52px) translateX(4px); opacity: 0.24; }
+  100% { transform: translateY(-118px) translateX(-3px); opacity: 0; }
+}
+@keyframes tier-rise {
+  from { opacity: 0; transform: translate(-50%, 8px) scale(0.92); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+/* Ink door: the shipped sheet is mobile-first (one 460px column). At desktop
+   the real door is two 360px columns with the idle butter between them. */
+@media (min-width: 1100px) {
+  .butter-page .pf-door-cols {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    max-width: 1240px;
+    margin-top: 18px;
+  }
+  .butter-page .pf-door-col {
+    flex: 0 0 360px;
+    width: 360px;
+  }
+  .butter-page .pf-door-gap {
+    height: 0;
+  }
+}
+
+/* The buddy you picked floats in the middle of the gate: between the two
+   columns on a wide screen, and in the gap above them on a phone, so the
+   character you chose is the one you see before a table is dealt. */
+.butter-page .pf-door-gap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.butter-page .pf-door-buddy {
+  position: relative;
+  width: clamp(88px, 15vw, 132px);
+  aspect-ratio: 1;
+  pointer-events: none;
+}
+.butter-page .pf-door-buddy img {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 10px var(--pf-glow, #ff5d8f59));
+  animation: ds-swim 2.6s ease-in-out infinite;
+}
+.butter-page .pf-door-buddy::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -4%;
+  width: 72%;
+  height: 15%;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(2, 5, 12, 0.5), rgba(2, 5, 12, 0));
+}
+@media (min-width: 1100px) {
+  .butter-page .pf-door-buddy {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 150px;
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* The shipped gate lets its five mascot columns size to their content, which is
+   what makes the first key 62px and the rest 58.6px; that is the row as it is on
+   krillion.io, so the door keeps the sheet's own rule. Below 374px those same
+   fixed 44px sprites push the last key past the panel, so only there do the
+   columns and sprites shrink with the panel. */
+@media (max-width: 373px) {
+  .butter-page .pf-keys {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+  }
+  .butter-page .pf-key img {
+    width: 100%;
+    height: auto;
+    max-width: 44px;
+  }
+}
+
+/* ------------------------------------------------------------------ the dive */
+
+/* Puffer Party's sheet pins `.ds-root` to the viewport; on Ink the game keeps
+   its own page area so the shell and the chat stay one click away. Every
+   measurement inside comes from the shipped stylesheet either way. */
+.butter-dive > .ds-root {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.butter-dive .ds-world {
+  transition: transform 1.05s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.butter-dive-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.butter-dive-meta-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.butter-dive-done-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.butter-dive-done-day {
+  color: #7d93b8;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 13px;
+}
+
+.butter-dive-done-score {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.butter-dive-big {
+  color: #e8f1ff;
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(3rem, 12vw, 5rem);
+  line-height: 1;
+}
+
+.butter-dive-metres {
+  color: #4de3ff;
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+}
+
+.butter-dive-results {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 26px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.butter-dive-result {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 12px;
+  padding: 10px 12px;
+  background: #101d33b3;
+  border: 1px solid #1b3050;
+}
+
+.butter-dive-result-tier {
+  grid-column: 1 / -1;
+  letter-spacing: 0.16em;
+  font-size: 12px;
+}
+
+.butter-dive-result-prompt {
+  grid-column: 1;
+  color: #e8f1ff;
+  font-size: 15px;
+}
+
+.butter-dive-result-points {
+  grid-row: 2;
+  grid-column: 2;
+  justify-self: end;
+  color: #e8f1ff;
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+}
+
+.butter-dive-result-answer {
+  grid-column: 1 / -1;
+  color: #4de3ff;
+  font-size: 15px;
+}
+
+.butter-dive-result-quip {
+  grid-column: 1 / -1;
+  color: #7d93b8;
+  font-size: 13px;
+}
+
+.butter-dive-reset {
+  margin-top: 22px;
+  color: #7d93b8;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 13px;
+}
+
+.butter-dive-done-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+/* The party door points at the other half of the reef: seven prompts, one dive
+   a day, the same answers and rarities the table deals. */
+.butter-page .pf-dive-link {
+  display: block;
+  width: max-content;
+  margin: 12px auto 0;
+  padding: 8px 14px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #4de3ff;
+  border: 1px solid #1b3050;
+  background: #0b1526d9;
+  box-shadow: 0 0 0 2px #060d1a;
+}
+.butter-page .pf-dive-link:hover {
+  color: #e8f1ff;
+  border-color: #4de3ff;
+}
+
+/* The shipped engine sizes its canvases from script; Butter's sea paints from
+   CSS, so both layers get the whole stage. */
+.butter-dive .ds-stage > .ds-sea,
+.butter-dive .ds-stage > .ds-fore {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* The sheet asks for the game's own fonts through custom properties; Ink's
+   theme does not define them, so without this every word falls back to Inter
+   and the dive stops looking like the dive. VT323 is the face the sheet loads. */
+.butter-dive {
+  --font-display: 'VT323', 'VT323 Fallback', ui-monospace, monospace;
+  --font-mono-ui: 'VT323', 'VT323 Fallback', ui-monospace, monospace;
+}
+
+.butter-dive .ds-root {
+  font-size: 16px;
+}
+
+/* The real intro puts the button in a grid row, so it runs the full 600px of
+   the intro column instead of shrinking to its label. */
+.butter-dive .ds-intro-inner .ds-begin-btn {
+  width: 100%;
+}

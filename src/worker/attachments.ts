@@ -6,10 +6,12 @@ import {
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENT_TOTAL_BYTES,
   MAX_ATTACHMENTS,
+  MAX_GIF_BYTES,
   MAX_TEXT_ATTACHMENT_CHARS,
 } from '../shared/config'
 import type { AttachmentInput, AttachmentKind, MessageAttachment, Role } from '../shared/types'
 import type { ChatMessage } from './ai'
+import { readAttachmentData } from './attachment-storage'
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const TEXT_EXTENSIONS = new Set([
@@ -32,6 +34,8 @@ const APPLICATION_TEXT_MIMES = new Set([
 ])
 
 const PROMPT_TEXT_PER_FILE = 20_000
+const MAX_THUMBNAIL_CHARS = 240_000
+const THUMBNAIL_DATA_URL = /^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/]+={0,2}$/i
 
 export class AttachmentValidationError extends Error {}
 
@@ -64,6 +68,13 @@ function cleanName(value: unknown): string {
   if (typeof value !== 'string') return ''
   const base = value.split(/[\\/]/).pop() ?? ''
   return base.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 120)
+}
+
+function cleanThumbnail(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const thumbnail = value.trim()
+  if (!thumbnail || thumbnail.length > MAX_THUMBNAIL_CHARS || !THUMBNAIL_DATA_URL.test(thumbnail)) return undefined
+  return thumbnail
 }
 
 function imageBytesLookValid(mime: string, bytes: Uint8Array): boolean {
@@ -113,12 +124,18 @@ export function parseAttachments(value: unknown): StoredAttachment[] {
       } catch {
         throw new AttachmentValidationError('That image could not be read.')
       }
-      if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
-        throw new AttachmentValidationError(`Each image can be up to ${Math.round(MAX_ATTACHMENT_BYTES / 100_000) / 10} MB.`)
+      const limit = mime === 'image/gif' ? MAX_GIF_BYTES : MAX_ATTACHMENT_BYTES
+      if (bytes.byteLength > limit) {
+        throw new AttachmentValidationError(
+          mime === 'image/gif'
+            ? `GIFs can be up to ${Math.round(MAX_GIF_BYTES / 100_000) / 10} MB.`
+            : `Each image can be up to ${Math.round(MAX_ATTACHMENT_BYTES / 100_000) / 10} MB.`,
+        )
       }
       if (!imageBytesLookValid(mime, bytes)) throw new AttachmentValidationError('That image is not a valid PNG, JPG, WebP or GIF.')
       total += bytes.byteLength
-      parsed.push({ id: crypto.randomUUID(), name, mime, size: bytes.byteLength, kind, data: base64 })
+      const thumbnail = cleanThumbnail(raw.thumbnail)
+      parsed.push({ id: crypto.randomUUID(), name, mime, size: bytes.byteLength, kind, data: base64, ...(thumbnail ? { thumbnail } : {}) })
       continue
     }
 
@@ -149,18 +166,32 @@ export function attachmentMeta(
     mime: attachment.mime,
     size: attachment.size,
     kind: attachment.kind,
-    ...(attachment.kind === 'image' ? { url: `${baseUrl}/${encodeURIComponent(attachment.id)}` } : {}),
+    ...(attachment.kind === 'image'
+      ? {
+          url: `${baseUrl}/${encodeURIComponent(attachment.id)}`,
+          thumbnailUrl: `${baseUrl}/${encodeURIComponent(attachment.id)}?thumb=1`,
+        }
+      : {}),
+    ...(attachment.mime !== 'text/uri-list'
+      ? { downloadUrl: `${baseUrl}/${encodeURIComponent(attachment.id)}?download=1` }
+      : {}),
   }
 }
 
-export function attachmentFromRow(row: Row): StoredAttachment {
+export async function attachmentFromRow(row: Row, bucket?: R2Bucket): Promise<StoredAttachment | null> {
+  const data = await readAttachmentData(bucket, {
+    kind: row.kind === 'image' ? 'image' : 'text',
+    data: row.data as string,
+    r2_key: typeof row.r2_key === 'string' ? row.r2_key : null,
+  })
+  if (data === null) return null
   return {
     id: row.id as string,
     name: row.name as string,
     mime: row.mime as string,
     size: Number(row.size),
     kind: row.kind === 'image' ? 'image' : 'text',
-    data: row.data as string,
+    data,
   }
 }
 
@@ -171,12 +202,13 @@ export async function loadAttachmentsForMessages(
   db: D1Database,
   owner: string,
   messageIds: string[],
+  bucket?: R2Bucket,
 ): Promise<Map<string, StoredAttachment[]>> {
   const grouped = new Map<string, StoredAttachment[]>()
   if (!messageIds.length) return grouped
   const rows = await db
     .prepare(
-      `SELECT id, message_id, name, mime, size, kind, data
+      `SELECT id, message_id, name, mime, size, kind, data, r2_key
        FROM message_attachments
        WHERE owner_sub = ? AND message_id IN (${placeholders(messageIds.length)})
        ORDER BY message_id, position, created_at`,
@@ -184,9 +216,11 @@ export async function loadAttachmentsForMessages(
     .bind(owner, ...messageIds)
     .all<Row>()
   for (const row of rows.results) {
+    const attachment = await attachmentFromRow(row, bucket)
+    if (!attachment) continue
     const messageId = row.message_id as string
     const list = grouped.get(messageId) ?? []
-    list.push(attachmentFromRow(row))
+    list.push(attachment)
     grouped.set(messageId, list)
   }
   return grouped

@@ -226,6 +226,16 @@ export function correctDecisionPlan(question: string, plan: AgentPlanStep[]): Ag
 
 const SMALL_TALK = /^(?:(?:hi|hello|hey|yo|sup)(?: there)?|good (?:morning|afternoon|evening)|how are you(?: doing)?|how'?s it going|what'?s up|thanks(?: you)?|thank you|ok(?:ay)?|cool|nice|great|bye|goodbye|what can you do|who are you|help)[!.?…\s]*$/i
 const BUILD_REQUEST = /\b(?:build|make|create|design|code|develop|generate)\b[\s\S]{0,60}\b(?:page|site|website|web\s+page|web\s+app|game|tool|app|form|dashboard|landing\s+page|html|calculator|tracker|proxy|server|api|endpoint|script|extension|clone)\b/i
+/**
+ * A request that names the artifact first: "A page for a jazz club: four shows…".
+ *
+ * It has no verb, so BUILD_REQUEST missed it, and the route then treated the
+ * request as an edit of whatever page was saved from an earlier turn — the agent
+ * spent its first minute reading a bakery page it was not asked about. The
+ * preposition keeps this narrow: "the page is slow" is not a new page.
+ */
+const BUILD_ARTIFACT =
+  /^\s*(?:a|an|the|my)\b[\w\s'’-]{0,26}?\b(?:page|site|website|web\s*app|app|game|tool|dashboard)\s+(?:for|about|that|to|with|where|selling|showcasing)\b/i
 const CANVAS_REQUEST = /\b(?:flashcards?|quiz|practice questions|study set|memorize|memorise|revise|test me)\b/i
 
 // Tool words are normalized before intent checks so a typo does not silently
@@ -310,7 +320,21 @@ export function isSmallTalk(question: string): boolean {
 
 /** A request that clearly asks for a generated page, site, game, tool or app. */
 export function isBuildRequest(question: string): boolean {
-  return BUILD_REQUEST.test(normalizedQuestion(question))
+  const text = normalizedQuestion(question)
+  return BUILD_REQUEST.test(text) || BUILD_ARTIFACT.test(text)
+}
+
+/**
+ * A request that works on what already exists. BUILD_REQUEST is greedy — "make
+ * sure the page still links it" is not a new project — so this wins when the
+ * words name the current files, a file on disk, or an operation only an edit
+ * can do.
+ */
+const EDIT_REQUEST =
+  /\b(?:rename|instead of|replace|swap|move|extract|split|refactor|keep (?:it|the|that)|still (?:works?|links?|loads?|runs?)|existing|current (?:page|site|project|file|version)|this (?:page|site|project|file))\b|\b[\w-]+\.(?:html?|css|m?js|jsx|tsx?|json|svg)\b/i
+
+export function isEditRequest(question: string): boolean {
+  return EDIT_REQUEST.test(normalizedQuestion(question))
 }
 
 /** A request that clearly asks for flashcards or a quiz. */

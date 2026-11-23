@@ -2,6 +2,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS,
   MAX_DOCUMENT_SOURCE_BYTES,
+  MAX_GIF_BYTES,
   MAX_TEXT_ATTACHMENT_CHARS,
 } from '../../shared/config'
 import { isDocumentFile, normalizeDocumentText } from '../../shared/documents'
@@ -39,6 +40,7 @@ const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingm
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const IMAGE_SOURCE_BYTES = 20_000_000
 const MAX_IMAGE_DIMENSION = 1_600
+const MAX_THUMBNAIL_DIMENSION = 360
 
 const TEXT_EXTENSIONS = new Set([
   'txt', 'md', 'markdown', 'csv', 'json', 'js', 'jsx', 'ts', 'tsx', 'css', 'html', 'htm',
@@ -111,12 +113,29 @@ async function compressImage(file: File, name: string): Promise<AttachmentInput>
     if (!blob || blob.size > MAX_ATTACHMENT_BYTES) blob = await canvasBlob(canvas, 'image/jpeg', 0.86)
     if (!blob) throw new AttachmentError('Could not prepare that image.')
     if (blob.size > MAX_ATTACHMENT_BYTES) throw new AttachmentError('That image is still too large after resizing. Try a smaller screenshot.')
+
+    // A small preview loads with the transcript; the full image stays untouched
+    // for the lightbox and the original-file download.
+    const thumbScale = Math.min(1, MAX_THUMBNAIL_DIMENSION / Math.max(canvas.width, canvas.height))
+    const thumbCanvas = document.createElement('canvas')
+    thumbCanvas.width = Math.max(1, Math.round(canvas.width * thumbScale))
+    thumbCanvas.height = Math.max(1, Math.round(canvas.height * thumbScale))
+    const thumbContext = thumbCanvas.getContext('2d')
+    let thumbnail: string | undefined
+    if (thumbContext) {
+      thumbContext.drawImage(canvas, 0, 0, thumbCanvas.width, thumbCanvas.height)
+      let thumbBlob = await canvasBlob(thumbCanvas, 'image/webp', 0.72)
+      if (!thumbBlob) thumbBlob = await canvasBlob(thumbCanvas, 'image/jpeg', 0.72)
+      if (thumbBlob) thumbnail = await readAsDataUrl(thumbBlob)
+    }
+
     return {
       name,
       mime: blob.type || 'image/jpeg',
       size: blob.size,
       kind: 'image',
       data: await readAsDataUrl(blob),
+      ...(thumbnail ? { thumbnail } : {}),
     }
   } finally {
     bitmap.close()
@@ -209,6 +228,15 @@ export async function readAttachment(file: File): Promise<PendingAttachment> {
           : 'pasted-file.txt')
   if (file.type.startsWith('image/')) {
     if (!IMAGE_TYPES.has(mime)) throw new AttachmentError('Use a PNG, JPG, WebP or GIF image.')
+    if (mime === 'image/gif') {
+      // Resizing a GIF through a canvas keeps only its first frame, so the
+      // original bytes go through untouched and it keeps animating.
+      if (file.size > MAX_GIF_BYTES) {
+        throw new AttachmentError(`GIFs can be up to ${MAX_GIF_BYTES / 1_000_000} MB. Try a shorter or smaller GIF.`)
+      }
+      const data = await readAsDataUrl(file)
+      return { id: crypto.randomUUID(), name, mime, size: file.size, kind: 'image', data }
+    }
     if (file.size > IMAGE_SOURCE_BYTES) throw new AttachmentError('That image is too large. Try a screenshot under 20 MB.')
     const attachment = await compressImage(file, name)
     return { ...attachment, id: crypto.randomUUID() }
@@ -245,6 +273,7 @@ export function attachmentPreview(attachment: PendingAttachment): {
   size: number
   kind: AttachmentKind
   url?: string
+  thumbnailUrl?: string
 } {
   return {
     id: attachment.id,
@@ -252,8 +281,39 @@ export function attachmentPreview(attachment: PendingAttachment): {
     mime: attachment.mime,
     size: attachment.size,
     kind: attachment.kind,
-    ...(attachment.kind === 'image' ? { url: attachment.data } : {}),
+    ...(attachment.kind === 'image' ? { url: attachment.data, thumbnailUrl: attachment.thumbnail ?? attachment.data } : {}),
   }
+}
+
+/** A short, human-readable type label for attachment metadata. */
+export function attachmentTypeLabel(mime: string, name = ''): string {
+  const ext = extensionOf(name)
+  if (mime === 'text/uri-list') return 'Link'
+  if (mime.startsWith('image/')) return mime.slice('image/'.length).toUpperCase()
+  if ((ext === 'pdf' || ext === 'docx') && mime === 'text/plain') return `${ext.toUpperCase()} text`
+  if (mime === 'text/plain') {
+    const code: Record<string, string> = {
+      js: 'JavaScript', jsx: 'JavaScript', ts: 'TypeScript', tsx: 'TypeScript', py: 'Python',
+      go: 'Go', rs: 'Rust', java: 'Java', c: 'C', cpp: 'C++', h: 'C header', sh: 'Shell',
+      sql: 'SQL', yaml: 'YAML', yml: 'YAML', toml: 'TOML', ini: 'INI', log: 'Log',
+    }
+    if (code[ext]) return code[ext]!
+  }
+  const labels: Record<string, string> = {
+    'text/plain': 'Text',
+    'text/markdown': 'Markdown',
+    'text/csv': 'CSV',
+    'text/html': 'HTML',
+    'application/json': 'JSON',
+    'application/xml': 'XML',
+    'application/javascript': 'JavaScript',
+    'application/x-javascript': 'JavaScript',
+    'application/typescript': 'TypeScript',
+    'application/x-typescript': 'TypeScript',
+    'application/pdf': 'PDF',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
+  }
+  return labels[mime] ?? (ext ? ext.toUpperCase() : mime.split('/').pop()?.toUpperCase() || 'File')
 }
 
 export function formatFileSize(bytes: number): string {

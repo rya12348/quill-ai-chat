@@ -11,6 +11,9 @@
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- The live browser is streamed by the provider's own player; setting up
+         TLS while the viewer is still rendering is a frame the person waits for. -->
+    <link rel="preconnect" href="https://api.steel.dev" crossorigin />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />

@@ -1,9 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
+
+import { commandTarget } from '../../shared/sites'
 import { Bot, Brain, ClipboardList, Compass, Download, FileSpreadsheet, FileText, Folder, FolderX, Globe2, Hammer, Layers, Menu as MenuIcon, MessageCircle, Monitor, Search, Share2, ShieldCheck, Sparkles, type LucideIcon } from 'lucide-react'
 
-import { CHAT_REACTIONS, DEFAULT_MODEL, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, MAX_CONTEXT_MESSAGES, MODELS, SUGGESTIONS } from '../../shared/config'
+import { DEFAULT_MODEL, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, MAX_CONTEXT_MESSAGES, MODELS, SUGGESTIONS } from '../../shared/config'
 import { modelDisplayName } from '../../shared/model-display'
 import { estimateConversationTokens, estimateTokens } from '../../shared/tokens'
 import { suggestToolMode, type SuggestedToolMode } from '../../shared/agent'
@@ -16,7 +18,7 @@ import { Mark, useMobileNav } from '../components/Shell'
 import { ShareDialog } from '../components/ShareDialog'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { Button, Dialog, Menu, Spinner, useToast } from '../components/ui'
-import { ApiError, useConversation, useMe, useMessageFeedback, useModels, useProjects, useProviders, useReviewSummary, useSetConversationModel, useSetConversationProject, useSetConversationReaction } from '../lib/api'
+import { ApiError, useConversation, useMe, useMessageFeedback, useModels, useProjects, useProviders, useReviewSummary, useSetConversationModel, useSetConversationProject } from '../lib/api'
 import { cx } from '../lib/cx'
 import { untilLabel } from '../lib/format'
 import { resolvePresetModel, type ModelChoice, type ModelPreset } from '../lib/model-presets'
@@ -24,7 +26,7 @@ import { AttachmentError, clipboardFiles, readAttachment, type PendingAttachment
 import { briefFromConversation } from '../lib/buffy-brief'
 import { buildDataset, isDataFile, readDataFile } from '../lib/dataset'
 import { getDataset, putDataset } from '../lib/dataset-store'
-import { checkConnection } from '../lib/offline'
+import { checkConnection, useOffline } from '../lib/offline'
 import { draftKey, readDraft, takeLegacyPendingMessage, writeDraft } from '../lib/outbox'
 import { dismissTurn, refreshConversationTitle, settleAnalysis, startTurn, useTurn } from '../lib/turn'
 
@@ -122,10 +124,12 @@ export function Chat() {
   const { data: models } = useModels()
   const { data: health } = useProviders()
   const turn = useTurn()
+  const offline = useOffline()
   // While a reply is streaming, startTurn owns the cache. Once the chat is
-  // idle, poll the saved conversation so another tab or device appears without
-  // a manual browser reload.
-  const page = useConversation(id, { refetchInterval: turn ? false : 4_000 })
+  // idle, poll the saved conversation with an ETag so another tab or device
+  // appears without a manual browser reload. Pause the timer offline; the app's
+  // reconnect probe refreshes active queries when the server answers again.
+  const page = useConversation(id, { refetchInterval: 4_000, paused: Boolean(turn) || offline })
   const { data: projectData } = useProjects()
   const projects = projectData?.items ?? []
   const setConversationModel = useSetConversationModel()
@@ -464,6 +468,13 @@ export function Chat() {
       content = content.trim()
       const outgoing = attachments
       if (!content && !outgoing.length) return
+      // "show poki.com" asks Ink to open a site, so it never reaches a model.
+      // The address rides in router state: no site name in the URL or history.
+      const siteCommand = outgoing.length ? undefined : commandTarget(content)
+      if (siteCommand) {
+        navigate('/proxy', { state: { target: siteCommand } })
+        return
+      }
       if (analyzeOn && !outgoing[0]) {
         toast('Attach one CSV, TSV or XLSX file to use Analyze.', 'danger')
         return
@@ -545,6 +556,7 @@ export function Chat() {
                   size: attachment.size,
                   kind: attachment.kind,
                   data: attachment.data,
+                  ...(attachment.thumbnail ? { thumbnail: attachment.thumbnail } : {}),
                 })),
               }
             : {}),
@@ -775,11 +787,11 @@ export function Chat() {
           {
             id: 'deep',
             label: 'Deep',
-            description: 'Extra drafts and review when needed.',
+            description: 'Extra drafts and review on Max effort.',
             pressed: blend,
             onClick: toggleBlend,
             icon: Sparkles,
-            title: 'Extra drafts and a review for hard questions.',
+            title: 'Use Max effort for extra drafts and a review.',
           },
           ...(canAdvisor
             ? [{
@@ -1125,7 +1137,6 @@ export function Chat() {
                 items={projectItems}
               />
             )}
-            {conversation && <ChatReaction conversation={conversation} />}
             {conversation && (
               <button
                 type="button"
@@ -1369,52 +1380,6 @@ function modeNote(usage?: ModeUsage): string | undefined {
 
 function Notice({ children }: { children: React.ReactNode }) {
   return <p className="rounded-control bg-surface-2 px-4 py-3 text-center text-[14.5px] text-muted">{children}</p>
-}
-
-const CHAT_REACTION_NAMES: Record<string, string> = {
-  '❤️': 'Love',
-  '😂': 'Laugh',
-  '👍': 'Like',
-  '🔥': 'Fire',
-  '😮': 'Wow',
-  '🎉': 'Celebrate',
-}
-
-function ChatReaction({ conversation }: { conversation: Conversation }) {
-  const setReaction = useSetConversationReaction()
-  const toast = useToast()
-  const choose = (reaction: string) => {
-    setReaction.mutate(
-      { id: conversation.id, reaction: conversation.reaction === reaction ? null : reaction },
-      { onError: (error) => toast(error instanceof Error ? error.message : 'Could not save the reaction', 'danger') },
-    )
-  }
-  return (
-    <Menu
-      align="end"
-      trigger={
-        <button
-          type="button"
-          aria-label={conversation.reaction ? `Chat reaction: ${conversation.reaction}` : 'React to this chat'}
-          title={conversation.reaction ? 'Change or remove this chat reaction' : 'React to this chat'}
-          className="grid size-8 shrink-0 place-items-center rounded-tile text-faint transition-colors hover:bg-surface-2 hover:text-fg"
-        >
-          {conversation.reaction ? (
-            <span className="text-[15px] leading-none">{conversation.reaction}</span>
-          ) : (
-            <span className="text-[16px] leading-none" aria-hidden="true">☺</span>
-          )}
-        </button>
-      }
-      items={[
-        ...CHAT_REACTIONS.map((reaction) => ({
-          label: `${reaction}  ${CHAT_REACTION_NAMES[reaction]}${conversation.reaction === reaction ? ' ✓' : ''}`,
-          onSelect: () => choose(reaction),
-        })),
-        ...(conversation.reaction ? [{ label: 'Remove reaction', onSelect: () => choose(conversation.reaction!) }] : []),
-      ]}
-    />
-  )
 }
 
 function ChatHeader({

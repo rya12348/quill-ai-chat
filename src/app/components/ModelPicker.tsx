@@ -9,9 +9,9 @@ import { MODEL_PRESET_OPTIONS, type ModelChoice, type ModelPreset } from '../lib
 import { modelSpeed } from '../lib/model-speed'
 
 const EFFORT_OPTIONS: { value: ReasoningEffort; label: string; title: string }[] = [
-  { value: 'low', label: 'Low', title: 'Fastest: one strong model, minimal extra work' },
-  { value: 'default', label: 'Default', title: 'Balanced: plan and blend only when the task needs it' },
-  { value: 'max', label: 'Max', title: 'Full strength: deep plan, independent drafts and a final check' },
+  { value: 'low', label: 'Low', title: 'Fastest: shortest answer budget' },
+  { value: 'default', label: 'Default', title: 'Direct answer; models reason internally only when needed' },
+  { value: 'max', label: 'Max', title: 'Allow extended model reasoning; expect a slower reply' },
 ]
 
 /** A quiet pill naming the model; opens a compact list of models. */

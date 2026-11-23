@@ -5,7 +5,7 @@ import { privateJson } from '../auth'
 import { now } from '../db'
 import { RATE_WINDOWS, rateLimit, tooManyRequests } from '../rate-limit'
 import type { AppContext } from '../env'
-import { fetchSitePage, normalizeSiteUrl, SiteError, webProxyPath, webProxyToken } from '../site-proxy'
+import { normalizeSiteUrl, webProxyPath, webProxyToken } from '../site-proxy'
 
 export const proxy = new Hono<AppContext>()
 
@@ -31,22 +31,14 @@ proxy.post('/session', async (c) => {
   const requested = typeof body.url === 'string' ? body.url.slice(0, 2_000) : ''
   const target = normalizeSiteUrl(requested)
   if (!target) {
-    return privateJson(c, { error: 'invalid_url', message: 'Enter a Google search or Google page.' }, 400)
-  }
-  const host = new URL(target).hostname.replace(/^www\./i, '').toLowerCase()
-  if (host !== 'google.com') {
-    return privateJson(c, { error: 'google_only', message: 'This proxy is Google-only. Use the search box to search Google.' }, 400)
+    return privateJson(c, { error: 'invalid_url', message: 'Enter a website address.' }, 400)
   }
 
-  let page
-  try {
-    page = await fetchSitePage(target, c.req.raw.signal)
-  } catch (error) {
-    if (!(error instanceof SiteError)) console.error(error)
-    const failure = error instanceof SiteError ? error : new SiteError(502, 'That site could not be opened.')
-    const status = [400, 403, 407, 413, 415, 429, 451, 504].includes(failure.status) ? failure.status : 502
-    return privateJson(c, { error: 'site_unavailable', message: failure.message }, status)
-  }
+  // The capability route fetches the page when it is opened, so a session only
+  // records the address. Google gets its own title because /proxy opens on
+  // Google; every other site is named by its host.
+  const host = new URL(target).hostname.replace(/^www\./i, '').toLowerCase()
+  const page = { finalUrl: target, title: host === 'google.com' ? 'Google' : host }
 
   const db = c.get('db')
   const token = webProxyToken()

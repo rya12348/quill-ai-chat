@@ -7,7 +7,7 @@ import type { BrowserAction, BrowserActResponse, BrowserElement, BrowserInspectR
 import { AiError, aiConfigured, completeText, isModelId, type ChatMessage } from '../ai'
 import { MODELS, type ModelId } from '../../shared/config'
 import { privateJson } from '../auth'
-import { BrowserServiceError, closeTab, createContext, createSession, fillSheet, getLiveView, getSession, inspectPage, isBrowserConfigured, listActiveSessions, openTab, openUrl, performAction, prepareDocument, provider, readScreen, readState, readTabs, releaseSession, switchTab, writeDocument, type BrowserViewport } from '../browserbase'
+import { BrowserServiceError, closeTab, createContext, createSession, fillSheet, getLiveView, getSession, inspectPage, isBrowserConfigured, listActiveSessions, openTab, openUrl, performAction, prepareDocument, provider, readMeta, readScreen, readState, readTabs, releaseSession, steelWindow, switchTab, writeDocument, type BrowserViewport } from '../browserbase'
 import { repliesToday } from '../db'
 import { RATE_WINDOWS, rateLimit, tooManyRequests } from '../rate-limit'
 import { normalizeSiteUrl } from '../site-proxy'
@@ -53,6 +53,9 @@ const ALLOWED_MODIFIERS = new Set(['Alt', 'Ctrl', 'Meta', 'Shift'])
 // at most one browser of its own.
 const MAX_CONCURRENT_BROWSERS = 3
 const SESSION_TTL_MS = 65 * 60_000
+// The live page polls every thirty seconds while it is open, so a row untouched
+// for this long names a browser whose tab is gone.
+const ABANDONED_SESSION_MS = 10 * 60_000
 const SLOT_LEASE_MS = 2 * 60_000
 
 type SessionRow = { session_id: string }
@@ -1999,7 +2002,7 @@ async function activeSession(db: D1Database, env: Env, owner: string, fresh = fa
 /** A provider viewer URL is safe to embed only when it is HTTP(S) and does not
  * carry an API key. Browserbase and Hyperbrowser use signed viewer URLs;
  * Steel's debug URL is the documented iframe surface. */
-async function liveViewUrl(env: Env, sessionId: string): Promise<string | undefined> {
+export async function liveViewUrl(env: Env, sessionId: string): Promise<string | undefined> {
   try {
     const viewer = new URL((await getLiveView(env, sessionId)).debuggerFullscreenUrl)
     if (viewer.protocol !== 'http:' && viewer.protocol !== 'https:') return undefined
@@ -2063,6 +2066,34 @@ async function reconcileTrackedSessions(db: D1Database, env: Env): Promise<void>
 }
 
 /**
+ * Free a slot held by a browser nobody is watching.
+ *
+ * Closing a tab, or opening Ink on another device, used to leave its remote
+ * browser running for the provider's whole idle window while still counting
+ * against Ink's cap, which is how every start ended up refused. A watched
+ * browser keeps its row fresh, so only abandoned ones are released here.
+ */
+async function releaseAbandonedSessions(db: D1Database, env: Env): Promise<void> {
+  const rows = await db
+    .prepare('SELECT owner_sub, session_id FROM browser_sessions WHERE updated_at < ?')
+    .bind(Date.now() - ABANDONED_SESSION_MS)
+    .all<SessionRecord>()
+  if (!rows.results?.length) return
+  await Promise.all(
+    rows.results.map(async (row) => {
+      try {
+        await releaseSession(env, row.session_id)
+      } catch {
+        // The provider may have ended it already; the row still goes.
+      }
+      await clearSession(db, row.owner_sub).catch(() => undefined)
+    }),
+  )
+  // Stopping is asynchronous; give the provider a moment to free the slot.
+  await wait(1_500)
+}
+
+/**
  * Reserve one of the finite browser slots before calling the provider. The
  * INSERT ... SELECT is one atomic D1 write, so two simultaneous starts cannot
  * both slip past the total limit. A lease expires quickly if a Worker dies.
@@ -2106,7 +2137,7 @@ async function releaseSessionSlot(db: D1Database, owner: string, token: string):
     .run()
 }
 
-async function startSession(db: D1Database, env: Env, owner: string, viewport?: BrowserViewport) {
+export async function startSession(db: D1Database, env: Env, owner: string, viewport?: BrowserViewport) {
   const row = await sessionRow(db, owner)
   if (row) {
     try {
@@ -2127,7 +2158,25 @@ async function startSession(db: D1Database, env: Env, owner: string, viewport?: 
     await clearSession(db, owner)
   }
 
-  const slot = await acquireSessionSlot(db, owner)
+  // A row outlives the browser it names: the provider ends an idle session
+  // after about fifteen minutes while the row is kept for an hour. Counting
+  // those rows is right for the cap, but refusing on them is not, so a full
+  // house is first checked against the provider and the dead browsers' rows
+  // are dropped. Only then can the person be told the slots are really busy.
+  let slot: string
+  try {
+    slot = await acquireSessionSlot(db, owner)
+  } catch (error) {
+    if (!(error instanceof BrowserServiceError) || error.code !== 'browser_capacity') throw error
+    await reconcileTrackedSessions(db, env)
+    try {
+      slot = await acquireSessionSlot(db, owner)
+    } catch (retry) {
+      if (!(retry instanceof BrowserServiceError) || retry.code !== 'browser_capacity') throw retry
+      await releaseAbandonedSessions(db, env)
+      slot = await acquireSessionSlot(db, owner)
+    }
+  }
   try {
     await reconcileTrackedSessions(db, env)
     const contextId = await contextFor(db, env, owner)
@@ -2206,9 +2255,30 @@ browser.get('/session', async (c) => {
     // Keep-alive checks the provider directly so an ended browser is noticed
     // even if an action used the short status cache a moment earlier.
     const active = await activeSession(c.get('db'), c.env, owner, true)
-    const state = await readState(c.env, active.sessionId)
+    // This poll is also the proof that someone is still watching: it stamps the
+    // row so a browser left open somewhere else can be reclaimed for a slot.
+    await c
+      .get('db')
+      .prepare('UPDATE browser_sessions SET updated_at = ? WHERE owner_sub = ? AND updated_at < ?')
+      .bind(Date.now(), owner, Date.now() - 90_000)
+      .run()
+      .catch(() => undefined)
     const liveUrl = await liveViewUrl(c.env, active.sessionId)
-    return privateJson(c, { ...active, ...(liveUrl ? { liveUrl } : {}), state })
+    // A keep-alive poll only needs the session to stay warm and the viewer
+    // address to stay current. Reading the page snapshot here forced a CDP
+    // round trip through the remote browser every thirty seconds, which the
+    // person watching the stream felt as a periodic freeze.
+    if (c.req.query('light') === '1') {
+      return privateJson(c, { ...active, ...(liveUrl ? { liveUrl } : {}) })
+    }
+    // Steel draws the page inside its own player, so attaching only needs the
+    // address and title. A full DOM snapshot here was the slowest part of
+    // opening the viewer and its text was thrown away.
+    const state = provider(c.env) === 'steel' ? await readMeta(c.env, active.sessionId) : await readState(c.env, active.sessionId)
+    // The stream is the whole window (Steel draws Chrome's chrome), so the pane
+    // keeps the window's shape, not the page's.
+    const frame = provider(c.env) === 'steel' ? steelWindow(state.snapshot?.viewport) : undefined
+    return privateJson(c, { ...active, ...(liveUrl ? { liveUrl } : {}), ...(frame ? { window: frame } : {}), state })
   } catch (error) {
     if (error instanceof BrowserServiceError && error.code === 'no_session') {
       return privateJson(c, { error: error.code, message: error.message }, 404)
@@ -2235,7 +2305,8 @@ browser.post('/session', async (c) => {
     const active = await startSession(db, c.env, owner, viewport)
     const state = requested ? await openUrl(c.env, active.sessionId, requested) : await readState(c.env, active.sessionId)
     const liveUrl = await liveViewUrl(c.env, active.sessionId)
-    return privateJson(c, { ...active, ...(liveUrl ? { liveUrl } : {}), state })
+    const frame = provider(c.env) === 'steel' ? steelWindow(viewport ?? state.snapshot?.viewport) : undefined
+    return privateJson(c, { ...active, ...(liveUrl ? { liveUrl } : {}), ...(frame ? { window: frame } : {}), state })
   } catch (error) {
     return errorResponse(c, error)
   }
@@ -2259,6 +2330,11 @@ browser.post('/state', async (c) => {
   const owner = c.get('user').sub
   try {
     const active = await activeSession(c.get('db'), c.env, owner)
+    // ?light=1 is the viewer following its own address bar: the page is already
+    // on screen, and a snapshot per click only delayed the address.
+    if (c.req.query('light') === '1' && provider(c.env) === 'steel') {
+      return privateJson(c, await readMeta(c.env, active.sessionId))
+    }
     return privateJson(c, await readState(c.env, active.sessionId))
   } catch (error) {
     return errorResponse(c, error)

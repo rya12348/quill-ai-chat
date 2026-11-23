@@ -40,6 +40,16 @@ test('ordinary Buffy questions use the fast lane and keep the Buffy label', () =
   assert.equal(route.fast, true)
   assert.equal(route.fullAgent, false)
   assert.equal(route.model, 'buffy')
+
+  const hosted = routeBuffyChat({
+    usingApi: false,
+    requestedModel: 'buffy-lite',
+    content: 'What is the capital of France?',
+  })
+  assert.equal(hosted.local, false)
+  assert.equal(hosted.fast, true)
+  assert.equal(hosted.fullAgent, false)
+  assert.equal(hosted.model, 'buffy-lite')
 })
 
 test('explicit tool requests still use the full Buffy agent', () => {

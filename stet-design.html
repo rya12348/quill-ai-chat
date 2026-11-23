@@ -1,0 +1,1085 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>Stet — design preview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --art: url("data:image/png;base64,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");
+      --bg: #f4efe4;
+      --surface: #fdfaf3;
+      --surface-2: #ece5d7;
+      --raised: #e1d7c5;
+      --line: #e4dccd;
+      --line-strong: #cdc1ae;
+      --fg: #211d18;
+      --muted: #6a6256;
+      --faint: #998f80;
+      --accent: #c2571b;
+      --accent-soft: #f6e4d4;
+      --success: #1f8a5b;
+      --danger: #c93f2e;
+      --radius-control: 10px;
+      --radius-card: 16px;
+      --radius-dialog: 20px;
+      --radius-tile: 8px;
+      --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+      --font-display: "Newsreader", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --shadow-card: 0 1px 2px rgb(27 26 23 / .04), 0 0 0 1px rgb(27 26 23 / .05);
+      --shadow-pop: 0 0 0 1px rgb(27 26 23 / .06), 0 12px 40px -12px rgb(27 26 23 / .25);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--bg); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--fg);
+      background: var(--bg);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    button, input, textarea, select { font: inherit; color: inherit; }
+    button { border: 0; padding: 0; background: none; cursor: pointer; }
+    a { color: inherit; text-decoration: none; }
+    img, svg { display: block; }
+    ::selection { background: var(--accent-soft); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    [hidden] { display: none !important; }
+
+    .icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+    .icon-sm { width: 14px; height: 14px; }
+    .icon-lg { width: 20px; height: 20px; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+
+    /* ---------- Artwork ---------- */
+    .horizon {
+      background-image: var(--art);
+      background-repeat: no-repeat;
+      background-size: 100% auto;
+      background-position: top center;
+      aspect-ratio: 272 / 92;
+      width: 100%;
+      user-select: none;
+    }
+    .art-full {
+      background-image: var(--art);
+      background-repeat: no-repeat;
+      background-size: contain;
+      background-position: center;
+      aspect-ratio: 272 / 160;
+      width: 272px;
+      max-width: 100%;
+    }
+
+    /* ---------- App shell ---------- */
+    .app { display: flex; height: 100dvh; overflow: hidden; background: var(--bg); }
+    .sidebar {
+      width: 264px; flex: 0 0 264px; display: flex; flex-direction: column;
+      min-height: 0; background: var(--bg); border-right: 1px solid var(--line);
+    }
+    .side-head { height: 56px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; font-family: var(--font-display); font-size: 19px; font-weight: 600; letter-spacing: -.02em; }
+    .mark {
+      width: 28px; height: 28px; flex: none; display: grid; place-items: center;
+      border-radius: 9px; color: var(--bg); background: var(--fg);
+    }
+    .mark svg { width: 17px; height: 17px; fill: currentColor; }
+    .mark.small { width: 22px; height: 22px; border-radius: 7px; }
+    .mark.small svg { width: 13px; height: 13px; }
+    .icon-button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius-tile); color: var(--faint); transition: color .15s, background-color .15s; }
+    .icon-button:hover { color: var(--fg); background: var(--surface); }
+    .side-close, .menu-button { display: none; }
+
+    .side-nav { padding: 0 12px; flex: none; }
+    .nav-item {
+      width: 100%; height: 36px; display: flex; align-items: center; gap: 8px;
+      margin-top: 2px; padding: 0 12px; border-radius: var(--radius-control);
+      color: var(--muted); font-size: 13.5px; font-weight: 500; text-align: left;
+      transition: color .15s, background-color .15s, box-shadow .15s;
+    }
+    .nav-item:first-child { margin-top: 0; }
+    .nav-item:hover { color: var(--fg); background: var(--surface); }
+    .nav-item.is-active { color: var(--fg); background: var(--surface); box-shadow: var(--shadow-card); }
+    .nav-item .icon { width: 16px; height: 16px; color: var(--faint); }
+    .nav-item.is-active .icon { color: var(--fg); }
+
+    .searchbox { position: relative; display: block; margin: 10px 12px 0; }
+    .searchbox .icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--faint); pointer-events: none; }
+    .searchbox input {
+      width: 100%; height: 32px; border: 1px solid var(--line); border-radius: var(--radius-control);
+      background: var(--surface); padding: 0 10px 0 32px; font-size: 13px; color: var(--fg);
+    }
+    .searchbox input::placeholder { color: var(--faint); }
+    .searchbox input:focus { outline: none; border-color: var(--line-strong); }
+
+    .projects { padding: 14px 12px 0; flex: none; }
+    .project-head { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 6px; color: var(--faint); font-size: 11.5px; font-weight: 500; }
+    .project-head button { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--faint); }
+    .project-head button:hover { background: var(--surface); color: var(--fg); }
+    .project-row {
+      width: 100%; height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 8px;
+      border-radius: var(--radius-control); color: var(--fg); font-size: 13px; font-weight: 500;
+      background: var(--surface); box-shadow: var(--shadow-card);
+    }
+    .project-row .icon { width: 14px; height: 14px; color: var(--muted); }
+    .project-row span { margin-left: auto; color: var(--faint); font-size: 11.5px; font-weight: 400; }
+    .hint { margin: 8px 4px 0; color: var(--faint); font-size: 11.5px; line-height: 1.4; }
+
+    .chat-list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px 10px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+    .chat-group-title { margin: 12px 4px 4px; color: var(--faint); font-size: 11.5px; font-weight: 500; }
+    .chat-row {
+      width: 100%; height: 32px; display: flex; align-items: center; gap: 8px;
+      padding: 0 10px; border-radius: var(--radius-control); color: var(--muted);
+      font-size: 13px; text-align: left; white-space: nowrap; overflow: hidden;
+      text-overflow: ellipsis; transition: background-color .15s, color .15s;
+    }
+    .chat-row:hover { background: var(--surface); color: var(--fg); }
+    .chat-row span { overflow: hidden; text-overflow: ellipsis; }
+
+    .sidebar-foot { flex: none; border-top: 1px solid var(--line); padding: 12px; }
+    .side-art { margin-bottom: 12px; }
+    .account {
+      width: 100%; min-height: 44px; display: flex; align-items: center; gap: 10px;
+      padding: 6px 8px; border-radius: var(--radius-control); text-align: left; transition: background-color .15s;
+    }
+    .account:hover { background: var(--surface); }
+    .avatar {
+      width: 28px; height: 28px; flex: none; display: grid; place-items: center;
+      border-radius: 50%; background: var(--raised); color: var(--fg);
+      font-size: 10px; font-weight: 600; letter-spacing: .02em;
+    }
+    .account-copy { min-width: 0; flex: 1; }
+    .account-copy strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 500; }
+    .account-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 11.5px; }
+    .account > .icon { width: 15px; height: 15px; color: var(--faint); }
+
+    .main { min-width: 0; flex: 1; display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+    .mobilebar { display: none; height: 48px; flex: none; align-items: center; gap: 8px; padding: 0 12px; }
+    .mobilebar .brand { font-size: 17px; }
+    .mobilebar .icon-button { margin-left: auto; }
+    .view { flex: 1; min-height: 0; overflow-y: auto; }
+
+    /* ---------- Home ---------- */
+    .view-home { display: flex; flex-direction: column; overflow: hidden; }
+    .chatbar { height: 56px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; }
+    .chatbar > span:first-child { font-family: var(--font-display); font-size: 17px; font-weight: 600; letter-spacing: -.02em; }
+    .model-pill { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 11.5px; font-weight: 500; }
+    .model-pill .mark { width: 16px; height: 16px; border-radius: 5px; }
+    .model-pill .mark svg { width: 10px; height: 10px; }
+    .model-pill .icon { width: 12px; height: 12px; color: var(--faint); }
+    .home-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; padding: 24px 32px 42px; }
+    .home-inner { width: 100%; max-width: 1040px; margin: auto; padding-bottom: 8px; }
+    .welcome-art { width: 176px; margin-bottom: 16px; }
+    .welcome h1 { margin: 0; font-family: var(--font-display); font-size: 46px; font-weight: 500; line-height: 1.05; letter-spacing: -.03em; text-wrap: balance; }
+    .welcome p { max-width: 490px; margin: 8px 0 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
+    .composer {
+      margin-top: 20px; overflow: hidden; border: 1px solid var(--line);
+      border-radius: var(--radius-card); background: var(--surface);
+      box-shadow: 0 1px 2px rgb(27 26 23 / .05), 0 8px 32px -12px rgb(27 26 23 / .18), 0 0 0 1px rgb(27 26 23 / .06);
+    }
+    .composer:focus-within { border-color: var(--line-strong); }
+    .composer textarea {
+      display: block; width: 100%; min-height: 58px; resize: none; border: 0; outline: 0;
+      background: transparent; padding: 14px 15px 4px; color: var(--fg); font-size: 14px; line-height: 1.55;
+    }
+    .composer textarea::placeholder { color: var(--faint); }
+    .composer-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 8px 10px; }
+    .tools { display: flex; align-items: center; gap: 4px; }
+    .tool-button { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-tile); color: var(--faint); transition: color .15s, background-color .15s; }
+    .tool-button:hover { color: var(--fg); background: var(--surface-2); }
+    .mode-pill { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; border-radius: var(--radius-tile); color: var(--muted); font-size: 11.5px; font-weight: 500; }
+    .mode-pill:hover { background: var(--surface-2); color: var(--fg); }
+    .mode-pill .icon { width: 12px; height: 12px; color: var(--faint); }
+    .send-group { display: flex; align-items: center; gap: 8px; }
+    .auto-label { color: var(--faint); font-size: 11px; }
+    .send-button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius-tile); background: var(--fg); color: var(--bg); transition: opacity .15s; }
+    .send-button:hover { opacity: .86; }
+    .send-button .icon { width: 15px; height: 15px; }
+    .suggestions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 20px; }
+    .suggestion {
+      min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+      border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface);
+      color: var(--muted); font-size: 12.5px; line-height: 1.4; text-align: left;
+      box-shadow: 0 1px 1px rgb(27 26 23 / .03); transition: border-color .15s, background-color .15s, color .15s;
+    }
+    .suggestion:hover { border-color: var(--line-strong); background: var(--surface-2); color: var(--fg); }
+    .suggestion-icon { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: var(--radius-tile); background: var(--surface-2); color: var(--faint); }
+    .suggestion-icon .icon { width: 14px; height: 14px; }
+    .suggestion span:last-child { min-width: 0; }
+    .task-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin-top: 14px; }
+    .task-pill { height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 11.5px; font-weight: 500; transition: color .15s, border-color .15s, background-color .15s; }
+    .task-pill:hover { border-color: var(--line-strong); color: var(--fg); }
+    .task-pill.is-active { border-color: var(--fg); background: var(--fg); color: var(--bg); }
+    .task-pill .icon { width: 13px; height: 13px; }
+
+    /* ---------- Shared page headings ---------- */
+    .kicker { display: inline-flex; align-items: center; gap: 8px; margin: 0; color: var(--accent); font-size: 10.5px; font-weight: 600; letter-spacing: .14em; line-height: 1; text-transform: uppercase; }
+    .kicker::before { content: ""; width: 22px; height: 1px; background: currentColor; }
+    .page-h1 { margin: 4px 0 0; font-family: var(--font-display); font-size: 34px; font-weight: 500; line-height: 1.1; letter-spacing: -.03em; }
+    .page-sub { max-width: 500px; margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+    .page-wrap { width: 100%; max-width: 920px; margin: 0 auto; padding: 36px 24px 56px; }
+    .page-wrap.narrow { max-width: 664px; }
+
+    .surface-card { border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-card); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 34px; padding: 0 12px; border-radius: var(--radius-tile); font-size: 12px; font-weight: 500; transition: opacity .15s, background-color .15s, border-color .15s, color .15s; }
+    .btn:hover { opacity: .88; }
+    .btn:disabled { opacity: .35; cursor: not-allowed; }
+    .btn-dark { background: var(--fg); color: var(--bg); }
+    .btn-outline { border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg); }
+    .btn-outline:hover { background: var(--surface-2); }
+    .btn .icon { width: 13px; height: 13px; }
+
+    /* ---------- Library ---------- */
+    .pdf-row, .review-row {
+      width: 100%; min-height: 58px; display: flex; align-items: center; gap: 12px;
+      margin-top: 20px; padding: 10px 16px; border: 1px solid var(--line);
+      border-radius: var(--radius-card); background: var(--surface); text-align: left;
+      box-shadow: 0 1px 1px rgb(27 26 23 / .03); transition: border-color .15s, background-color .15s;
+    }
+    .pdf-row:hover, .review-row:hover { border-color: var(--line-strong); background: #fbf7ee; }
+    .feature-icon { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: var(--radius-tile); background: var(--fg); color: var(--bg); }
+    .feature-icon.accent { background: var(--accent-soft); color: var(--accent); }
+    .feature-copy { min-width: 0; flex: 1; }
+    .feature-copy strong { display: block; font-size: 12.5px; font-weight: 500; }
+    .feature-copy small { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+    .row-link { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--muted); font-size: 11.5px; font-weight: 500; }
+    .row-link .icon { width: 13px; height: 13px; }
+    .empty-library { margin-top: 24px; padding: 44px 20px 38px; border: 1px dashed var(--line-strong); border-radius: var(--radius-card); background: rgb(253 250 243 / .55); text-align: center; }
+    .empty-library .horizon { width: 160px; margin: 0 auto; }
+    .empty-library h2 { margin: 12px 0 0; font-size: 14px; font-weight: 500; }
+    .empty-library p { max-width: 360px; margin: 4px auto 0; color: var(--muted); font-size: 12.5px; line-height: 1.65; }
+    .empty-library .btn { margin-top: 16px; }
+
+    /* ---------- Settings ---------- */
+    .settings-section { margin-top: 30px; }
+    .settings-section > h2 { margin: 0; font-size: 13.5px; font-weight: 600; }
+    .settings-section > .surface-card { margin-top: 10px; }
+    .account-card { display: flex; align-items: center; gap: 14px; padding: 16px; }
+    .account-card .avatar { width: 44px; height: 44px; font-size: 14px; }
+    .account-card-copy { min-width: 0; flex: 1; }
+    .account-card-copy strong { display: block; font-size: 15px; font-weight: 500; }
+    .account-card-copy small { display: block; color: var(--muted); font-size: 13px; }
+    .badge { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-size: 10.5px; font-weight: 500; }
+    .instruction-card { padding: 16px; }
+    .instruction-card label { display: block; font-size: 13.5px; font-weight: 500; }
+    .instruction-card > p { margin: 4px 0 0; color: var(--faint); font-size: 12.5px; line-height: 1.55; }
+    .instruction-card textarea {
+      display: block; width: 100%; min-height: 104px; margin-top: 12px; resize: vertical;
+      border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--bg);
+      padding: 10px 12px; color: var(--fg); font-size: 13.5px; line-height: 1.55;
+    }
+    .instruction-card textarea::placeholder { color: var(--faint); }
+    .instruction-card textarea:focus { outline: none; border-color: var(--faint); box-shadow: 0 0 0 3px rgb(33 29 24 / .08); }
+    .instruction-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+    .instruction-foot span { color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+    .shortcut-card { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px; }
+    .shortcut-card strong { display: block; font-size: 13.5px; font-weight: 500; }
+    .shortcut-card p { margin: 4px 0 0; color: var(--faint); font-size: 12.5px; line-height: 1.55; }
+    .shortcut-card kbd { border: 1px solid var(--line); border-radius: 4px; background: var(--surface-2); padding: 1px 5px; font-family: var(--font-mono); font-size: 11px; }
+    .usage-card { padding: 16px; }
+    .usage-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .usage-head strong { font-size: 15px; font-weight: 500; }
+    .usage-head span { color: var(--faint); font-size: 12px; }
+    .usage-bar { height: 6px; margin-top: 12px; overflow: hidden; border-radius: 3px; background: var(--surface-2); }
+    .usage-bar span { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--fg); }
+    .signin-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 32px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; }
+    .screen-card { margin-top: 24px; padding: 32px 24px; text-align: center; }
+    .screen-card .feature-icon { width: 38px; height: 38px; margin: 0 auto; }
+    .screen-card h2 { margin: 14px 0 0; font-family: var(--font-display); font-size: 25px; font-weight: 500; letter-spacing: -.025em; }
+    .screen-card p { max-width: 380px; margin: 6px auto 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+    .screen-card .btn { margin-top: 18px; }
+    .text-link { display: inline-flex; align-items: center; gap: 4px; color: var(--fg); font-size: 12px; font-weight: 500; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+    .text-link:hover { color: var(--accent); }
+
+    /* ---------- Browser ---------- */
+    .view-browser { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+    body.browser-open .sidebar { display: none; }
+    body.browser-open .mobilebar { display: none; }
+    body.browser-open .main { width: 100%; }
+    .browser-topbar { min-height: 56px; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 14px; border-bottom: 1px solid var(--line); }
+    .browser-back { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: var(--radius-tile); color: var(--muted); font-size: 12px; font-weight: 500; }
+    .browser-back:hover { background: var(--surface-2); color: var(--fg); }
+    .browser-brand { display: none; align-items: center; gap: 8px; color: var(--fg); font-family: var(--font-display); font-size: 15px; font-weight: 600; }
+    .urlbar { flex: 1; min-width: 160px; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-tile); background: var(--surface); }
+    .urlbar .icon { width: 14px; height: 14px; color: var(--faint); }
+    .urlbar input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--fg); font-size: 12.5px; }
+    .urlbar button { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; color: var(--muted); }
+    .urlbar button:hover { background: var(--surface-2); color: var(--fg); }
+    .status-pill { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 10px; font-weight: 500; }
+    .browser-layout { display: flex; flex: 1; min-height: 0; }
+    .browser-stage { flex: 1; min-width: 0; min-height: 0; display: flex; padding: 12px; background: var(--surface-2); }
+    .browser-window { display: flex; flex: 1; min-width: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-card); }
+    .window-chrome { height: 36px; flex: none; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); background: #f8f3e9; padding: 0 12px; }
+    .window-dots { display: flex; align-items: center; gap: 4px; }
+    .window-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
+    .chrome-divider { width: 1px; height: 16px; background: var(--line); }
+    .window-tab { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 10px; border: 1px solid var(--line); border-bottom-color: var(--surface); border-radius: 7px 7px 0 0; background: var(--surface); color: var(--muted); font-size: 10.5px; }
+    .window-tab .icon { width: 12px; height: 12px; }
+    .window-live { margin-left: auto; color: var(--faint); font-size: 9.5px; }
+    .browser-hero { flex: 1; min-height: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 32px; padding: 38px 40px 32px; overflow-y: auto; }
+    .browser-copy { max-width: 496px; }
+    .browser-copy h1 { margin: 8px 0 0; font-family: var(--font-display); font-size: 34px; font-weight: 500; line-height: 1.08; letter-spacing: -.03em; }
+    .browser-copy > p:not(.kicker) { max-width: 390px; margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+    .browser-start { margin-top: 20px; }
+    .browser-features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--line); }
+    .browser-features strong { display: block; font-size: 11.5px; font-weight: 500; }
+    .browser-features span { display: block; margin-top: 3px; color: var(--faint); font-size: 10.5px; line-height: 1.4; }
+    .browser-art { flex: none; width: 272px; }
+    .window-footer { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); background: #faf6ed; padding: 6px 12px; color: var(--faint); font-size: 10px; }
+
+    .browser-rail { width: 370px; flex: 0 0 370px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--bg); }
+    .rail-task { flex: none; border-bottom: 1px solid var(--line); padding: 14px 16px; }
+    .rail-task-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .rail-task h2 { margin: 0; font-family: var(--font-display); font-size: 17px; font-weight: 600; letter-spacing: -.02em; }
+    .rail-task p { margin: 2px 0 0; color: var(--faint); font-size: 10.5px; line-height: 1.45; }
+    .rail-task textarea { display: block; width: 100%; min-height: 82px; margin-top: 12px; resize: none; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 12px; color: var(--fg); font-size: 12.5px; line-height: 1.45; }
+    .rail-task textarea::placeholder { color: var(--faint); }
+    .rail-task textarea:focus { outline: none; border-color: var(--line-strong); }
+    .rail-run { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .rail-run span { color: var(--faint); font-size: 10.5px; }
+    .rail-run .btn { height: 30px; font-size: 11.5px; }
+    .inspect-row { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11.5px; font-weight: 500; }
+    .inspect-row span:first-child { display: inline-flex; align-items: center; gap: 6px; }
+    .inspect-row .icon { width: 13px; height: 13px; color: var(--accent); }
+    .inspect-row span:last-child { color: var(--faint); font-size: 9.5px; font-weight: 400; }
+    .activity-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+    .activity-head .kicker { font-size: 10px; }
+    .activity-head > span:last-child { color: var(--faint); font-size: 10px; }
+    .activity-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px 16px; text-align: center; }
+    .activity-empty .icon { width: 20px; height: 20px; color: var(--faint); }
+    .activity-empty p { max-width: 240px; margin: 10px 0 0; color: var(--faint); font-size: 11.5px; line-height: 1.55; }
+    .rail-foot { flex: none; border-top: 1px solid var(--line); padding: 10px 16px; color: var(--faint); font-size: 10px; line-height: 1.5; }
+
+    /* ---------- Sign in ---------- */
+    .auth-page { min-height: 100dvh; background: var(--bg); }
+    .auth-header { width: 100%; max-width: 1040px; height: 64px; margin: 0 auto; display: flex; align-items: center; padding: 0 32px; }
+    .auth-back { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--faint); font-size: 11.5px; }
+    .auth-back:hover { color: var(--fg); }
+    .auth-back .icon { width: 13px; height: 13px; }
+    .auth-grid { width: 100%; max-width: 1040px; min-height: calc(100dvh - 64px); margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .9fr); align-items: center; gap: 48px; padding: 24px 32px 64px; }
+    .auth-copy { width: 100%; max-width: 420px; }
+    .auth-copy .horizon { width: 196px; margin-bottom: 20px; }
+    .auth-copy h1 { margin: 8px 0 0; font-family: var(--font-display); font-size: 58px; font-weight: 500; line-height: 1.02; letter-spacing: -.03em; text-wrap: balance; }
+    .auth-copy > p:not(.kicker) { margin: 16px 0 0; color: var(--muted); font-size: 16px; line-height: 1.6; }
+    .auth-card { margin-top: 28px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-card); }
+    .auth-card label { display: block; color: var(--muted); font-size: 11.5px; font-weight: 500; }
+    .auth-card input { display: block; width: 100%; height: 40px; margin-top: 6px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--bg); color: var(--fg); font-size: 13.5px; outline: none; }
+    .auth-card input + label { margin-top: 12px; }
+    .auth-card input::placeholder { color: var(--faint); }
+    .auth-card input:focus { border-color: var(--faint); box-shadow: 0 0 0 3px rgb(33 29 24 / .08); }
+    .auth-submit { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 44px; margin-top: 16px; border-radius: var(--radius-control); background: var(--fg); color: var(--bg); font-size: 13.5px; font-weight: 500; transition: opacity .15s; }
+    .auth-submit:hover { opacity: .9; }
+    .auth-submit:disabled { opacity: .35; cursor: not-allowed; }
+    .auth-small { margin: 12px 0 0; color: var(--faint); font-size: 12px; text-align: center; }
+    .auth-small button { font-weight: 500; color: var(--fg); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 2px; }
+    .auth-small button:hover { color: var(--accent); }
+    .or-row { display: flex; align-items: center; gap: 12px; margin-top: 24px; color: var(--faint); font-size: 12px; }
+    .or-row span { flex: 1; height: 1px; background: var(--line); }
+    .guest-button { display: inline-flex; align-items: center; gap: 8px; height: 44px; margin-top: 16px; padding: 0 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface); color: var(--fg); font-size: 13.5px; font-weight: 500; transition: background-color .15s; }
+    .guest-button:hover { background: var(--surface-2); }
+    .guest-note { margin: 12px 0 0; color: var(--faint); font-size: 13px; }
+    .auth-chat { max-width: 440px; justify-self: end; padding: 28px; border-radius: var(--radius-dialog); background: var(--surface); box-shadow: var(--shadow-pop); }
+    .auth-bubble { width: fit-content; max-width: 80%; margin-left: auto; padding: 10px 16px; border-radius: 18px 18px 8px 18px; background: var(--surface-2); font-size: 14.5px; line-height: 1.5; }
+    .auth-answer { display: flex; gap: 14px; margin-top: 24px; }
+    .auth-answer .mark { margin-top: 2px; border-radius: 8px; }
+    .auth-answer-copy { color: var(--fg); font-size: 14.5px; line-height: 1.6; }
+    .auth-answer-copy p { margin: 0; }
+    .auth-answer-copy ol { margin: 10px 0 0; padding-left: 22px; }
+    .auth-answer-copy li { margin-top: 6px; padding-left: 3px; }
+    .auth-answer-copy li::marker { color: var(--accent); }
+
+    .scrim { display: none; }
+
+    @media (max-width: 1120px) {
+      .browser-layout { flex-direction: column; overflow-y: auto; }
+      .browser-stage { min-height: 540px; }
+      .browser-window { min-height: 516px; }
+      .browser-rail { width: 100%; flex: none; border-left: 0; border-top: 1px solid var(--line); }
+      .activity-empty { min-height: 170px; }
+    }
+
+    @media (max-width: 900px) {
+      .app { display: block; height: 100dvh; }
+      .sidebar {
+        position: fixed; z-index: 30; inset: 0 auto 0 0; width: 284px;
+        transform: translateX(-102%); transition: transform .22s cubic-bezier(.22, 1, .36, 1);
+        box-shadow: var(--shadow-pop);
+      }
+      body.nav-open .sidebar { transform: translateX(0); }
+      .side-close, .menu-button { display: grid; }
+      .scrim { position: fixed; z-index: 20; inset: 0; background: rgb(23 20 16 / .35); }
+      body.nav-open .scrim { display: block; }
+      .main { height: 100dvh; }
+      .mobilebar { display: flex; }
+      .chatbar { height: 48px; padding: 0 18px; }
+      .chatbar > span:first-child { font-size: 16px; }
+      .home-scroll { padding: 20px 18px 34px; }
+      .home-inner { margin: 0 auto; }
+      .welcome { text-align: center; }
+      .welcome-art { margin-left: auto; margin-right: auto; }
+      .welcome h1 { font-size: 38px; }
+      .welcome p { margin-left: auto; margin-right: auto; }
+      .suggestions { grid-template-columns: 1fr; }
+      .task-row { justify-content: flex-start; }
+      .page-wrap { padding: 28px 18px 44px; }
+      .browser-topbar { padding: 8px 10px; }
+      .browser-brand { display: none; }
+      .browser-stage { padding: 8px; }
+      .browser-hero { flex-direction: column; gap: 24px; padding: 26px 22px; }
+      .browser-art { order: -1; width: 248px; align-self: flex-start; }
+      .browser-copy h1 { font-size: 30px; }
+      .browser-features { grid-template-columns: 1fr; gap: 12px; }
+      .window-live { display: none; }
+      .auth-grid { display: block; padding: 18px 20px 48px; }
+      .auth-copy { max-width: 440px; margin: 0 auto; }
+      .auth-copy h1 { font-size: 44px; }
+      .auth-chat { display: none; }
+      .auth-header { padding: 0 20px; }
+    }
+
+    @media (max-width: 520px) {
+      .welcome h1 { font-size: 36px; }
+      .model-pill { display: none; }
+      .browser-back { padding: 0 4px; }
+      .status-pill { display: none; }
+      .browser-window { min-height: 480px; }
+      .browser-stage { min-height: 500px; }
+      .browser-hero { padding: 22px 18px; }
+      .browser-art { width: 216px; }
+      .account-card { flex-wrap: wrap; }
+      .account-card .badge { margin-left: 58px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-library" viewBox="0 0 24 24"><path d="M5 4h3v16H5zM10 4h3v16h-3zM16 4l3 16"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.13.37.35.7.65.96.3.26.67.41 1.06.44H21v4h-.09a1.7 1.7 0 0 0-1.51 1Z"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></symbol>
+    <symbol id="i-arrow-up-right" viewBox="0 0 24 24"><path d="M7 17 17 7M7 7h10v10"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.4 11.6-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6M14.5 4l-5 16"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+    <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9.5 4.5A3.5 3.5 0 0 0 6 8a3.5 3.5 0 0 0-2 6.2A3.5 3.5 0 0 0 7.5 20H12V4.5ZM14.5 4.5A3.5 3.5 0 0 1 18 8a3.5 3.5 0 0 1 2 6.2A3.5 3.5 0 0 1 16.5 20H12V4.5Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5 5-2Z"/></symbol>
+  </svg>
+
+  <div class="scrim" data-close-nav></div>
+
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar" aria-label="Sidebar">
+      <div class="side-head">
+        <button class="brand" data-go="home" aria-label="Stet home">
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 64 64"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg>
+          </span>
+          <span>Stet</span>
+        </button>
+        <button class="icon-button side-close" data-close-nav aria-label="Close menu">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </div>
+
+      <nav class="side-nav" aria-label="Primary">
+        <button class="nav-item is-active" data-go="home">
+          <svg class="icon"><use href="#i-plus"/></svg>
+          New chat
+        </button>
+        <button class="nav-item" data-go="library">
+          <svg class="icon"><use href="#i-library"/></svg>
+          Library
+        </button>
+        <button class="nav-item" data-go="humanizer">
+          <svg class="icon"><use href="#i-pen"/></svg>
+          Humanizer
+        </button>
+        <button class="nav-item" data-go="browser">
+          <svg class="icon"><use href="#i-monitor"/></svg>
+          Browser
+        </button>
+        <button class="nav-item" data-go="room">
+          <svg class="icon"><use href="#i-users"/></svg>
+          Live room
+        </button>
+        <button class="nav-item" data-go="proxy">
+          <svg class="icon"><use href="#i-globe"/></svg>
+          Proxy
+        </button>
+        <button class="nav-item" data-go="pdf">
+          <svg class="icon"><use href="#i-file"/></svg>
+          PDF Studio
+        </button>
+      </nav>
+
+      <label class="searchbox">
+        <svg class="icon"><use href="#i-search"/></svg>
+        <input type="search" placeholder="Search chats" aria-label="Search chats" />
+      </label>
+
+      <div class="projects">
+        <div class="project-head">
+          <span>Projects</span>
+          <button type="button" aria-label="New project">
+            <svg class="icon icon-sm"><use href="#i-plus"/></svg>
+          </button>
+        </div>
+        <button class="project-row" type="button">
+          <svg class="icon"><use href="#i-folder"/></svg>
+          All chats
+          <span>69</span>
+        </button>
+        <p class="hint">Group related chats together.</p>
+      </div>
+
+      <div class="chat-list" aria-label="Recent chats">
+        <p class="chat-group-title">Yesterday</p>
+        <button class="chat-row" type="button"><span>Build a clean one-page lan...</span></button>
+        <button class="chat-row" type="button"><span>Reply with exactly: DeepS...</span></button>
+        <button class="chat-row" type="button"><span>Reply with exactly: Kimi K...</span></button>
+        <button class="chat-row" type="button"><span>Reply with exactly: DeepS...</span></button>
+        <button class="chat-row" type="button"><span>Reply with exactly: Kimi K...</span></button>
+        <button class="chat-row" type="button"><span>Reply with exactly: NVIDIA...</span></button>
+      </div>
+
+      <div class="sidebar-foot">
+        <div class="horizon side-art" aria-hidden="true"></div>
+        <button class="account" type="button" data-go="settings">
+          <span class="avatar" aria-hidden="true">AM</span>
+          <span class="account-copy">
+            <strong>Alex Morgan</strong>
+            <small>0 of 50 replies today</small>
+          </span>
+          <svg class="icon"><use href="#i-settings"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="mobilebar">
+        <button class="icon-button menu-button" data-open-nav aria-label="Open menu">
+          <svg class="icon"><use href="#i-menu"/></svg>
+        </button>
+        <button class="brand" data-go="home" aria-label="Stet home">
+          <span class="mark small" aria-hidden="true">
+            <svg viewBox="0 0 64 64"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg>
+          </span>
+          <span>Stet</span>
+        </button>
+        <button class="icon-button" data-go="browser" aria-label="Open browser">
+          <svg class="icon"><use href="#i-monitor"/></svg>
+        </button>
+      </header>
+
+      <!-- Home -->
+      <section class="view view-home" data-view="home">
+        <header class="chatbar">
+          <span>New chat</span>
+          <span class="model-pill">
+            <span class="mark" aria-hidden="true"><svg viewBox="0 0 64 64"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></span>
+            Stet Auto
+            <svg class="icon"><use href="#i-chevron"/></svg>
+          </span>
+        </header>
+
+        <div class="home-scroll">
+          <div class="home-inner">
+            <div class="welcome">
+              <div class="horizon welcome-art" aria-hidden="true"></div>
+              <h1>What are you working on?</h1>
+              <p>Ask a question, work through a file, or pick a starting point.</p>
+            </div>
+
+            <form class="composer" id="composer">
+              <textarea rows="2" placeholder="Ask anything…" aria-label="Message"></textarea>
+              <div class="composer-row">
+                <div class="tools">
+                  <button class="tool-button" type="button" aria-label="Attach a file">
+                    <svg class="icon"><use href="#i-paperclip"/></svg>
+                  </button>
+                  <button class="mode-pill" type="button">
+                    Chat
+                    <svg class="icon"><use href="#i-chevron"/></svg>
+                  </button>
+                </div>
+                <div class="send-group">
+                  <span class="auto-label">Auto</span>
+                  <button class="send-button" type="submit" aria-label="Send message">
+                    <svg class="icon"><use href="#i-arrow-up"/></svg>
+                  </button>
+                </div>
+              </div>
+            </form>
+
+            <div class="suggestions">
+              <button class="suggestion" type="button" data-prompt="Explain how compound interest works with a quick example">
+                <span class="suggestion-icon"><svg class="icon"><use href="#i-arrow-up-right"/></svg></span>
+                <span>Explain how compound interest works with a quick example</span>
+              </button>
+              <button class="suggestion" type="button" data-prompt="Draft a polite follow-up email about a late invoice">
+                <span class="suggestion-icon"><svg class="icon"><use href="#i-arrow-up-right"/></svg></span>
+                <span>Draft a polite follow-up email about a late invoice</span>
+              </button>
+              <button class="suggestion" type="button" data-prompt="Give me a 20-minute bodyweight workout for a small room">
+                <span class="suggestion-icon"><svg class="icon"><use href="#i-arrow-up-right"/></svg></span>
+                <span>Give me a 20-minute bodyweight workout for a small room</span>
+              </button>
+              <button class="suggestion" type="button" data-prompt="What should I know before adopting a cat?">
+                <span class="suggestion-icon"><svg class="icon"><use href="#i-arrow-up-right"/></svg></span>
+                <span>What should I know before adopting a cat?</span>
+              </button>
+            </div>
+
+            <div class="task-row" aria-label="Task modes">
+              <button class="task-pill" type="button"><svg class="icon"><use href="#i-compass"/></svg>Advisor</button>
+              <button class="task-pill" type="button"><svg class="icon"><use href="#i-monitor"/></svg>Agent</button>
+              <button class="task-pill" type="button"><svg class="icon"><use href="#i-search"/></svg>Research</button>
+              <button class="task-pill" type="button"><svg class="icon"><use href="#i-library"/></svg>Analyze</button>
+              <button class="task-pill" type="button"><svg class="icon"><use href="#i-code"/></svg>Build</button>
+              <button class="task-pill" type="button"><svg class="icon"><use href="#i-brain"/></svg>Study</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Library -->
+      <section class="view" data-view="library" hidden>
+        <div class="page-wrap">
+          <p class="kicker">Library</p>
+          <h1 class="page-h1">Artifacts</h1>
+          <p class="page-sub">Pages, spreadsheet analyses, study sets and research reports saved alongside your chats.</p>
+
+          <button class="pdf-row" type="button">
+            <span class="feature-icon"><svg class="icon"><use href="#i-file"/></svg></span>
+            <span class="feature-copy">
+              <strong>PDF Studio</strong>
+              <small>Merge, split, compress, sign and convert documents privately.</small>
+            </span>
+            <span class="row-link">Open <svg class="icon"><use href="#i-arrow-up-right"/></svg></span>
+          </button>
+
+          <button class="review-row" type="button">
+            <span class="feature-icon accent"><svg class="icon"><use href="#i-brain"/></svg></span>
+            <span class="feature-copy">
+              <strong>Smart Review</strong>
+              <small>All caught up — nothing due today.</small>
+            </span>
+            <span class="row-link">Open <svg class="icon"><use href="#i-arrow-up-right"/></svg></span>
+          </button>
+
+          <div class="empty-library">
+            <div class="horizon" aria-hidden="true"></div>
+            <h2>Nothing saved yet</h2>
+            <p>Build a page, analyze a spreadsheet, study a topic or run research. The result will appear here automatically.</p>
+            <button class="btn btn-outline" type="button" data-go="home">Start a task</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings -->
+      <section class="view" data-view="settings" hidden>
+        <div class="page-wrap narrow">
+          <p class="kicker">Workspace</p>
+          <h1 class="page-h1">Settings</h1>
+          <p class="page-sub">Account, writing preferences, and connections.</p>
+
+          <section class="settings-section">
+            <h2>Account</h2>
+            <div class="surface-card account-card">
+              <span class="avatar" aria-hidden="true">AM</span>
+              <span class="account-card-copy">
+                <strong>Alex Morgan</strong>
+                <small>alex@example.com</small>
+              </span>
+              <span class="badge">Development user</span>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <h2>Assistant</h2>
+            <div class="surface-card instruction-card">
+              <label for="instructions">Standing instructions</label>
+              <p>Applied to every new reply in every chat. Ask for tone, format, language or expertise.</p>
+              <textarea id="instructions" rows="4" placeholder="e.g. Keep answers concise, use British spelling, and show your working for calculations."></textarea>
+              <div class="instruction-foot">
+                <span>0 / 2000</span>
+                <button class="btn btn-dark" type="button">Save</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <h2>Shortcuts</h2>
+            <div class="surface-card shortcut-card">
+              <div>
+                <strong>Open a new tab</strong>
+                <p>Press <kbd>`</kbd> anywhere to open Google Classroom in a new tab. Stet stays exactly as it is.</p>
+              </div>
+              <button class="btn btn-outline" type="button">Open <svg class="icon"><use href="#i-arrow-up-right"/></svg></button>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <h2>Usage</h2>
+            <div class="surface-card usage-card">
+              <div class="usage-head">
+                <strong>0 of 50 replies today</strong>
+                <span>Resets in 22h</span>
+              </div>
+              <div class="usage-bar"><span></span></div>
+            </div>
+          </section>
+
+          <div class="signin-link">
+            <span>Preview the account entry screen</span>
+            <button class="text-link" type="button" data-go="auth">View sign-in <svg class="icon icon-sm"><use href="#i-arrow-right"/></svg></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Humanizer -->
+      <section class="view" data-view="humanizer" hidden>
+        <div class="page-wrap narrow">
+          <p class="kicker">Writing</p>
+          <h1 class="page-h1">Humanizer</h1>
+          <p class="page-sub">Keep the meaning. Lose the stiffness.</p>
+          <div class="surface-card screen-card">
+            <span class="feature-icon accent"><svg class="icon"><use href="#i-pen"/></svg></span>
+            <h2>A more natural draft, in one pass</h2>
+            <p>Paste a paragraph, choose a tone, and compare the rewrite beside your original.</p>
+            <button class="btn btn-dark" type="button">New rewrite</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Live room -->
+      <section class="view" data-view="room" hidden>
+        <div class="page-wrap narrow">
+          <p class="kicker">Together</p>
+          <h1 class="page-h1">Live room</h1>
+          <p class="page-sub">Work through a question with other people, in real time.</p>
+          <div class="surface-card screen-card">
+            <span class="feature-icon"><svg class="icon"><use href="#i-users"/></svg></span>
+            <h2>No one in the room yet</h2>
+            <p>Start a room and invite someone. The conversation and working notes stay together.</p>
+            <button class="btn btn-dark" type="button">Create a room</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Proxy -->
+      <section class="view" data-view="proxy" hidden>
+        <div class="page-wrap narrow">
+          <p class="kicker">Utilities</p>
+          <h1 class="page-h1">Proxy</h1>
+          <p class="page-sub">A stable browser connection for the sites that need one.</p>
+          <div class="surface-card screen-card">
+            <span class="feature-icon"><svg class="icon"><use href="#i-globe"/></svg></span>
+            <h2>Open a proxied tab</h2>
+            <p>Useful for portals and tools that behave differently when they cannot keep a connection.</p>
+            <button class="btn btn-dark" type="button">Open proxy</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- PDF Studio -->
+      <section class="view" data-view="pdf" hidden>
+        <div class="page-wrap narrow">
+          <p class="kicker">Tools</p>
+          <h1 class="page-h1">PDF Studio</h1>
+          <p class="page-sub">Merge, split, compress, sign and convert documents privately.</p>
+          <div class="surface-card screen-card">
+            <span class="feature-icon"><svg class="icon"><use href="#i-file"/></svg></span>
+            <h2>Bring a document to the workbench</h2>
+            <p>Everything happens on this device, so the file never has to leave your browser.</p>
+            <button class="btn btn-dark" type="button">Choose a PDF</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Browser -->
+      <section class="view view-browser" data-view="browser" hidden>
+        <header class="browser-topbar">
+          <button class="browser-back" type="button" data-go="home">
+            <svg class="icon"><use href="#i-arrow-left"/></svg>
+            Stet
+          </button>
+          <span class="browser-brand">
+            <span class="mark small" aria-hidden="true"><svg viewBox="0 0 64 64"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></span>
+            Computer use
+          </span>
+          <form class="urlbar" onsubmit="return false">
+            <svg class="icon"><use href="#i-globe"/></svg>
+            <input value="https://sheets.google.com/" aria-label="Website address" />
+            <button type="submit" aria-label="Open website">
+              <svg class="icon"><use href="#i-arrow-right"/></svg>
+            </button>
+          </form>
+          <span class="status-pill">Ready</span>
+        </header>
+
+        <div class="browser-layout">
+          <section class="browser-stage" aria-label="Cloud browser">
+            <div class="browser-window">
+              <div class="window-chrome">
+                <span class="window-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                <span class="chrome-divider" aria-hidden="true"></span>
+                <span class="window-tab"><svg class="icon"><use href="#i-globe"/></svg>New tab</span>
+                <span class="window-live">Stet live screen</span>
+              </div>
+              <div class="browser-hero">
+                <div class="browser-copy">
+                  <p class="kicker">Browser</p>
+                  <h1>Open a cloud browser</h1>
+                  <p>Runs in the cloud. Sign in once, then describe what you need done.</p>
+                  <button class="btn btn-dark browser-start" type="button">
+                    <svg class="icon"><use href="#i-play"/></svg>
+                    Start browser
+                  </button>
+                  <div class="browser-features">
+                    <div><strong>Forms and portals</strong><span>Applications, invoices, checkout.</span></div>
+                    <div><strong>Research and reading</strong><span>Pages, PDFs, dashboards, long threads.</span></div>
+                    <div><strong>Repeatable flows</strong><span>Sign in, fill, submit, download.</span></div>
+                  </div>
+                </div>
+                <figure class="browser-art">
+                  <div class="art-full" role="img" aria-label="Pixel-art mountains at dusk"></div>
+                  <figcaption class="sr-only">Pixel-art mountains at dusk. Original by Luis Zuno (@ansimuz), CC0.</figcaption>
+                </figure>
+              </div>
+              <div class="window-footer"><span>Separate Chrome profile</span><span>Runs in the cloud</span></div>
+            </div>
+          </section>
+
+          <aside class="browser-rail" aria-label="Computer task">
+            <div class="rail-task">
+              <div class="rail-task-head">
+                <div>
+                  <h2>Computer task</h2>
+                  <p>Describe the outcome. Stet uses the browser above to do it.</p>
+                </div>
+                <button class="icon-button" type="button" aria-label="Refresh page view">
+                  <svg class="icon"><use href="#i-refresh"/></svg>
+                </button>
+              </div>
+              <textarea rows="3" placeholder="e.g. Inspect the header and restyle it, or write an essay in Google Docs"></textarea>
+              <div class="rail-run">
+                <button class="btn btn-dark" type="button" disabled>Run</button>
+                <span>24 steps max</span>
+              </div>
+            </div>
+            <button class="inspect-row" type="button">
+              <span><svg class="icon"><use href="#i-code"/></svg>Inspect &amp; code</span>
+              <span>Open</span>
+            </button>
+            <div class="activity-head">
+              <p class="kicker">Activity</p>
+              <span>0 steps</span>
+            </div>
+            <div class="activity-empty">
+              <svg class="icon"><use href="#i-globe"/></svg>
+              <p>Stet’s browser actions and working notes will appear here.</p>
+            </div>
+            <div class="rail-foot">Computer use in a cloud Chrome with its own saved profile. The live screen is served through Stet, not an embedded provider page.</div>
+          </aside>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Sign in -->
+  <main class="auth-page" id="auth" hidden>
+    <header class="auth-header">
+      <button class="brand" type="button" data-go="home" aria-label="Stet home">
+        <span class="mark" aria-hidden="true"><svg viewBox="0 0 64 64"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></span>
+        <span>Stet</span>
+      </button>
+      <button class="auth-back" type="button" data-go="settings">
+        Back to app
+        <svg class="icon"><use href="#i-arrow-right"/></svg>
+      </button>
+    </header>
+
+    <div class="auth-grid">
+      <div class="auth-copy">
+        <div class="horizon" aria-hidden="true"></div>
+        <p class="kicker" id="auth-kicker">Welcome back</p>
+        <h1 id="auth-title">Sign in to Stet</h1>
+        <p id="auth-sub">A practical assistant for everyday work. Sign in to keep your conversations.</p>
+
+        <form class="auth-card" id="auth-form">
+          <label for="email">Email</label>
+          <input id="email" type="email" autocomplete="email" placeholder="you@example.com" />
+          <label for="password">Password</label>
+          <input id="password" type="password" autocomplete="current-password" placeholder="Your password" />
+          <button class="auth-submit" id="auth-submit" type="submit" disabled>
+            <span id="auth-submit-label">Sign in</span>
+            <svg class="icon"><use href="#i-arrow-right"/></svg>
+          </button>
+          <p class="auth-small">
+            <span id="auth-switch-copy">New here?</span>
+            <button type="button" id="auth-switch">Create an account</button>
+          </p>
+        </form>
+
+        <div class="or-row"><span></span>or<span></span></div>
+        <button class="guest-button" type="button" data-go="home">
+          Continue as guest
+          <svg class="icon"><use href="#i-arrow-right"/></svg>
+        </button>
+        <p class="guest-note">No account. Your chats stay in this browser.</p>
+      </div>
+
+      <div class="auth-chat" aria-label="Example conversation">
+        <div class="auth-bubble">What’s a good way to start learning the piano as an adult?</div>
+        <div class="auth-answer">
+          <span class="mark small" aria-hidden="true"><svg viewBox="0 0 64 64"><path d="M44 18c-9 1-17 8-20 18l-4 10 10-4c10-3 17-11 18-20l-9 9-3-3 8-10z"/></svg></span>
+          <div class="auth-answer-copy">
+            <p>Start with ten focused minutes a day rather than an hour on Sundays. Three things to do in week one:</p>
+            <ol>
+              <li>Learn the C major scale with correct fingering, hands separately.</li>
+              <li>Pick one song you love and learn its first four bars.</li>
+              <li>Record yourself once a week so you can hear progress.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const app = document.getElementById('app');
+    const auth = document.getElementById('auth');
+    const views = [...document.querySelectorAll('.view')];
+    const navItems = [...document.querySelectorAll('.nav-item')];
+    const authForm = document.getElementById('auth-form');
+    const email = document.getElementById('email');
+    const password = document.getElementById('password');
+    const authSubmit = document.getElementById('auth-submit');
+    const authKicker = document.getElementById('auth-kicker');
+    const authTitle = document.getElementById('auth-title');
+    const authSub = document.getElementById('auth-sub');
+    const authSubmitLabel = document.getElementById('auth-submit-label');
+    const authSwitch = document.getElementById('auth-switch');
+    const authSwitchCopy = document.getElementById('auth-switch-copy');
+    let authMode = 'signin';
+    let lastView = 'settings';
+
+    function closeNav() {
+      document.body.classList.remove('nav-open');
+    }
+
+    function updateAuthMode() {
+      const register = authMode === 'register';
+      authKicker.textContent = register ? 'Get started' : 'Welcome back';
+      authTitle.textContent = register ? 'Create your Stet account' : 'Sign in to Stet';
+      authSub.textContent = register
+        ? 'A practical assistant for everyday work. Use an email and a password you choose.'
+        : 'A practical assistant for everyday work. Sign in to keep your conversations.';
+      authSubmitLabel.textContent = register ? 'Create account' : 'Sign in';
+      authSwitchCopy.textContent = register ? 'Already have an account?' : 'New here?';
+      authSwitch.textContent = register ? 'Sign in' : 'Create an account';
+      password.placeholder = register ? 'At least 8 characters' : 'Your password';
+    }
+
+    function updateAuthButton() {
+      authSubmit.disabled = !email.value.trim() || !password.value;
+    }
+
+    function go(name) {
+      closeNav();
+      if (name === 'auth') {
+        app.hidden = true;
+        auth.hidden = false;
+        document.body.classList.add('auth-open');
+        window.scrollTo(0, 0);
+        return;
+      }
+      if (views.some((view) => view.dataset.view === name)) {
+        lastView = name;
+        app.hidden = false;
+        auth.hidden = true;
+        document.body.classList.remove('auth-open');
+        document.body.classList.toggle('browser-open', name === 'browser');
+        views.forEach((view) => { view.hidden = view.dataset.view !== name; });
+        navItems.forEach((item) => { item.classList.toggle('is-active', item.dataset.go === name); });
+        const heading = views.find((view) => view.dataset.view === name)?.querySelector('h1');
+        document.title = name === 'home' ? 'Stet — design preview' : `${heading?.textContent?.trim() || 'Stet'} · Stet`;
+        window.scrollTo(0, 0);
+      }
+    }
+
+    document.querySelectorAll('[data-go]').forEach((button) => {
+      button.addEventListener('click', () => go(button.dataset.go));
+    });
+    document.querySelectorAll('[data-open-nav]').forEach((button) => {
+      button.addEventListener('click', () => document.body.classList.add('nav-open'));
+    });
+    document.querySelectorAll('[data-close-nav], .scrim').forEach((button) => {
+      button.addEventListener('click', closeNav);
+    });
+
+    document.querySelectorAll('.suggestion').forEach((button) => {
+      button.addEventListener('click', () => {
+        const textarea = document.querySelector('#composer textarea');
+        textarea.value = button.dataset.prompt;
+        textarea.focus();
+      });
+    });
+
+    document.querySelectorAll('.task-pill').forEach((button) => {
+      button.addEventListener('click', () => button.classList.toggle('is-active'));
+    });
+
+    document.getElementById('composer').addEventListener('submit', (event) => event.preventDefault());
+    authForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      go('home');
+    });
+    email.addEventListener('input', updateAuthButton);
+    password.addEventListener('input', updateAuthButton);
+    authSwitch.addEventListener('click', () => {
+      authMode = authMode === 'signin' ? 'register' : 'signin';
+      updateAuthMode();
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeNav();
+    });
+
+    updateAuthMode();
+    updateAuthButton();
+  </script>
+</body>
+</html>

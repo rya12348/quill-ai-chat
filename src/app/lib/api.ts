@@ -1,6 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { type Query, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo, useRef } from 'react'
 
-import type { ArtifactSummary, AttachmentInput, Conversation, ConversationMemory, FeedbackRating, HumanizerLength, HumanizerPurpose, HumanizerResult, HumanizerStrength, HumanizerTone, Me, Message, ModelInfo, Project, ProviderHealth, ProxySession, ReviewQueue, ReviewRating, ReviewRatingResult, ReviewSummary, RoomList, RoomMessage, RoomSnapshot, RoomSummary, RoomVisibility, SharedConversation, TrafficSummary, UserSettings } from '../../shared/types'
+import type { ArtifactSummary, AttachmentInput, Conversation, ConversationMemory, FeedbackRating, HumanizerLength, HumanizerPurpose, HumanizerResult, HumanizerStrength, HumanizerTone, Me, Message, ModelInfo, Project, ProviderHealth, ProxySession, ReviewQueue, ReviewRating, ReviewRatingResult, ReviewSummary, RoomList, RoomMessage, RoomPeople, RoomProfile, RoomReaction, RoomSnapshot, RoomSummary, RoomVisibility, SharedConversation, TrafficSummary, UserSettings } from '../../shared/types'
 import { localBrowser } from './local-browser'
 import { noteOffline } from './offline'
 
@@ -72,6 +73,34 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
 
 export type ConversationPage = { conversation: Conversation; messages: Message[] }
 
+export type ConditionalApiResult<T> =
+  | { kind: 'data'; data: T; etag: string | null }
+  | { kind: 'not-modified'; etag: string | null }
+
+/**
+ * A read that can ask the Worker to answer 304. The response body is reused
+ * from the query cache, so idle polling does not decode and render an unchanged
+ * conversation over and over.
+ */
+export async function apiConditional<T>(path: string, etag: string | null, signal?: AbortSignal): Promise<ConditionalApiResult<T>> {
+  let response: Response
+  try {
+    response = await fetch(`/api${path}`, {
+      credentials: 'same-origin',
+      headers: { accept: 'application/json', ...(etag ? { 'if-none-match': etag } : {}) },
+      signal,
+    })
+  } catch (error) {
+    if (signal?.aborted) throw error
+    throw new ApiError(0, 'Ink could not be reached. Check your connection and try again.')
+  }
+  noteOffline(response)
+  const nextEtag = response.headers.get('etag')
+  if (response.status === 304) return { kind: 'not-modified', etag: nextEtag ?? etag }
+  if (!response.ok) throw await readError(response)
+  return { kind: 'data', data: (await response.json()) as T, etag: nextEtag }
+}
+
 export const useMe = () =>
   useQuery({
     queryKey: ['me'],
@@ -126,11 +155,171 @@ export function useSendRoomMessage(roomId: string) {
   })
 }
 
+export function useSetRoomMessageReaction(roomId: string) {
+  return useMutation({
+    mutationFn: ({ messageId, reaction }: { messageId: string; reaction: string | null }) =>
+      api<{ messageId: string; reactions: RoomReaction[] }>(
+        `/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/reaction`,
+        { method: 'PATCH', json: { reaction } },
+      ),
+  })
+}
+
+export function useUpdateRoomProfile() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, room, targetId }: { name: string; room?: string; targetId?: string }) =>
+      api<RoomProfile>('/rooms/profile', {
+        method: 'PATCH',
+        json: { name, ...(room ? { room } : {}), ...(targetId ? { targetId } : {}) },
+      }),
+    onSuccess: () => {
+      // The new name is shown beside existing messages too, so refresh open
+      // room snapshots rather than updating only future sends. It is also the
+      // site-wide display name shown in Settings and the sidebar.
+      void client.invalidateQueries({ queryKey: ['room'] })
+      void client.invalidateQueries({ queryKey: ['rooms'] })
+      void client.invalidateQueries({ queryKey: ['me'] })
+    },
+  })
+}
+
+export function useCreateRoomInvite() {
+  return useMutation({
+    mutationFn: (roomId: string) =>
+      api<{ url: string }>(`/rooms/${encodeURIComponent(roomId)}/invite`, { method: 'POST' }),
+  })
+}
+
+/** The durable Ink directory, used by the people picker and saved quick-add. */
+export function useRoomPeople(enabled = true) {
+  return useQuery({
+    queryKey: ['room-people'],
+    queryFn: () => api<RoomPeople>('/rooms/people'),
+    enabled,
+    staleTime: 10_000,
+    refetchInterval: enabled ? 30_000 : false,
+    refetchOnWindowFocus: true,
+  })
+}
+
+export function useSaveRoomPerson() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ personId, saved }: { personId: string; saved: boolean }) =>
+      api<{ ok: true; personId: string; saved: boolean }>(
+        `/rooms/people/${encodeURIComponent(personId)}/saved`,
+        { method: 'PATCH', json: { saved } },
+      ),
+    onSuccess: (result) => {
+      client.setQueryData<RoomPeople>(['room-people'], (current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((person) =>
+                person.id === result.personId ? { ...person, saved: result.saved } : person,
+              ),
+            }
+          : current,
+      )
+      void client.invalidateQueries({ queryKey: ['room-people'] })
+    },
+  })
+}
+
+/**
+ * Give someone a private name in your own people list. Pass null to restore the
+ * name they use themselves. Other people never see this label.
+ */
+export function useRenameRoomPerson() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ personId, label }: { personId: string; label: string | null }) =>
+      api<{ ok: true; personId: string; label: string | null }>(
+        `/rooms/people/${encodeURIComponent(personId)}/label`,
+        { method: 'PATCH', json: { label } },
+      ),
+    onSuccess: (result) => {
+      client.setQueryData<RoomPeople>(['room-people'], (current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((person) => {
+                if (person.id !== result.personId) return person
+                const own = person.originalName ?? person.name
+                return {
+                  ...person,
+                  name: result.label ?? own,
+                  ...(result.label
+                    ? { renamed: true, originalName: own }
+                    : { renamed: false, originalName: undefined }),
+                }
+              }),
+            }
+          : current,
+      )
+      void client.invalidateQueries({ queryKey: ['room-people'] })
+    },
+  })
+}
+
+export function useInviteRoomPeople() {
+  return useMutation({
+    mutationFn: ({ roomId, personIds }: { roomId: string; personIds: string[] }) =>
+      api<{ ok: true; invited: number; people: { id: string; name: string }[] }>(
+        `/rooms/${encodeURIComponent(roomId)}/invite/people`,
+        { method: 'POST', json: { personIds } },
+      ),
+  })
+}
+
+export function useAcceptRoomInvite() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ roomId, invite }: { roomId: string; invite: string }) =>
+      api<{ ok: true; room: RoomSummary }>(`/rooms/${encodeURIComponent(roomId)}/invite/accept`, {
+        method: 'POST',
+        json: { invite },
+      }),
+    onSuccess: (result, input) => {
+      // Redeeming an invite is the same grant as entering the password. Mark
+      // the room open immediately so a return visit cannot ask for it again.
+      client.setQueryData<RoomList>(['rooms'], (current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((item) =>
+                item.id === result.room.id ? { ...item, ...result.room } : item,
+              ),
+            }
+          : current,
+      )
+      void client.invalidateQueries({ queryKey: ['rooms'] })
+      void client.invalidateQueries({ queryKey: ['room', input.roomId] })
+    },
+  })
+}
+
+export function useDeleteRoom() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (roomId: string) =>
+      api<{ ok: true; roomId: string }>(`/rooms/${encodeURIComponent(roomId)}`, { method: 'DELETE' }),
+    onSuccess: (_result, roomId) => {
+      client.setQueryData<RoomList>(['rooms'], (current) =>
+        current ? { ...current, items: current.items.filter((room) => room.id !== roomId) } : current,
+      )
+      client.removeQueries({ queryKey: ['room', roomId] })
+      void client.invalidateQueries({ queryKey: ['rooms'] })
+    },
+  })
+}
+
 export function useCreateRoom() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: (input: { name: string; visibility: RoomVisibility; password?: string }) =>
-      api<{ room: RoomSummary }>('/rooms', { method: 'POST', json: input }),
+    mutationFn: (input: { name: string; visibility: RoomVisibility; password?: string; inviteIds?: string[] }) =>
+      api<{ room: RoomSummary; invited?: number }>('/rooms', { method: 'POST', json: input }),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['rooms'] })
     },
@@ -145,9 +334,28 @@ export function useUnlockRoom() {
         method: 'POST',
         json: { password },
       }),
-    onSuccess: (_, input) => {
-      void client.invalidateQueries({ queryKey: ['rooms'] })
-      void client.invalidateQueries({ queryKey: ['room', input.roomId] })
+    onSuccess: async (result, input) => {
+      // The server has already saved the grant. Update the rail before the
+      // network refetch completes so returning to the room cannot prompt for
+      // the same password again.
+      client.setQueryData<RoomList>(['rooms'], (current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((item) =>
+                item.id === result.room.id
+                  ? { ...item, ...result.room, ...(item.invited ? { invited: true } : {}) }
+                  : item,
+              ),
+            }
+          : current,
+      )
+      // Keep the dialog pending until the room and rail reflect the saved
+      // grant, so the user never lands back on the locked view.
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['rooms'] }),
+        client.invalidateQueries({ queryKey: ['room', input.roomId] }),
+      ])
     },
   })
 }
@@ -329,11 +537,44 @@ export function useSetConversationProject() {
 }
 export const useConversation = (
   id: string | undefined,
-  options: { refetchInterval?: number | false } = {},
-) =>
-  useQuery({
+  options: { refetchInterval?: number | false; paused?: boolean } = {},
+) => {
+  const client = useQueryClient()
+  const etags = useRef(new Map<string, string>())
+  const { refetchInterval = false, paused = false } = options
+  // Keep the callback stable so a render caused by typing does not restart the
+  // idle timer. It still reads the latest failure count from the query.
+  const refreshInterval = useMemo(() => {
+    if (!refetchInterval) return false
+    return (query: Query<ConversationPage, Error, ConversationPage, readonly unknown[]>) => {
+      if (paused) return false
+      const failures = query.state.fetchFailureCount
+      if (!failures) return refetchInterval
+      const error = query.state.error
+      // A missing chat will not appear by refreshing it. An offline read waits
+      // for the app's reconnect probe instead of retrying on the idle timer.
+      if (error instanceof ApiError && (error.status === 404 || error.code === 'offline' || error.status === 0)) return false
+      // Server errors back off as well, up to one request a minute.
+      return Math.min(60_000, refetchInterval * 2 ** Math.min(failures, 4))
+    }
+  }, [paused, refetchInterval])
+
+  return useQuery({
     queryKey: ['conversation', id],
-    queryFn: () => api<ConversationPage>(`/conversations/${id}`),
+    queryFn: async ({ signal }) => {
+      if (!id) throw new ApiError(400, 'Choose a conversation first.')
+      const result = await apiConditional<ConversationPage>(`/conversations/${id}`, etags.current.get(id) ?? null, signal)
+      if (result.etag) etags.current.set(id, result.etag)
+      if (result.kind === 'data') return result.data
+      const cached = client.getQueryData<ConversationPage>(['conversation', id])
+      if (cached) return cached
+      // A 304 is only useful with a cached page. Fetch once without the tag if
+      // this tab has no copy (for example after a cache reset).
+      const retry = await apiConditional<ConversationPage>(`/conversations/${id}`, null, signal)
+      if (retry.kind !== 'data') throw new ApiError(304, 'The conversation did not change.')
+      if (retry.etag) etags.current.set(id, retry.etag)
+      return retry.data
+    },
     enabled: Boolean(id),
     // Chat is shared across tabs and devices. A fresh read whenever the page
     // opens or regains focus means a reply written elsewhere is visible without
@@ -342,12 +583,13 @@ export const useConversation = (
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
-    ...(options.refetchInterval ? { refetchInterval: options.refetchInterval } : {}),
+    refetchInterval: refreshInterval,
     // A missing chat and an offline read are both answers, not hiccups. Retrying
     // an offline 503 leaves the page blank while the retry is pending; show the
     // explicit offline state at once instead.
     retry: false,
   })
+}
 
 export type MemoryState = { memory: ConversationMemory | null }
 
@@ -429,22 +671,6 @@ export function useMessageFeedback() {
   return useMutation({
     mutationFn: ({ id, rating }: { id: string; rating: FeedbackRating }) =>
       api<{ ok: boolean; rating: FeedbackRating }>(`/messages/${id}/feedback`, { method: 'POST', json: { rating } }),
-  })
-}
-
-export function useSetConversationReaction() {
-  const client = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, reaction }: { id: string; reaction: string | null }) =>
-      api<{ reaction: string | null }>(`/conversations/${id}/reaction`, { method: 'PATCH', json: { reaction } }),
-    onSuccess: ({ reaction }, { id }) => {
-      client.setQueryData<ConversationPage>(['conversation', id], (old) =>
-        old ? { ...old, conversation: { ...old.conversation, reaction } } : old,
-      )
-      client.setQueryData<{ items: Conversation[] }>(['conversations'], (old) =>
-        old ? { ...old, items: old.items.map((conversation) => (conversation.id === id ? { ...conversation, reaction } : conversation)) } : old,
-      )
-    },
   })
 }
 

@@ -12,9 +12,13 @@ export function ThemeToggle({ className }: { className?: string }) {
       onClick={toggle}
       aria-label={`Switch to ${next} mode`}
       title={`Switch to ${next} mode`}
-      className={cx('grid size-8 shrink-0 place-items-center rounded-tile text-faint transition-colors hover:bg-surface-2 hover:text-fg', className)}
+      className={cx(
+        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface-2/70 px-2.5 text-[12px] font-medium text-muted shadow-card transition-colors hover:border-accent/40 hover:bg-surface-2 hover:text-fg',
+        className,
+      )}
     >
-      {theme === 'dark' ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
+      {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+      <span className="hidden sm:inline">{next === 'light' ? 'Light' : 'Dark'}</span>
     </button>
   )
 }

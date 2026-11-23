@@ -1,6 +1,6 @@
 // Small production load probe. It only hits cache-safe health and shell routes;
 // it never starts a chat or spends a model request.
-const base = (process.env.PRODUCTION_URL?.trim() || 'https://ink.7394.jo3.org').replace(/\/$/, '')
+const base = (process.env.PRODUCTION_URL?.trim() || 'https://www.inkbrowser.dpdns.org').replace(/\/$/, '')
 const total = Math.max(4, Math.min(240, Number(process.env.LOAD_REQUESTS || 40)))
 const concurrency = Math.max(1, Math.min(12, Number(process.env.LOAD_CONCURRENCY || 4)))
 const p95Limit = Number(process.env.LOAD_P95_MS || 2000)

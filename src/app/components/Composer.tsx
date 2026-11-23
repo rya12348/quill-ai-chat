@@ -5,7 +5,7 @@ import { MAX_MESSAGE_CHARS } from '../../shared/config'
 import { formatTokenCount } from '../../shared/tokens'
 import type { ReasoningEffort } from '../../shared/types'
 import { cx } from '../lib/cx'
-import { ATTACHMENT_ACCEPT, clipboardFiles, formatFileSize, MAX_ATTACHMENTS, type PendingAttachment } from '../lib/attachments'
+import { ATTACHMENT_ACCEPT, attachmentTypeLabel, clipboardFiles, formatFileSize, MAX_ATTACHMENTS, type PendingAttachment } from '../lib/attachments'
 import type { ModelChoice, ModelPreset } from '../lib/model-presets'
 import { ModelPicker } from './ModelPicker'
 import { Button, Dialog } from './ui'
@@ -394,7 +394,7 @@ export function Composer({
             attachment.kind === 'image' ? (
               <div key={attachment.id} className="group/attachment relative">
                 <img
-                  src={attachment.data}
+                  src={attachment.thumbnail ?? attachment.data}
                   alt={attachment.name}
                   title={attachment.name}
                   className="size-14 rounded-[10px] border border-line object-cover"
@@ -416,9 +416,10 @@ export function Composer({
                   <FileText className="size-3.5 shrink-0" />
                 )}
                 <span className="truncate">{attachment.name}</span>
-                {attachment.mime === 'text/uri-list' ? null : (
-                  <span className="shrink-0 text-faint">{formatFileSize(attachment.size)}</span>
-                )}
+                <span className="shrink-0 text-faint">
+                  {attachmentTypeLabel(attachment.mime, attachment.name)}
+                  {attachment.mime === 'text/uri-list' ? '' : ` · ${formatFileSize(attachment.size)}`}
+                </span>
                 <button
                   type="button"
                   onClick={() => onRemoveAttachment(attachment.id)}

@@ -6,6 +6,8 @@ import { clearAttention } from './app/lib/attention'
 import { initTheme } from './app/lib/theme'
 import './styles.css'
 import './retro.css'
+import './butter-party.css'
+import './dive.css'
 
 initTheme()
 // A reload starts with no unread room messages, so never keep the previous
@@ -26,6 +28,8 @@ createRoot(document.getElementById('root')!).render(
 // whenever Vite is running in development or the page is on Codespaces.
 if ((import.meta.env.DEV || codespaces) && canUseServiceWorker) {
   void (async () => {
+    // The in-app browser is served by the worker now, so an Ultraviolet worker
+    // left under /service/ only serves stale assets; remove it with the rest.
     const registrations = await navigator.serviceWorker.getRegistrations()
     await Promise.all(registrations.map((registration) => registration.unregister()))
     if ('caches' in window) {
@@ -45,5 +49,13 @@ if (import.meta.env.PROD && !codespaces && canUseServiceWorker) {
     void navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {
       /* offline on a first visit: the page still works without it */
     })
+    // The in-app browser renders every real site through its own worker under
+    // /service/. Without this registration each proxied address answers 404 and
+    // a shortcut opens on a blank frame, so it is registered on every load.
+    void navigator.serviceWorker
+      .register('/service/sw.js', { scope: '/service/', updateViaCache: 'none' })
+      .catch(() => {
+        /* the browser refuses a nested worker: the proxy reports it instead */
+      })
   })
 }

@@ -137,6 +137,16 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
   if (url.pathname === '/sw.js') return
+  // The proxied site space belongs to the /service/ worker. A frame inside a
+  // proxied page can end up seen by this worker instead, and answering a
+  // site's own request from the app's cache — or with the app's 404 for
+  // /service/ paths — leaves the frame empty. Never touch it here.
+  if (
+    url.pathname.startsWith('/service/') ||
+    url.pathname.startsWith('/api/web-proxy/') ||
+    url.pathname.startsWith('/api/poki-')
+  )
+    return
 
   if (request.method !== 'GET') {
     if (!isApi(url)) return

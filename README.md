@@ -549,7 +549,7 @@ owner's credits, so remove or gate guest access first.
 
 ## Deploy the production Pages site
 
-`https://ink.7394.jo3.org/` is served by the Cloudflare Pages project `ink-jo3`.
+`https://www.inkbrowser.dpdns.org/` is served by the Cloudflare Pages project `ink-jo3`.
 The production D1 binding and runtime flags live in `pages/wrangler.jsonc`; that
 file is the single source of truth, not a dashboard-only setting. Do not create
 a temporary staging directory or copy the build by hand. The root

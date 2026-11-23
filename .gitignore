@@ -3,6 +3,7 @@ dist
 .wrangler
 backups
 .tmp-pages-secrets.json
+.secrets
 .env
 .env.*
 .freebuff
@@ -13,3 +14,31 @@ backups
 .DS_Store
 *.log
 .ink-chrome-profile
+
+# Puffer Party knowledge pack: rebuilt, not committed
+.k3/
+scripts/puffer-kb/kb.json
+scripts/puffer-kb/dist/
+
+# agent scratch: probes, dumps, browser profiles, downloaded datasets
+.tmp-*
+.tmp/
+tmp/
+*.sse
+*.pid
+.cf-pages-jo3/
+.deploy-safe/
+.cloud-attachments/
+.k/
+.k2/
+.screenshots/
+screenshots/
+# review images dropped at the repo root
+/*.png
+/*.jpg
+
+# benchmark and probe output
+bench/
+tmp-bench/
+tmp-dent/
+g.json

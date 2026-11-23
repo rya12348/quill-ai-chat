@@ -198,12 +198,15 @@ export function Menu({
   trigger,
   items,
   align = 'end',
+  side = 'below',
 }: {
   trigger: ReactNode
   items: { label: string; onSelect: () => void; danger?: boolean; icon?: ReactNode }[]
   align?: 'start' | 'end'
+  side?: 'below' | 'above' | 'auto'
 }) {
   const [open, setOpen] = useState(false)
+  const [openUp, setOpenUp] = useState(side === 'above')
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!open) return
@@ -222,6 +225,12 @@ export function Menu({
         onClick={(e) => {
           e.stopPropagation()
           e.preventDefault()
+          const rect = ref.current?.getBoundingClientRect()
+          const spaceBelow = rect ? window.innerHeight - rect.bottom : 0
+          setOpenUp(
+            side === 'above' ||
+              (side === 'auto' && Boolean(rect) && spaceBelow < 260 && (rect?.top ?? 0) > spaceBelow),
+          )
           setOpen((v) => !v)
         }}
         className="inline-flex"
@@ -236,7 +245,11 @@ export function Menu({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 4, scale: 0.98 }}
             transition={{ duration: 0.14 }}
-            className={cx('absolute top-full z-40 mt-1 min-w-[160px] rounded-[14px] bg-surface p-1 shadow-pop', align === 'end' ? 'right-0' : 'left-0')}
+            className={cx(
+              'absolute z-40 min-w-[160px] rounded-[14px] bg-surface p-1 shadow-pop',
+              openUp ? 'bottom-full mb-1' : 'top-full mt-1',
+              align === 'end' ? 'right-0' : 'left-0',
+            )}
           >
             {items.map((item) => (
               <li key={item.label}>

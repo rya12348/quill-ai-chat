@@ -302,11 +302,27 @@ const cssOf = (html: string) =>
 const scriptOf = (html: string) =>
   [...html.matchAll(/<script\b(?![^>]*\bdata-buffy-preview\b)[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]).join('\n')
 
+/** One award the audit could not give, with the points it was worth. */
+export type DesignGap = {
+  points: number
+  /** What is missing, in words a single patch can act on. */
+  gap: string
+}
+
 export type DesignAudit = {
   /** 0–100: a rough visual-quality signal, not a model-reported confidence. */
   score: number
   /** Specific, actionable gaps the polish pass should close. */
   issues: string[]
+  /**
+   * The points this page has not earned yet, biggest first.
+   *
+   * A score of 68 tells a model nothing it can act on, and a production page
+   * stayed at 68 through four polish rounds that each guessed at the layout.
+   * Naming the missing points turns "make it nicer" into "add a second
+   * breakpoint (+2), a clamp() type scale (+3), focus-visible (+4)".
+   */
+  gaps: DesignGap[]
 }
 
 /**
@@ -331,68 +347,71 @@ export function auditDesign(html: string): DesignAudit {
   const words = text ? text.split(/\s+/).length : 0
   const issues: string[] = []
   let score = 0
-  const award = (points: number, condition: boolean) => {
-    if (condition) score += points
+  const gaps: DesignGap[] = []
+  /**
+   * Every point the audit can award, as data rather than a call: the score is
+   * the awards that were met, and the gaps are the same table with the ones that
+   * were not. One table means the two verdicts can never disagree about what the
+   * page has.
+   */
+  const awards: [points: number, met: boolean, gap: string][] = [
+    [4, css.length >= 1_200, 'the stylesheet is under 1,200 characters, so the page has almost no styled parts'],
+    [3, css.length >= 2_400, 'the stylesheet is under 2,400 characters, so too few parts are styled'],
+    [3, css.length >= 3_800, 'the stylesheet is under 3,800 characters, so the page has too few styled components'],
+    [2, css.length >= 5_500, 'the stylesheet is under 5,500 characters'],
+    [3, declarations >= 35, 'fewer than 35 CSS declarations'],
+    [3, declarations >= 65, 'fewer than 65 CSS declarations'],
+    [2, declarations >= 95, 'fewer than 95 CSS declarations'],
+    [2, selectors >= 12, 'fewer than 12 CSS rules'],
+    [2, selectors >= 24, 'fewer than 24 CSS rules'],
+    [2, selectors >= 36, 'fewer than 36 CSS rules'],
+    [4, countCss(/@media/g) >= 1, 'no @media breakpoint'],
+    [2, countCss(/@media/g) >= 2, 'only one @media breakpoint'],
+    [3, hasCss(/display\s*:\s*flex/i), 'no display:flex anywhere'],
+    [4, hasCss(/display\s*:\s*grid/i), 'no display:grid anywhere'],
+    [2, hasCss(/grid-template-columns/i), 'no grid-template-columns'],
+    [2, hasCss(/gap\s*:/i), 'no gap on a flex or grid container'],
+    [2, hasCss(/max-width\s*:/i), 'no max-width on the shell'],
+    [1, hasCss(/aspect-ratio/i), 'no aspect-ratio frame'],
+    [1, hasCss(/object-fit/i), 'no object-fit on an image'],
+    [1, hasCss(/position\s*:\s*(?:sticky|fixed)/i), 'no sticky or fixed element'],
+    [5, countCss(/--[a-z0-9-]+\s*:/gi) >= 3, 'fewer than three CSS custom properties'],
+    [2, countCss(/--[a-z0-9-]+\s*:/gi) >= 8, 'fewer than eight CSS custom properties'],
+    [3, hasCss(/clamp\(/i), 'no clamp() type scale'],
+    [2, hasCss(/font-family\s*:/i), 'no font-family stack'],
+    [1, hasCss(/line-height\s*:/i), 'no line-height'],
+    [1, hasCss(/letter-spacing\s*:/i), 'no letter-spacing on headings'],
+    [2, hasCss(/border-radius\s*:/i), 'no border-radius'],
+    [2, hasCss(/box-shadow\s*:/i), 'no box-shadow'],
+    [1, hasCss(/transition\s*:/i), 'no transition'],
+    [4, hasCss(/focus-visible|:focus/i), 'no focus-visible rule'],
+    [2, hasCss(/prefers-reduced-motion/i), 'no prefers-reduced-motion rule'],
+    [1, hasCss(/::placeholder/i), 'no ::placeholder styling'],
+    [3, hasCss(/button[^{]*\{[^{}]*(?:background|border-radius|padding)/i), 'the buttons are left as browser defaults'],
+    [2, hasCss(/input[^{]*\{[^{}]*(?:border|padding|background)/i), 'the inputs are left as browser defaults'],
+    [2, hasHtml(/<svg\b/i), 'no inline SVG'],
+    [1, hasHtml(/<img\b/i), 'no image'],
+    [2, hasHtml(/<header\b/i), 'no <header>'],
+    [1, hasHtml(/<nav\b/i), 'no <nav>'],
+    [2, hasHtml(/<main\b/i), 'no <main>'],
+    [1, hasHtml(/<footer\b/i), 'no <footer>'],
+    [2, sections >= 2, 'fewer than two <section> blocks'],
+    [2, h1s === 1, h1s === 0 ? 'no h1' : 'more than one h1'],
+    [2, headings >= 2, 'fewer than two h2 headings'],
+    [2, hasHtml(/<(?:form|button|input|select|textarea)\b/i), 'no controls at all'],
+    [1, hasHtml(/<label\b/i), 'no <label>'],
+    [1, hasHtml(/aria-/i), 'no aria- attributes'],
+    [1, hasHtml(/alt\s*=/i), 'no alt text'],
+    [2, words >= 80, 'fewer than 80 words of copy'],
+    [1, hasHtml(/<meta[^>]+viewport/i), 'no viewport meta tag'],
+    [1, hasHtml(/<title\b/i), 'no <title>'],
+  ]
+  for (const [points, met, gap] of awards) {
+    if (met) score += points
+    else gaps.push({ points, gap })
   }
-
-  // A page with no CSS, or CSS short enough to be a browser default, is a
-  // prototype rather than a designed page.
-  award(4, css.length >= 1_200)
-  award(3, css.length >= 2_400)
-  award(3, css.length >= 3_800)
-  award(2, css.length >= 5_500)
-  award(3, declarations >= 35)
-  award(3, declarations >= 65)
-  award(2, declarations >= 95)
-  award(2, selectors >= 12)
-  award(2, selectors >= 24)
-  award(2, selectors >= 36)
-
-  // Layout and responsive craft.
-  award(4, countCss(/@media/g) >= 1)
-  award(2, countCss(/@media/g) >= 2)
-  award(3, hasCss(/display\s*:\s*flex/i))
-  award(4, hasCss(/display\s*:\s*grid/i))
-  award(2, hasCss(/grid-template-columns/i))
-  award(2, hasCss(/gap\s*:/i))
-  award(2, hasCss(/max-width\s*:/i))
-  award(1, hasCss(/aspect-ratio/i))
-  award(1, hasCss(/object-fit/i))
-  award(1, hasCss(/position\s*:\s*(?:sticky|fixed)/i))
-
-  // Type and surface craft.
-  award(5, countCss(/--[a-z0-9-]+\s*:/gi) >= 3)
-  award(2, countCss(/--[a-z0-9-]+\s*:/gi) >= 8)
-  award(3, hasCss(/clamp\(/i))
-  award(2, hasCss(/font-family\s*:/i))
-  award(1, hasCss(/line-height\s*:/i))
-  award(1, hasCss(/letter-spacing\s*:/i))
-  award(2, hasCss(/border-radius\s*:/i))
-  award(2, hasCss(/box-shadow\s*:/i))
-  award(1, hasCss(/transition\s*:/i))
-  award(4, hasCss(/focus-visible|:focus/i))
-  award(2, hasCss(/prefers-reduced-motion/i))
-  award(1, hasCss(/::placeholder/i))
-
-  // Controls, content structure and a few distinctive details.
-  award(3, hasCss(/button[^{]*\{[^{}]*(?:background|border-radius|padding)/i))
-  award(2, hasCss(/input[^{]*\{[^{}]*(?:border|padding|background)/i))
-  award(2, hasHtml(/<svg\b/i))
-  award(1, hasHtml(/<img\b/i))
-  award(2, hasHtml(/<header\b/i))
-  award(1, hasHtml(/<nav\b/i))
-  award(2, hasHtml(/<main\b/i))
-  award(1, hasHtml(/<footer\b/i))
-  award(2, sections >= 2)
-  award(2, h1s === 1)
-  award(2, headings >= 2)
-  award(2, hasHtml(/<(?:form|button|input|select|textarea)\b/i))
-  award(1, hasHtml(/<label\b/i))
-  award(1, hasHtml(/aria-/i))
-  award(1, hasHtml(/alt\s*=/i))
-  award(2, words >= 80)
-  award(1, hasHtml(/<meta[^>]+viewport/i))
-  award(1, hasHtml(/<title\b/i))
+  // Biggest first: a model with one patch left should spend it on +4, not +1.
+  gaps.sort((left, right) => right.points - left.points)
 
   if (!css) {
     score -= 30
@@ -467,7 +486,7 @@ export function auditDesign(html: string): DesignAudit {
     issues.push('The layout uses a negative pixel offset to place content; this collapses on smaller screens. Use a composed media frame or normal flow instead.')
   }
 
-  return { score: Math.max(0, Math.min(100, score)), issues: issues.slice(0, 8) }
+  return { score: Math.max(0, Math.min(100, score)), issues: issues.slice(0, 8), gaps: gaps.slice(0, 12) }
 }
 
 /** Convenience for tests and callers that only need the number. */
@@ -488,15 +507,152 @@ const qaAttr = (tag: string, name: string): string => {
 }
 
 /**
+ * Hosts a page loads code, stylesheets or fonts from. Every build is previewed
+ * under `script-src 'unsafe-inline'`, so a CDN module, an import map, a
+ * stylesheet or a webfont never loads: the page paints its shell and dies with
+ * a blank canvas. A remote <img> is fine and is deliberately not counted.
+ */
+export function externalAssetHosts(html: string): string[] {
+  const hosts: string[] = []
+  const add = (raw: string) => {
+    const url = raw.trim().replace(/^\/\//, 'https://')
+    let host = url
+    try {
+      host = new URL(url).host
+    } catch {
+      host = url.slice(0, 60)
+    }
+    if (host && !hosts.includes(host)) hosts.push(host)
+  }
+  const isExternal = (url: string) => /^(?:https?:)?\/\//i.test(url.trim())
+
+  // <script src> and every <link href>: stylesheet, modulepreload, preconnect,
+  // font preload. An inline <script> with no src is exactly what is allowed.
+  for (const tag of html.matchAll(/<(?:script|link)\b[^>]*>/gi)) {
+    const url = /\b(?:src|href)\s*=\s*["']([^"']+)["']/i.exec(tag[0])?.[1] ?? ''
+    if (isExternal(url)) add(url)
+  }
+  // Import maps, static and dynamic imports, importScripts, worker scripts.
+  for (const match of html.matchAll(
+    /\b(?:from|import|importScripts|Worker)\s*\(?\s*["']((?:https?:)?\/\/[^"']+)["']/gi,
+  )) {
+    add(match[1]!)
+  }
+  // Import-map targets are plain JSON strings, not imports.
+  for (const match of html.matchAll(/["']((?:https?:)?\/\/[^"']+\.(?:m?js|css|woff2?))["']/gi)) add(match[1]!)
+  // @import, which never reaches a <link> tag.
+  for (const match of html.matchAll(/@import\s+(?:url\(\s*)?["']?((?:https?:)?\/\/[^"')\s]+)/gi)) add(match[1]!)
+  return hosts
+}
+
+/**
+ * A key map read through `e.code` or `e.key` must use names from that same
+ * namespace. `const keys = { w: false }` read as `if (e.code in keys)` never
+ * fires — a real keyboard reports 'KeyW' — so that player stands still while
+ * every string-matching check still passes.
+ */
+export function keyboardMappingIssue(html: string): string | null {
+  for (const match of html.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*\{([^{}]*)\}/g)) {
+    const name = match[1]!
+    const names = [...match[2]!.matchAll(/([A-Za-z_$][\w$]*)\s*:/g)].map((entry) => entry[1]!)
+    if (names.length < 2) continue
+    const esc = name.replace(/[$]/g, '\\$')
+    const readsCode = new RegExp(`e\\.code\\s+in\\s+${esc}\\b|${esc}\\s*\\[\\s*e\\.code`).test(html)
+    const readsKey = new RegExp(`e\\.key\\s+in\\s+${esc}\\b|${esc}\\s*\\[\\s*e\\.key`).test(html)
+    if (!readsCode && !readsKey) continue
+    const codeShaped = names.filter((entry) =>
+      /^(?:Key[A-Z]|Digit\d|Space|Enter|Escape|Arrow(?:Up|Down|Left|Right)|Numpad\w+)$/.test(entry),
+    ).length
+    const keyShaped = names.filter((entry) => /^[a-z]$|^(?:space|enter|escape)$/i.test(entry)).length
+    if (readsCode && keyShaped > codeShaped) {
+      return `The key map declares ${names.slice(0, 4).join(', ')}, but the handler reads e.code, which reports KeyW/Space. Use e.code names, or read e.key instead.`
+    }
+    if (readsKey && codeShaped > keyShaped) {
+      return `The key map declares ${names.slice(0, 4).join(', ')}, but the handler reads e.key. Use e.key names, or read e.code instead.`
+    }
+  }
+  return null
+}
+
+/**
  * Deterministic checks for the things a reviewer should never have to catch:
  * a missing title or viewport, a dead button, an unlabelled control, a broken
  * image source, an external script the sandbox will block, or an interaction
  * that disappeared during a repair. A warning is still shown; a failed check
  * marks the build for a bounded repair.
  */
+const COVERAGE_GENERIC = new Set([
+  'page', 'pages', 'site', 'sites', 'website', 'web', 'app', 'application',
+  'section', 'sections', 'detail', 'details', 'information', 'info', 'content',
+  'short', 'small', 'simple', 'basic', 'clean', 'modern', 'nice', 'good', 'new', 'full',
+  'using', 'make', 'makes', 'build', 'create', 'design', 'please', 'want', 'need', 'needs',
+  'should', 'would', 'like', 'that', 'this', 'these', 'those', 'with', 'from', 'their',
+  'there', 'where', 'which', 'when', 'what', 'have', 'also', 'plus', 'very', 'more',
+  'most', 'some', 'each', 'every', 'other', 'only', 'just', 'than', 'then', 'them',
+  'they', 'your', 'you', 'our', 'its', 'about', 'today', 'tomorrow', 'list', 'lists',
+  'day', 'time', 'act', 'takes', 'type', 'types', 'kind', 'kinds', 'things', 'stuff',
+])
+
+/**
+ * What the request asked the page to contain, and whether it is there.
+ *
+ * The page checks can tell a complete document from a broken one; they cannot
+ * tell a jazz-club page with two of its four shows from one with all four. That
+ * is the gap that makes an output look finished and still miss the brief: a
+ * production page passed every check at 100/100 while "four upcoming shows with
+ * day, time, act and price" had become two shows and no prices.
+ *
+ * The extraction is deliberately conservative. A clause only counts when it has
+ * a distinctive word (five letters or more) that the page never uses, and things
+ * a page can show without naming — a price, an hour, a form, an address — are
+ * recognised by their shape. A missed requirement costs one more step; a false
+ * one makes a good page chase a word it does not need. The bias is to miss.
+ */
+export function requestCoverage(question: string, html: string): string[] {
+  const prompt = question.replace(/\s+/g, ' ').trim().toLowerCase()
+  if (!prompt) return []
+  const text = visibleText(html).toLowerCase()
+  const markup = html.toLowerCase()
+  const haystack = `${text} ${markup}`
+  const present = (word: string): boolean => {
+    const stem = word.replace(/[^a-z0-9-]/g, '')
+    if (!stem) return false
+    const pattern = stem.replace(/-/g, '[- ]?')
+    if (new RegExp(`\\b${pattern}(?:s|es)?\\b`).test(haystack)) return true
+    // A price does not have to be called a price; an opening time does not have
+    // to be called a time. These are the shapes the thing takes on a real page.
+    if (/^prices?$|^costs?$|^fees?$/.test(stem)) return /[$£€]\s?\d/.test(text)
+    if (/^open(?:ing)?$|^hours?$|^times?$/.test(stem)) return /\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b|\bopen\b|\b\d{1,2}\s?[-–]\s?\d{1,2}\b/.test(text)
+    // A run of shows does not have to call itself "shows": four dated, priced
+    // entries in a table are the thing the request meant.
+    if (/^shows?$|^upcoming$|^schedules?$|^events?$|^week$|^performances?$|^line-?up$/.test(stem)) {
+      const times = (text.match(/\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b/g) ?? []).length
+      const prices = (text.match(/[$£€]\s?\d/g) ?? []).length
+      return Math.max(times, prices) >= 3
+    }
+    if (/^forms?$|^pre-?order$|^ordering$|^bookings?$/.test(stem)) return /<form\b|<input\b|<select\b/.test(markup)
+    if (/^contacts?$|^email$|^phone$/.test(stem)) return /@|mailto:|\b(?:call|phone|tel)\b/.test(haystack)
+    if (/^address$|^location$/.test(stem)) return /<address\b/.test(markup) || /\b\d+\s+[a-z][a-z'-]+\s+(?:street|st|road|rd|avenue|ave|lane|ln|way|quay)\b/.test(text)
+    return false
+  }
+  const clauses = prompt
+    .split(/[,;:.!?]|\band\b|\bwith\b|\bplus\b/)
+    .map((clause) => clause.trim())
+    .filter(Boolean)
+  const missing: string[] = []
+  for (const clause of clauses) {
+    const words = [...new Set(clause.match(/[a-z][a-z'-]{2,}/g) ?? [])].filter((word) => !COVERAGE_GENERIC.has(word))
+    const keys = words.filter((word) => word.length >= 5)
+    if (!keys.length) continue
+    if (keys.some(present)) continue
+    missing.push(clause.slice(0, 90))
+  }
+  return [...new Set(missing)].slice(0, 4)
+}
+
 export function verifyPage(
   html: string,
-  options: { interactive?: boolean; proxyPath?: string; question?: string } = {},
+  options: { interactive?: boolean; proxyPath?: string; question?: string; files?: string[]; pagePath?: string } = {},
 ): PageVerification {
   const checks: BuildCheck[] = []
   const add = (id: string, label: string, status: BuildCheck['status'], detail?: string) =>
@@ -530,8 +686,7 @@ export function verifyPage(
   const missingAlt = images.filter((tag) => !/\balt\s*=/i.test(tag))
   const emptyImage = images.filter((tag) => !qaAttr(tag, 'src') || /^(?:#|javascript:)/i.test(qaAttr(tag, 'src')))
   const emptyLinks = [...html.matchAll(/<a\b[^>]*>/gi)].map((match) => match[0]).filter((tag) => !qaAttr(tag, 'href'))
-  const externalScript = /<script\b[^>]*\bsrc\s*=/i.test(html)
-  const externalStyle = /<link\b[^>]*\brel\s*=\s*["']stylesheet/i.test(html)
+  const externalAssets = externalAssetHosts(html)
   const hardWidths = [...html.matchAll(/(?:min-)?width\s*:\s*(\d{4,})px/gi)]
     .map((match) => Number(match[1]))
     .filter((value) => value > 1_400)
@@ -550,8 +705,76 @@ export function verifyPage(
   else warn('h1', 'One clear page heading', `There are ${h1s} h1 elements; keep one per screen.`)
   if (css.length >= 800) pass('stylesheet', 'Page has a real stylesheet')
   else fail('stylesheet', 'Page has a real stylesheet', 'The page needs a substantive inline stylesheet.')
-  if (/@media/i.test(css) && /max-width\s*:/i.test(css)) pass('responsive', 'Responsive breakpoints are present')
-  else warn('responsive', 'Responsive breakpoints are present', 'Add at least one mobile breakpoint and a constrained content width.')
+  if (/@media/i.test(css) && /max-width\s*:/i.test(css)) {
+    pass('responsive', 'Responsive breakpoints are present')
+    // A breakpoint that only changes padding keeps the header as one long row:
+    // on a phone the brand and the nav then overlap and the last link clips.
+    const mobile = css.slice(Math.max(0, css.search(/@media/i)))
+    const reflows = /flex-wrap|flex-direction\s*:\s*column|grid-template-columns|display\s*:\s*none/i.test(mobile)
+    if (/<nav\b/i.test(html) && !reflows) {
+      fail(
+        'header-reflow',
+        'Header reflows on a phone',
+        'The mobile breakpoint does not stack the header: the brand and the nav stay on one row and the last link clips. Inside the @media block, make the header a column (or flex-wrap: wrap) and centre the nav.',
+      )
+    } else pass('header-reflow', 'Header reflows on a phone')
+  } else {
+    // A page with no breakpoint is not a finished page on a phone: one 12,746-
+    // character coffee shop arrived with zero media queries and finished at
+    // 97/100 because this was only a warning.
+    fail(
+      'responsive',
+      'Responsive breakpoints are present',
+      'There is no @media block, so the page does not adapt to a phone. Add one breakpoint (max-width: 720px) that stacks the header and any multi-column section.',
+    )
+  }
+  // A fixed or sticky header floats over the top of the page. Without an offset
+  // the first line of the hero sits underneath it — a real page at 97/100 had
+  // its headline cut in half this way.
+  // Only a fixed header floats over content from the first pixel; a sticky one
+  // still takes its space in the flow until the page scrolls.
+  const floatsHeader =
+    /position\s*:\s*fixed/i.test(css) &&
+    /(?:^|[},])\s*(?:body|main|\.hero|header\s*\+|header\s*~)[^{]*\{[^}]*(?:padding-top|margin-top)/i.test(css)
+  if (/position\s*:\s*fixed/i.test(css) && !floatsHeader && !/scroll-padding-top/i.test(css)) {
+    fail(
+      'header-offset',
+      'The header does not cover the page',
+      'The header is fixed and nothing offsets the content under it, so the first heading hides behind the header. Give body (or the hero) a padding-top as tall as the header.',
+    )
+  } else pass('header-offset', 'The header does not cover the page')
+  // A var() with no definition is silently ignored, so `gap: var(--space-4)`
+  // collapses to zero and `padding: var(--space-3)` to nothing. One page rendered
+  // with its nav run together and a fixed header over its hero because of five
+  // undefined tokens like this.
+  // var(--x, fallback) is safe; only a bare var() with nothing defined vanishes.
+  const usedVars = [...css.matchAll(/var\(\s*(--[a-z0-9-]+)\s*([,)])/gi)]
+    .filter((match) => match[2] === ')')
+    .map((match) => match[1]!)
+  const definedVars = new Set([...html.matchAll(/(--[a-z0-9-]+)\s*:/gi)].map((match) => match[1]!))
+  const undefinedVars = [...new Set(usedVars)].filter((name) => !definedVars.has(name))
+  if (undefinedVars.length) {
+    fail(
+      'variables',
+      'Every CSS variable is defined',
+      `var(${undefinedVars.slice(0, 3).join('), var(')}) is never defined, so every declaration that uses it is ignored. Define the token in :root (or use the value directly).`,
+    )
+  } else pass('variables', 'Every CSS variable is defined')
+  // Nav links with no gap render as one run-on word: “MenuAboutContact”.
+  const navBlock = html.match(/<nav\b[\s\S]*?<\/nav>/i)?.[0] ?? ''
+  const navLinks = (navBlock.match(/<a\b/gi) ?? []).length
+  if (navLinks >= 2) {
+    const spaced =
+      /(?:^|[},])\s*(?:nav|\.[a-z-]*nav[a-z-]*|header\s+ul|nav\s+ul|header)[^{]*\{[^}]*(?:gap\s*:|justify-content\s*:\s*space-between)/i.test(css) ||
+      /(?:^|[},])\s*(?:nav\s+a|nav\s+ul\s+li|\.nav\s+a)[^{]*\{[^}]*margin/i.test(css)
+    if (spaced) pass('nav-spacing', 'Nav links are spaced apart')
+    else
+      fail(
+        'nav-spacing',
+        'Nav links are spaced apart',
+        'The nav links touch each other and read as one word. Put them in a flex row with a gap (16px or more), or add a margin between them.',
+      )
+  } else pass('nav-spacing', 'Nav links are spaced apart')
   if ((html.match(/<button\b/gi) ?? []).length) {
     if (hasInertButtons(html)) fail('controls', 'Every button has a handler', 'A button has no JavaScript behaviour.')
     else pass('controls', 'Every button has a handler')
@@ -572,8 +795,48 @@ export function verifyPage(
   if (missingAnchors.length) {
     fail('anchors', 'Anchor links have targets', `No section has id: ${missingAnchors.slice(0, 3).join(', ')}.`)
   } else pass('anchors', 'Anchor links have targets')
-  if (externalScript || externalStyle) fail('assets', 'Assets stay self-contained', 'External scripts or stylesheets will be blocked by the sandbox.')
-  else pass('assets', 'Assets stay self-contained')
+  if (externalAssets.length) {
+    fail(
+      'assets',
+      'Assets stay self-contained',
+      `The preview runs inline scripts only, so ${externalAssets.slice(0, 3).join(', ')} never loads. Inline the code, or write the effect yourself.`,
+    )
+  } else pass('assets', 'Assets stay self-contained')
+  // A page that links a stylesheet or a script it never wrote is a page that
+  // renders unstyled in the preview — and it scored 85 anyway, because nothing
+  // checked the link. Only checked when the caller knows the project.
+  if (options.files?.length) {
+    const pagePath = (options.pagePath ?? 'index.html').replace(/^\.?\//, '')
+    const pageDir = pagePath.includes('/') ? pagePath.slice(0, pagePath.lastIndexOf('/') + 1) : ''
+    const known = new Set(options.files.map((file) => file.replace(/^\.?\//, '')))
+    const refs = [...html.matchAll(/\b(?:href|src)\s*=\s*["']([^"']+)["']/gi)]
+      .map((match) => match[1]!.trim())
+      .filter((value) => value && !/^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(value))
+      .map((value) => value.split(/[?#]/)[0]!.replace(/^\.?\//, ''))
+      .filter(Boolean)
+    const missing = [...new Set(refs)].filter((ref) => {
+      if (known.has(ref)) return false
+      return !(pageDir && known.has(`${pageDir}${ref}`))
+    })
+    // A preview is rendered from the document alone, so a linked stylesheet or
+    // script never loads there even when the file exists in the project: the page
+    // arrives with dead buttons and no styling. It has to be inline.
+    const linkedCode = [...new Set(refs)].filter((ref) => /\.(?:css|m?js)$/i.test(ref))
+    if (linkedCode.length) {
+      fail(
+        'references',
+        'Every linked file exists',
+        `${pagePath} links ${linkedCode.slice(0, 3).join(', ')}, which does not load in the preview. Put that code in a <style> or <script> block inside the page.`,
+      )
+    } else if (missing.length) {
+      const list = missing.slice(0, 3).join(', ')
+      fail(
+        'references',
+        'Every linked file exists',
+        `${pagePath} links ${list}, which ${missing.length === 1 ? 'is' : 'are'} not in the project. Inline that code, or write the file in the same turn — never link a file you have not written.`,
+      )
+    } else pass('references', 'Every linked file exists')
+  }
   if (/\b(?:lorem ipsum|your (?:copy|content|text) here|coming soon|placeholder)\b/i.test(text)) {
     fail('copy', 'Copy is finished', 'Placeholder copy is still present.')
   } else if (text.split(/\s+/).filter(Boolean).length < 60) {
@@ -588,12 +851,23 @@ export function verifyPage(
   if (options.interactive) {
     if (hasInteractiveCode(html)) pass('interactive', 'Interactive behaviour is present')
     else fail('interactive', 'Interactive behaviour is present', 'The requested app or game has no working JavaScript interaction.')
+    const keys = keyboardMappingIssue(html)
+    if (keys) fail('keys', 'Keyboard controls are wired', keys)
+    else pass('keys', 'Keyboard controls are wired')
   }
   if (options.proxyPath) {
     if (hasProxyCode(html, options.proxyPath)) pass('proxy', 'Proxy endpoint is wired')
     else fail('proxy', 'Proxy endpoint is wired', 'The proxy app does not load the provided endpoint.')
   }
   if (options.question) {
+    const coverage = requestCoverage(options.question, html)
+    if (coverage.length) {
+      fail(
+        'brief',
+        'The page covers the brief',
+        `The request asked for ${coverage.join('; ')}. It is not on the page: add that content, not just a heading.`,
+      )
+    } else pass('brief', 'The page covers the brief')
     const requested = requestedControlIssues(options.question, html)
     if (requested.length) fail('requested-controls', 'Requested controls are implemented', requested.join(' '))
     else pass('requested-controls', 'Requested controls are implemented')
@@ -629,6 +903,26 @@ export function verifyPages(
   const warnings = checks.filter((check) => check.status === 'warn').map((check) => check.detail ? `${check.label} — ${check.detail}` : check.label)
   const score = Math.round(results.reduce((total, result) => total + result.score, 0) / results.length)
   return { checks, failures, warnings, score }
+}
+
+/**
+ * An applied edit is not an accepted edit.
+ *
+ * The checks are deterministic, so they are the arbiter: an edit may not add a
+ * failure, increase the failure count, or lower the score. A neutral edit (a
+ * copy tweak, a colour change) passes — unlike Dent's repair gate, this one
+ * does not require a strict improvement, because a working page that is simply
+ * being edited is a legitimate outcome.
+ *
+ * Failure labels carry a page index (`2:about.html: …`) that shifts when a page
+ * is added, so the identity comparison strips that prefix first and compares
+ * page-qualified labels instead.
+ */
+export function pageCheckImprovement(before: PageVerification, after: PageVerification): boolean {
+  const identity = (failure: string) => failure.replace(/^\d+:/, '').trim()
+  const known = new Set(before.failures.map(identity))
+  const added = after.failures.map(identity).filter((failure) => !known.has(failure))
+  return added.length === 0 && after.failures.length <= before.failures.length && after.score >= before.score
 }
 
 function repairNotes(verification: PageVerification, audit: DesignAudit): string[] {
@@ -1062,6 +1356,20 @@ export function buildMessages(question: string, system: string, previous?: Build
   ]
 }
 
+/**
+ * A repair is kept only when it fixes a named failure or raises the score.
+ * Trading one failure for another is a regression, and looping on it would
+ * spend the whole budget going sideways.
+ */
+export function repairAccepted(before: PageVerification, after: PageVerification): boolean {
+  const kept = after.failures.every((failure) => before.failures.includes(failure))
+  // A repair that introduces a failure it did not have is a regression, even
+  // when it cleared a different one and the score rose.
+  if (!kept) return false
+  if (after.failures.length < before.failures.length) return true
+  return after.failures.length === before.failures.length && after.score > before.score
+}
+
 type PolishIntent = {
   lane: PublicLane
   question: string
@@ -1370,7 +1678,7 @@ Rules:
 - Use the real photographs listed at the end of this message, and only those, for imagery: each inside a fixed-aspect container with a background colour, with loading="lazy" and the exact width, height and alt text given. Draw anything product-specific that no photo covers (a loaf, a chair, a chart) as inline SVG. Never invent or hotlink any other image URL. If no photographs are listed, use inline SVG or CSS gradients instead.
 - Credit every photograph in a small caption or credits line directly with that image: the photographer, "Wikimedia Commons", the licence, and a link to commons.wikimedia.org. Never add a photography credit to a section that has no photograph.
 - Add motion that works without JavaScript: CSS transitions on hover and focus, plus a short fade or slide-in on load using @keyframes. Wrap animation rules in @media (prefers-reduced-motion: reduce) so the page respects that setting.
-- Do not use external scripts, stylesheets, fonts, fetch, XHR, WebSocket, storage or API calls. A proxy app is the one exception: it may load the provided proxy endpoint in an iframe.
+- Do not use external scripts, stylesheets, fonts, fetch, XHR, WebSocket, storage or API calls. Never import a library through an import map or a module URL: the preview runs inline scripts only, so it would never load. A proxy app is the one exception: it may load the provided proxy endpoint in an iframe.
 - Do not embed third-party maps, videos or other iframes. Draw a small inline SVG locator or use a styled address card; the proxy app is the only iframe exception.
 - For forms and signups, show an inline confirmation or status in the page; never use window.alert().
 - Fill every page with the real content: headings, copy and controls. Never return an empty shell or a CSS-only document.
@@ -1399,6 +1707,7 @@ The game must actually work, not just look like a game:
 - Use <canvas> for the playfield. Scale it for devicePixelRatio, handle resize, and fit the frame on phone and desktop.
 - Run a requestAnimationFrame loop with delta time, pause when the document is hidden, and keep the game state in JavaScript.
 - Implement the exact control scheme the request names. For two players, wire two independent, simultaneous key maps and two movable characters; never map both sets to the same player or make one player keyboard-only. Label each player's keys on the start screen and in the HUD.
+- Read keys from one namespace only. If the handler tests e.code, the map must use KeyA/KeyD/KeyW/KeyS/Space/ArrowLeft/…; if it tests e.key, use a/d/w/s/" ". A map of lowercase names read through e.code never fires, so that player can never move.
 - Keep the two control schemes strictly disjoint: Player 1 reads only W/A/S/D and Space; Player 2 reads only Arrow keys. Never let Player 1 read an Arrow key or Player 2 read a WASD key.
 - Add keyboard input, plus touch/pointer controls for one player or on-screen controls for both players when the request names two.
 - A tag transfers once per contact. Add a short tag cooldown or require the players to separate, so IT does not flip every frame while they overlap.
@@ -1414,6 +1723,7 @@ The game must actually work, not just look like a game:
 - Initialise both players before the first animation frame: call reset() once at startup, or guard draw() with if (!p1 || !p2) return;. The start button must recover the loop if the first frame already ran; never leave a frozen canvas at 60 seconds.
 - Add a clear HUD with the live score for every player, plus the timer or level, and a short instruction line. Keep both scores visible throughout the round, not only on the game-over screen. Keep the game readable at small sizes.
 - Draw all art with canvas, CSS or inline SVG. Do not use photographs, external images, scripts, stylesheets, fonts or sound files. WebAudio beeps are optional.
+- A 3D request is still one inline document: no 3D library is reachable, and an import map would leave a blank canvas. Draw it yourself on a canvas 2D context with a projection you control: an isometric board, or a perspective divide (screen = centre + (world - camera) * focal / depth) with depth sorting and darker tops for shading. That route renders first time and is easy to debug. Hand-written WebGL is the risky choice: one shader that fails to compile draws nothing at all, with an empty screen and no error, so use it only if you are certain the program links and every uniform is set.
 - Do not use fetch/XHR/WebSocket, storage or API calls.
 - Never use placeholder mechanics, TODO comments, fake buttons or described-but-missing features.
 - Keep the page 6–8 KB, one page, no page markers, and do not turn it into a multi-page site.
@@ -1441,7 +1751,7 @@ The game must actually work, not just look like a game:
   // returns a valid page first wins and the others are cancelled. This replaces
   // the old sequential retries, where one slow lane could hold the build for a
   // full minute before the next lane was even tried.
-  const deadline = Date.now() + (game ? 140_000 : 120_000)
+  const deadline = Date.now() + (game ? 175_000 : 150_000)
   const buildLabel = game ? 'game' : proxy ? 'proxy' : 'page'
   const startedAt = Date.now()
   const heartbeat = setInterval(() => {
@@ -1671,13 +1981,20 @@ The game must actually work, not just look like a game:
     // break the playfield. Clean tools also skip visual polish; only a failed
     // check or a plainly unfinished non-interactive page earns another call.
     const designNeedsWork = !game && !functional && !proxy && beforeRepairAudit.score < 84
-    // Games never get a visual redesign, but a game with a failed control or
-    // collision check gets one targeted repair. A clean game still ships
-    // immediately; a working loop is worth more than a prettier shell.
-    const needsRepair = game ? verification.failures.length > 0 : verification.failures.length > 0 || designNeedsWork
-    if (Date.now() < deadline - 6_000 && pages.length === 1 && needsRepair) {
-      await input.onStatus?.(game ? 'Fixing the game checks…' : 'Fixing the checked issues…')
-      polished = await polishBuildPage({
+    // Games never get a visual redesign, but a failing game gets targeted
+    // repairs. One pass used to be the limit, so a first fix that missed took
+    // the whole page down with it and shipped as a warning. Each round now gets
+    // the named failures again, and a round that trades one failure for another
+    // ends the loop instead of spending the budget going sideways.
+    const repairRounds = game || functional ? 3 : 2
+    for (let round = 1; round <= repairRounds; round += 1) {
+      const wantsDesign = round === 1 && designNeedsWork
+      if (!verification.failures.length && !wantsDesign) break
+      if (pages.length !== 1 || Date.now() > deadline - 8_000) break
+      await input.onStatus?.(
+        game ? `Fixing the game checks… (${round}/${repairRounds})` : 'Fixing the checked issues…',
+      )
+      const attempt = await polishBuildPage({
         lane: winner.lane,
         question: input.question,
         page: pages[0]!,
@@ -1689,13 +2006,20 @@ The game must actually work, not just look like a game:
         interactive: game || functional,
         ...(game ? { game: true } : {}),
         signal: input.signal,
-        timeoutMs: Math.min(game ? 20_000 : 25_000, Math.max(8_000, deadline - Date.now() - 4_000)),
+        timeoutMs: Math.min(game ? 24_000 : 25_000, Math.max(8_000, deadline - Date.now() - 5_000)),
         onStatus: input.onStatus,
       })
-      if (polished) {
-        pages = [{ ...polished.page, html: tidy(polished.page.html) }]
-        verification = polished.verification
-      }
+      if (!attempt) break
+      const nextPages = [{ ...attempt.page, html: tidy(attempt.page.html) }]
+      const nextVerification = verifyPages(nextPages, {
+        interactive: game || functional,
+        question: input.question,
+        ...(proxy && input.proxyPath ? { proxyPath: input.proxyPath } : {}),
+      })
+      if (!repairAccepted(verification, nextVerification)) break
+      pages = nextPages
+      verification = nextVerification
+      polished = { ...attempt, verification: nextVerification }
     }
     verification = verifyPages(pages, {
       interactive: game || functional,

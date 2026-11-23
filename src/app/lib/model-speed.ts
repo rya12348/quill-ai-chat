@@ -13,8 +13,9 @@ export const MODEL_SPEED_LABELS: Record<ModelSpeed, { label: string; title: stri
 }
 
 const FAST_MODEL = /claude-haiku-5-5|gemini-web|gemini-4|buffy-lite/i
-const LONGER_MODEL =
-  /claude-sonnet-5-5|gpt-6\.1-sol|gpt-6-luna|kimi-k3|deepseek|step-5|ling-3\.2|nemotron-3-ultra|(^|[\s/])dent([\s-]|$)|(^|[\s/])buffy([\s-]|$)/i
+// Picker models now answer through the selected lane directly. Only the local
+// Buffy agent has a deliberately longer tool run.
+const LONGER_MODEL = /(^|[\s/])buffy([\s-]|$)/i
 
 /**
  * Classify a picker row by its usual response time. Unknown models stay

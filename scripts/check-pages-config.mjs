@@ -21,7 +21,7 @@ const d1 = (entries) => entries?.find((entry) => entry.binding === 'DB')
 
 if (config.name !== 'ink-jo3') fail('name must be ink-jo3')
 if (config.pages_build_output_dir !== '../dist/client') fail('pages_build_output_dir must be ../dist/client')
-if (config.vars?.APP_ORIGIN !== 'https://ink.7394.jo3.org') fail('production APP_ORIGIN must be the custom domain')
+if (config.vars?.APP_ORIGIN !== 'https://www.inkbrowser.dpdns.org') fail('production APP_ORIGIN must be the custom domain')
 
 const productionDb = d1(config.d1_databases)
 if (productionDb?.database_name !== 'ink-live') fail('production DB must be ink-live')

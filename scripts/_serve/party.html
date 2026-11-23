@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Puffer Party — bot console</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  body{margin:0;background:#0b1118;color:#dfe9f2;font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;padding:24px}
+  main{max-width:860px;margin:0 auto}
+  header{display:flex;align-items:baseline;gap:10px;margin-bottom:18px}
+  h1{font-size:20px;margin:0;letter-spacing:-.01em}
+  .dot{width:9px;height:9px;border-radius:50%;background:#3d4b59;display:inline-block}
+  .dot.on{background:#43d17c;box-shadow:0 0 0 3px rgba(67,209,124,.16)}
+  .dot.stale{background:#e0a72e;box-shadow:0 0 0 3px rgba(224,167,46,.16)}
+  .muted{color:#8fa3b5;font-size:12.5px}
+  .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px}
+  .card{background:#111b25;border:1px solid #1e2b38;border-radius:10px;padding:10px 12px}
+  .card .k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#7d92a6;margin-bottom:4px}
+  .card .v{font-size:15px;font-weight:600;word-break:break-word}
+  .v.win{color:#43d17c}
+  .panel{background:#111b25;border:1px solid #1e2b38;border-radius:10px;padding:14px;margin-bottom:16px}
+  .panel h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#8fa3b5;margin:0 0 10px;font-weight:600}
+  .row{display:flex;gap:8px}
+  input{flex:1;background:#0b1118;border:1px solid #22303e;border-radius:8px;color:#dfe9f2;padding:9px 11px;font:inherit}
+  input:focus{outline:none;border-color:#3a6ea5}
+  button{background:#1d6fd4;border:0;color:#fff;border-radius:8px;padding:9px 16px;font:inherit;font-weight:600;cursor:pointer}
+  button:hover{background:#2680ea}
+  button.ghost{background:#1b2733;color:#c3d3e2}
+  button.ghost:hover{background:#22303e}
+  #ev{font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;max-height:250px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+  #ev .t{color:#5f7488}
+  #ev .hi{color:#8fd0a0}
+  #ev .bad{color:#e58b8b}
+  ol{margin:0;padding-left:20px}
+  li{margin:0 0 7px}
+  a{color:#6fb3ff}
+  code{background:#0b1118;border:1px solid #22303e;border-radius:5px;padding:1px 5px;font-size:12.5px}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="dot" id="dot"></span>
+    <h1>Puffer Party</h1>
+    <span class="muted" id="conn">looking for the bot…</span>
+  </header>
+
+  <div class="facts">
+    <div class="card"><div class="k">Turn</div><div class="v" id="up">—</div></div>
+    <div class="card"><div class="k">Category</div><div class="v" id="cat">—</div></div>
+    <div class="card"><div class="k">In the box</div><div class="v" id="box">—</div></div>
+    <div class="card"><div class="k">Answers sent</div><div class="v" id="sent">0</div></div>
+    <div class="card"><div class="k">Refused</div><div class="v" id="bad">0</div></div>
+    <div class="card"><div class="k">Script</div><div class="v" id="ver">—</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Answer now</h2>
+    <div class="row">
+      <input id="w" placeholder="type a word and press send — the bot types it on your turn" autocomplete="off">
+      <button id="go">Send</button>
+    </div>
+    <p class="muted" id="status" style="margin:9px 0 0">queued words are typed by the bot when it is your turn</p>
+  </div>
+
+  <div class="panel">
+    <h2>Live</h2>
+    <div id="ev" class="muted">waiting for events…</div>
+  </div>
+
+  <div class="panel">
+    <h2>How this runs</h2>
+    <ol>
+      <li><strong>The game lives in its own tab or window.</strong> Not in a frame, not through a proxy page: the party asks for a human verification that is tied to the game's own address, so anything that re-serves the page from another address cannot pass it. This console is separate from the game on purpose.</li>
+      <li><strong>The bot is a userscript in that tab.</strong> Install or update it from <a href="http://127.0.0.1:8081/puffer-bot.user.js">127.0.0.1:8081/puffer-bot.user.js</a>, then reload the game tab. This page and the pack server keep working while it plays.</li>
+      <li><strong>Nothing here is proxied.</strong> The only network the bot uses is this machine: the pack and model on <code>127.0.0.1:5201</code>, plus the game tab's own connection.</li>
+    </ol>
+  </div>
+</main>
+
+<script>
+(function () {
+  var LIVE = 'http://127.0.0.1:5201/live';
+  var CMD = 'http://127.0.0.1:5201/cmd';
+  var $ = function (id) { return document.getElementById(id); };
+  var lastEvents = '';
+
+  function ago(ms) {
+    if (ms < 1200) return 'just now';
+    if (ms < 60000) return Math.round(ms / 1000) + 's ago';
+    return Math.round(ms / 60000) + 'm ago';
+  }
+
+  function label(e) {
+    // One compact line per event: the first meaningful key and its value.
+    var keys = Object.keys(e || {});
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (k === 'ms' || k === 'cat' || k === 'n' || k === 'src' || k === 'via') continue;
+      var v = e[k];
+      if (v && typeof v === 'object') continue;
+      var rest = [];
+      if (e.src) rest.push(e.src);
+      if (e.via) rest.push(e.via);
+      if (e.n) rest.push('n=' + e.n);
+      return { key: k, text: String(v).slice(0, 90) + (rest.length ? '  (' + rest.join(', ') + ')' : '') };
+    }
+    return { key: 'event', text: JSON.stringify(e).slice(0, 90) };
+  }
+
+  function paint(j) {
+    var age = j.now && j.at ? j.now - j.at : 1e9;
+    var dot = $('dot');
+    dot.className = 'dot' + (age < 8000 ? ' on' : age < 60000 ? ' stale' : '');
+    $('conn').textContent = j.at ? 'bot ' + ago(age) + (j.name ? ' · ' + j.name : '') : 'bot has not reported yet';
+    $('ver').textContent = j.ver || '—';
+    $('cat').textContent = j.cat || '—';
+    $('box').textContent = j.box || '—';
+    // up is the bot's own "is it my turn" flag (0/1) or a name, depending on the
+    // script version; label both rather than showing a bare 0.
+    var up = j.up;
+    var mine = typeof up === 'string' ? /\b(yours|you)\b/i.test(up) : !!up;
+    $('up').textContent = typeof up === 'string' && up ? up : (mine ? 'yours' : 'theirs');
+    $('up').className = 'v' + (mine ? ' win' : '');
+    $('sent').textContent = String(j.sent == null ? 0 : j.sent);
+    $('bad').textContent = String(j.bad == null ? 0 : j.bad);
+
+    var evs = (j.events || []).slice(-14);
+    var sig = JSON.stringify(evs);
+    if (sig === lastEvents) return;
+    lastEvents = sig;
+    var host = $('ev');
+    if (!evs.length) { host.textContent = 'no events yet'; return; }
+    host.innerHTML = evs.map(function (x) {
+      var e = x.e || {};
+      var L = label(e);
+      var cls = /bad|giveUp|fail|drop|skip/i.test(L.key) ? 'bad' : /sent|ok|delivered|learned|llmLine|rescue/i.test(L.key) ? 'hi' : '';
+      var t = e.ms ? new Date(e.ms).toLocaleTimeString() : '';
+      return '<div><span class="t">' + t + '</span>  <span class="' + cls + '">' + L.key + '</span>  ' + L.text.replace(/[<>&]/g, '') + '</div>';
+    }).join('');
+  }
+
+  function tick() {
+    fetch(LIVE, { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j) paint(j); })
+      .catch(function () { $('conn').textContent = 'pack server is not running on 5201'; $('dot').className = 'dot'; });
+  }
+
+  $('go').addEventListener('click', function () {
+    var w = $('w').value.trim();
+    if (!w) return;
+    $('status').textContent = 'sending "' + w + '"…';
+    fetch(CMD + '?do=say&w=' + encodeURIComponent(w), { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { $('status').textContent = j && j.queued ? 'queued "' + w + '" (' + j.queued + ' waiting)' : 'queued "' + w + '"'; $('w').value = ''; })
+      .catch(function () { $('status').textContent = 'could not reach the pack server on 5201'; });
+  });
+  $('w').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('go').click(); });
+
+  tick();
+  setInterval(tick, 1500);
+})();
+</script>
+</body>
+</html>

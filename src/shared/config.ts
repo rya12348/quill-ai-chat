@@ -5,8 +5,23 @@
 export const BRAND = 'Ink'
 export const TAGLINE = 'Write, research and build pages in one thread.'
 
-/** The emoji a person can attach to a chat. */
+/** The quick reactions offered beside a room message; any other emoji is allowed too. */
 export const CHAT_REACTIONS = ['❤️', '😂', '👍', '🔥', '😮', '🎉'] as const
+
+/**
+ * One reaction: a single emoji, including joined sequences, flags, keycaps and
+ * skin tones. Words, digits and mixed text are rejected so a reaction stays a
+ * reaction rather than a second message.
+ */
+export function cleanReactionEmoji(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const reaction = value.trim()
+  if (!reaction || reaction.length > 32) return null
+  const withoutKeycaps = reaction.replace(/[0-9#*]\uFE0F?\u20E3/g, '')
+  if (/[\p{L}\p{N}\s]/u.test(withoutKeycaps)) return null
+  if (!/(?:\p{Extended_Pictographic}|[\u{1F1E6}-\u{1F1FF}]{2}|[0-9#*]\uFE0F?\u20E3)/u.test(reaction)) return null
+  return reaction
+}
 
 /** What the model is told before every conversation. */
 export const SYSTEM_PROMPT = `You are ${BRAND}, a sharp, practical writing and research tool. Your job is to help the person think clearly and get the thing done — not to sound impressive.
@@ -129,6 +144,12 @@ export const MAX_INSTRUCTIONS_CHARS = 2_000
 export const MAX_ATTACHMENTS = 4
 /** Maximum stored bytes for one image after browser compression. */
 export const MAX_ATTACHMENT_BYTES = 1_200_000
+/**
+ * A GIF is stored exactly as picked so it keeps animating, which rules out the
+ * browser's resize pass. Its cap is higher but still inside the per-message
+ * total below.
+ */
+export const MAX_GIF_BYTES = 3_000_000
 /** Maximum text kept from one file; the Worker sends a shorter prompt excerpt. */
 export const MAX_TEXT_ATTACHMENT_CHARS = 40_000
 /** A PDF or DOCX is parsed in the browser; this bounds the source upload. */
@@ -173,6 +194,8 @@ export const ROOM_ID = 'general'
 export const ROOM_NAME = 'General'
 /** Room names are short enough to scan in the room rail. */
 export const ROOM_NAME_CHARS = 32
+/** The display name other people see beside a room message. */
+export const ROOM_DISPLAY_NAME_CHARS = 40
 /** Private rooms need a password the creator chooses. */
 export const ROOM_PASSWORD_MIN_CHARS = 4
 export const ROOM_PASSWORD_MAX_CHARS = 72
@@ -182,3 +205,10 @@ export const MAX_ROOMS = 50
 export const ROOM_MESSAGE_CHARS = 500
 /** Messages are part of the room for exactly thirty minutes. */
 export const ROOM_MESSAGE_TTL_MS = 30 * 60_000
+/**
+ * Active room media caps, measured in decoded attachment bytes. Bytes live in
+ * R2; the per-room cap also bounds abandoned rooms until the next retention
+ * sweep.
+ */
+export const ROOM_ATTACHMENT_USER_BYTES = 16 * 1024 * 1024
+export const ROOM_ATTACHMENT_ROOM_BYTES = 64 * 1024 * 1024

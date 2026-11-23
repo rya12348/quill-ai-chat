@@ -61,21 +61,53 @@ const OPENROUTER_FREE_MODELS = [
 // token, which is why the strongest LLM7 lanes looked dead in production.
 const LLM7_MODELS = ['gpt-oss:20b', 'codestral-latest', 'mistral-Nemo-Instruct-2407']
 const GROQ_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b']
+// Workers AI model ids carry their publisher in the id. Both gpt-oss sizes are
+// marked for function calling and have a 128k window, which is what a long step
+// loop needs.
+/**
+ * The Workers AI ids that answered on a Workers Free account on 2026-11-20.
+ *
+ * Every id here was called on a live account, not copied from a catalogue. The
+ * list used to be eleven: GLM-5.3 is not available on the Workers Free plan,
+ * GLM-5.3-flash, DeepSeek R1 Distill 32B, DeepSeek V4 Flash and Nemotron 3 120B
+ * were all deprecated the same day they were listed, and Gemma 4 26B replied with
+ * `content: null` — which an agent step loop reads as an empty answer and retries
+ * on another lane. Only the five below produce text.
+ */
+const WORKERS_AI_MODELS = [
+  '@cf/openai/gpt-oss-120b',
+  '@cf/openai/gpt-oss-20b',
+  '@cf/qwen/qwen3.8-27b',
+  '@cf/meta/llama-4-scout-17b-16e-instruct',
+  '@cf/mistralai/mistral-small-3.1-24b-instruct',
+]
 const MISTRAL_MODELS = ['mistral-large-4', 'codestral-latest', 'ministral-14b-latest']
 // Kimi K3 was retired from NVIDIA on 2026-10-15 and DeepSeek V4.1 Flash on
 // 2026-11-16. Both still appeared in the catalogue and failed in ~50 ms with
 // HTTP 410, which made the first build-spec call fail and left every build
 // without its implementation contract. Dent uses the official DeepSeek lane
 // when that key is configured; it is not silently replaced by another model.
+/**
+ * The NVIDIA ids that answered on a live free NIM key on 2026-11-20.
+ *
+ * `z-ai/glm-5.3-flash` returned an empty body and `openai/gpt-oss-20b` returned
+ * `content: null`, which an agent step loop reads as a dropped call and retries
+ * elsewhere. Both were removed rather than left in as silent fallbacks. The
+ * vision split was measured too: only Nemotron 3.5 Super VL and Gemma 4 31B
+ * answered an image part — Step 5 Preview accepts text but returns nothing for a
+ * picture, so it is no longer advertised as vision.
+ */
 const NVIDIA_MODELS = [
   'stepfun-ai/step-5-preview',
   'minimaxai/minimax-m3.1-flash',
   'nvidia/nemotron-3.5-super-vl-120b-a12b',
-  'z-ai/glm-5.3-flash',
   'nvidia/nemotron-3-ultra-550b-a55b',
-  'openai/gpt-oss-20b',
   'google/gemma-4-31b-it',
 ]
+// An older NVIDIA_MODEL secret can still name one of the two retired checkpoints.
+// Honouring it made the Kimi row a permanently dead lane (HTTP 410 in ~50 ms)
+// that silently answered as another model, so the override is ignored for them.
+const RETIRED_NVIDIA_MODELS = /^(?:moonshotai\/kimi-k3|deepseek-ai\/deepseek-v4\.1-flash)$/i
 // Alibaba's Singapore free quota is per model (1M tokens for 90 days), so each
 // model gets its own lane; one exhausted quota must not hide the other two.
 const DASHSCOPE_MODELS = ['qwen3.8-max', 'deepseek-v4-pro', 'glm-5.3']
@@ -90,6 +122,9 @@ const SAMBANOVA_MODELS = ['DeepSeek-V3.2', 'DeepSeek-V3.1', 'gpt-oss-120b', 'Min
 // allowance is small (2 requests/minute per IP and model), so it is best used
 // as a fallback rather than as every member of a blend.
 const OVH_MODELS = [
+  // This is the exact DeepSeek V4.1 Flash checkpoint behind Dent. OVHcloud's
+  // keyless lane keeps Dent available without an NVIDIA or OpenRouter balance.
+  'DeepSeek-V4.1-Flash-1017',
   'gpt-oss-120b',
   'gpt-oss-20b',
   'Qwen3.5-397B-A17B',
@@ -113,18 +148,6 @@ const KILO_FREE_MODELS = [
   'stealth/glyph-cluster',
   'stealth/crouton-alpha',
   'openrouter/free',
-]
-const CLOUDFLARE_MODELS = [
-  '@cf/zai-org/glm-5.3',
-  '@cf/zai-org/glm-5.3-flash',
-  '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
-  '@cf/deepseek-ai/deepseek-v4-flash-0731',
-  '@cf/openai/gpt-oss-120b',
-  '@cf/qwen/qwen3.8-27b',
-  '@cf/nvidia/nemotron-3-120b-a12b',
-  '@cf/google/gemma-4-26b-a4b-it',
-  '@cf/meta/llama-4-scout-17b-16e-instruct',
-  '@cf/mistralai/mistral-small-3.1-24b-instruct',
 ]
 // BlockRun's live free list. It exposes several models beyond the two Ink
 // originally used, all through the same keyless endpoint.
@@ -255,11 +278,50 @@ function requestBody(lane: PublicLane, input: LaneInput, stream: boolean): Recor
   }
   if (input.temperature !== undefined) body.temperature = input.temperature
   const host = new URL(lane.url).host
-  if (input.reasoning && host === 'openrouter.ai') body.reasoning = { effort: input.reasoningEffort ?? 'high' }
+  if (host === 'openrouter.ai') {
+    body.reasoning = input.reasoning ? { effort: input.reasoningEffort ?? 'high' } : { enabled: false }
+  }
+  // Workers AI's gpt-oss answers with `content: null` and the words in a
+  // reasoning field while it is thinking, which reads as an empty reply to a
+  // step loop. Ask for the lowest effort so the answer lands in `content`.
+  if (host === 'api.cloudflare.com' && /gpt-oss/i.test(lane.model)) {
+    body.reasoning = input.reasoning ? { effort: input.reasoningEffort ?? 'medium' } : { effort: 'low' }
+  }
+  // NVIDIA NIM and the OpenAI-compatible free gateways turn chain-of-thought
+  // on by default for Nemotron, Step and similar models. That hidden reasoning
+  // can run for tens of seconds before the first visible token, which made a
+  // selected model look stalled even though the request was healthy. Default
+  // effort answers directly; Max is the only path that asks for reasoning.
+  if (thinkingSwitchAllowed(lane.url, stream)) {
+    body.chat_template_kwargs = input.reasoning ? { enable_thinking: true, thinking: true } : { enable_thinking: false, thinking: false }
+  }
   if (host === 'api.z.ai' || host === 'open.bigmodel.cn') {
     body.thinking = { type: input.reasoning ? 'enabled' : 'disabled' }
   }
   return body
+}
+
+/**
+ * Whether this gateway may be sent the thinking switch.
+ *
+ * NVIDIA NIM answers with an empty body when `chat_template_kwargs` is combined
+ * with `stream: true`. Measured on a live free key on 2026-11-20: without the
+ * switch all three NVIDIA models stream `content` normally, with it the response
+ * body is empty. Because every chat, build and agent call streams, that made the
+ * strongest free lanes silently unusable — the empty body read as "NVIDIA is
+ * down" and each call quietly fell through to another provider. The switch is
+ * only useful for the non-streaming internal calls (plan, review, classify), so
+ * it is never sent on a streaming request.
+ */
+export function thinkingSwitchAllowed(url: string, stream: boolean): boolean {
+  let host = ''
+  try {
+    host = new URL(url).host
+  } catch {
+    return false
+  }
+  if (host === 'integrate.api.nvidia.com') return !stream
+  return host === 'api.kilo.ai' || host === 'blockrun.ai'
 }
 
 /**
@@ -461,9 +523,12 @@ export function pickPickerFamilies(
   // happened to win the strength sort. Pin the exact V4.1 lane into the
   // shortlist whenever one is configured and working, replacing the last row
   // rather than hiding it (and replacing a stronger non-4.1 representative).
-  const exact = lanes.find(
-    (lane) => /(?:deepseek-flash|deepseek-v4\.1)/i.test(`${lane.model} ${lane.label}`) && statusById.get(laneKey(lane)) !== 'down',
-  )
+  // Prefer the free DeepSeek lane over a paid copy of the same checkpoint. The
+  // paid OpenRouter row can have equal strength but no credits, which made Dent
+  // look configured while every call failed.
+  const isDent = (lane: PublicLane) =>
+    /(?:deepseek-flash|deepseek-v4\.1)/i.test(`${lane.model} ${lane.label}`) && statusById.get(laneKey(lane)) !== 'down'
+  const exact = lanes.find((lane) => isDent(lane) && lane.billing !== 'paid') ?? lanes.find(isDent)
   if (exact) {
     const row = { family: 'DeepSeek', lane: exact }
     const at = visible.findIndex(({ family }) => family === 'DeepSeek')
@@ -529,7 +594,6 @@ export function laneStrength(model: string, url?: string): number {
   return optionalCloudflare ? Math.max(50, base - 8) : base
 }
 
-const workersAiUrl = (account: string) => `https://api.cloudflare.com/client/v4/accounts/${account}/ai/v1/chat/completions`
 
 /** Only lanes whose model and API actually accept image input get this flag. */
 export function laneSupportsVision(lane: Pick<PublicLane, 'url' | 'model'>): boolean {
@@ -549,8 +613,17 @@ export function laneSupportsVision(lane: Pick<PublicLane, 'url' | 'model'>): boo
   if (host === 'blockrun.ai') return /nemotron-3-nano-omni/.test(model)
   if (host === 'oai.endpoints.kepler.ai.cloud.ovh.net') return /qwen2\.5-vl/.test(model)
   if (host === 'generativelanguage.googleapis.com') return true
-  if (host === 'integrate.api.nvidia.com') return /gemma-4-31b|step-5-preview|nemotron-3.5-super-vl/.test(model)
-  if (host === 'api.cloudflare.com') return /gemma-4-26b|llama-4-scout/.test(model)
+  // Measured with a real image part on a live key, streaming through this file's
+  // own path: Gemma 4 31B answers "red" in `content`. Step 5 Preview returns an
+  // empty body for a picture, and Nemotron 3.5 Super VL streams its answer into
+  // `reasoning_content` only — the fallback above surfaces that text, but it is
+  // scratchpad prose, which cannot parse as an agent step. So Gemma is the one
+  // NVIDIA vision lane a caller can actually use.
+  if (host === 'integrate.api.nvidia.com') return /gemma-4-31b/.test(model)
+  // Only the vision id that was verified with a real image part on a live
+  // Workers Free account. Gemma 4 26B answered with null content, so flagging it
+  // as vision only produced failed steps.
+  if (host === 'api.cloudflare.com') return /llama-4-scout/.test(model)
   return false
 }
 
@@ -718,7 +791,8 @@ export function publicLanes(env: Env): PublicLane[] {
   }
 
   if (env.NVIDIA_API_KEY) {
-    for (const model of withOverride(env.NVIDIA_MODEL, NVIDIA_MODELS)) {
+    const nvidiaModels = withOverride(env.NVIDIA_MODEL, NVIDIA_MODELS).filter((model) => !RETIRED_NVIDIA_MODELS.test(model))
+    for (const model of nvidiaModels) {
       lanes.push({
         url: NVIDIA_URL,
         model,
@@ -778,6 +852,23 @@ export function publicLanes(env: Env): PublicLane[] {
       description: 'Trial credits via Cohere',
       key: env.COHERE_API_KEY,
     })
+  }
+
+  // Workers AI: the same account this app already runs on, with a free daily
+  // allowance and real function calling. Its OpenAI-compatible endpoint takes
+  // the same shape as every other lane here, so nothing else has to change.
+  if (env.CLOUDFLARE_AI_TOKEN && env.CLOUDFLARE_ACCOUNT_ID) {
+    const url = `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`
+    for (const model of withOverride(env.CLOUDFLARE_AI_MODEL, WORKERS_AI_MODELS)) {
+      lanes.push({
+        url,
+        model,
+        label: `${labelFor(model)} (Workers AI)`,
+        description: 'Free daily allowance on Workers AI',
+        billing: 'free',
+        key: env.CLOUDFLARE_AI_TOKEN,
+      })
+    }
   }
 
   if (env.GROQ_API_KEY) {
@@ -852,18 +943,6 @@ export function publicLanes(env: Env): PublicLane[] {
         label: `${labelFor(model)} (SambaNova)`,
         description: 'Included via SambaNova',
         key: env.SAMBANOVA_API_KEY,
-      })
-    }
-  }
-
-  if (env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_AI_TOKEN) {
-    for (const model of withOverride(env.CLOUDFLARE_AI_MODEL, CLOUDFLARE_MODELS)) {
-      lanes.push({
-        url: workersAiUrl(env.CLOUDFLARE_ACCOUNT_ID),
-        model,
-        label: `${labelFor(model)} (Workers AI)`,
-        description: 'Daily Workers AI allowance',
-        key: env.CLOUDFLARE_AI_TOKEN,
       })
     }
   }
@@ -972,6 +1051,55 @@ function anonymousLanes(): PublicLane[] {
 }
 
 /** Puts the model someone picked first, keeping the rest as fallbacks. */
+/**
+ * The lanes Buffy Code reaches for first, in measured order.
+ *
+ * `scripts/model-bench.ts` runs the production edit path — same workspace,
+ * dialect and page checks — against three tasks the coder actually gets: a
+ * multi-part change, a stateful toggle and a validated form. Kilo's Nemotron 3
+ * Ultra finished 12/13 twice at roughly nine seconds a call; Stealth's
+ * Glyph Cluster matched it once and then lost a call to a 503; every other
+ * keyless lane either missed spec details or spent its calls on rate limits.
+ * Chat keeps its own latency-first order: this list is for the coder only.
+ */
+export const CODE_LANE_ORDER = [
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'stealth/glyph-cluster',
+  'openrouter/free',
+  'kilo-auto/free',
+]
+
+/** A stable re-order: unknown lanes keep the strength order they arrived in. */
+export function codeLanes(lanes: PublicLane[]): PublicLane[] {
+  const rank = (model: string) => {
+    const index = CODE_LANE_ORDER.indexOf(model)
+    return index === -1 ? CODE_LANE_ORDER.length : index
+  }
+  return [...lanes].sort((a, b) => rank(a.model) - rank(b.model))
+}
+
+/**
+ * Reorders lanes so the ones named in `preference` come first, in that order.
+ * Matching is a case-insensitive substring of the model id or the label, so
+ * "gpt-oss-120b" finds a lane whatever provider hosts it. Lanes that are not
+ * named keep their relative order after the named ones, and an empty preference
+ * changes nothing. Named lanes that do not exist are simply not there — falling
+ * through to the normal order is the whole point of a preference, not a filter.
+ */
+export function orderByPreference<T extends { model: string; label: string }>(
+  lanes: T[],
+  preference: string[],
+): T[] {
+  const wanted = preference.map((entry) => entry.trim().toLowerCase()).filter(Boolean)
+  if (!wanted.length) return lanes
+  const rank = (lane: T) => {
+    const haystack = `${lane.model} ${lane.label}`.toLowerCase()
+    const index = wanted.findIndex((entry) => haystack.includes(entry))
+    return index === -1 ? wanted.length : index
+  }
+  return [...lanes].sort((a, b) => rank(a) - rank(b))
+}
+
 export function orderLanes(lanes: PublicLane[], model?: string): PublicLane[] {
   const eligible = lanes.filter(
     (lane) =>
@@ -1132,7 +1260,10 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
           input.onLaneResult?.(failureResult(lane, failure, startedAt))
           throw failure
         }
-        if (buffered.length < 120) continue
+        // Hold only enough text to catch a quota notice or refusal. Waiting for
+        // 120 characters made every hosted model feel silent for seconds even
+        // after its first token arrived.
+        if (buffered.length < 40) continue
         released = true
         yield { type: 'text', text: buffered }
       }
@@ -1365,7 +1496,22 @@ export async function* publicComplete(lanes: PublicLane[], input: LaneInput): As
   for (const lane of activeLanes(lanes)) {
     if (input.signal?.aborted) return
     let yieldedText = false
+    /**
+     * Reasoning held back in case it is the only answer that ever arrives.
+     *
+     * A model with thinking on sometimes streams the whole answer down the
+     * reasoning channel and never sends `content`: Workers AI's gpt-oss did it for
+     * text, and NVIDIA's Nemotron 3.5 Super VL does it for an image. Reported as
+     * busy, that reads as "the provider is down" and the call silently falls
+     * through. It is only used when no content token arrives, so a model that does
+     * answer normally never has its scratchpad shown as the reply.
+     */
+    let heldReasoning = ''
     try {
+      // Workers AI's gpt-oss streams its whole answer down the reasoning channel
+      // and leaves `content` null. For everyone else reasoning is private and is
+      // not the answer; for these two ids it is the only place the words appear.
+      const reasoningIsAnswer = lane.url.includes('api.cloudflare.com') && /gpt-oss/i.test(lane.model)
       for await (const piece of streamLane(lane, {
         ...input,
         timeoutMs: input.timeoutMs ?? 180_000,
@@ -1374,16 +1520,208 @@ export async function* publicComplete(lanes: PublicLane[], input: LaneInput): As
         // active streams keep resetting this timer.
         idleMs: input.idleMs ?? 12_000,
       })) {
+        if (reasoningIsAnswer && piece.type === 'reasoning') {
+          if (piece.text.trim()) yieldedText = true
+          yield { type: 'text', text: piece.text }
+          continue
+        }
         if (piece.type === 'text') yieldedText = true
+        else if (piece.type === 'reasoning') heldReasoning = (heldReasoning + piece.text).slice(-8_000)
         yield piece
       }
       if (yieldedText) return
+      if (heldReasoning.trim()) {
+        yield { type: 'text', text: heldReasoning }
+        return
+      }
     } catch (error) {
       if (yieldedText) throw error
       if (input.signal?.aborted) return
+      // `streamLane` reports "returned an empty reply" when the stream ended with
+      // no content — which is exactly what a reasoning-only answer looks like. The
+      // held reasoning is that answer, so use it instead of reporting the provider
+      // as busy. Only for empty/malformed: a network failure or a timeout is a
+      // real failure and must still fall through to the next lane.
+      const emptyish = error instanceof AiError && (error.code === 'empty' || error.code === 'malformed')
+      if (emptyish && heldReasoning.trim()) {
+        yield { type: 'text', text: heldReasoning }
+        return
+      }
       lastError = error
     }
   }
   if (lastError instanceof AiError && lastError.code === 'invalid_key') throw lastError
   throw new AiError('busy', 'The models are busy right now. Try again in a minute.', 429)
+}
+
+/**
+ * Streams from the first lane that produces visible text. The selected lane
+ * starts immediately; one measured backup starts after a short head start, so
+ * a fast choice wins but a slow or silent choice cannot hold the composer.
+ * Reasoning-only output does not win the race.
+ */
+export async function* raceComplete(
+  lanes: PublicLane[],
+  input: LaneInput,
+  alternates: AsyncIterable<StreamPiece>[] = [],
+): AsyncGenerator<StreamPiece> {
+  const eligible = activeLanes(lanes)
+  if (!eligible.length && !alternates.length) throw new AiError('busy', 'The models are busy right now. Try again in a minute.', 429)
+
+  type Attempt = {
+    label: string
+    controller: AbortController
+    iterator: AsyncIterator<StreamPiece>
+    first?: StreamPiece
+  }
+  type Winner = Attempt & { first: StreamPiece }
+
+  const attempts: Attempt[] = []
+  const race = (label: string, iterator: AsyncIterator<StreamPiece>, controller: AbortController, signal: AbortSignal, index: number) => {
+    const attempt: Attempt = { label, controller, iterator }
+    attempts.push(attempt)
+    return (async (): Promise<Winner> => {
+      // Give the selected lane a real head start. If it is healthy it answers
+      // first; if it is still thinking, the backup takes over.
+      if (index > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 900))
+        if (signal.aborted) throw new AiError('aborted', 'The reply was stopped.', 499)
+      }
+      while (true) {
+        const next = await iterator.next()
+        if (next.done) throw new AiError('empty', `${label} returned no answer.`, 502)
+        if (next.value.type === 'text') {
+          // Mark this attempt in place. A copied winner would fail the identity
+          // check below, and every lane (the winner included) would be aborted
+          // after its first 40 characters — every reply was truncated there.
+          attempt.first = next.value
+          return attempt as Winner
+        }
+      }
+    })()
+  }
+
+  const firsts: Promise<Winner>[] = eligible.map((lane, index) => {
+    const controller = new AbortController()
+    const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal
+    const iterator = streamLane(lane, {
+      ...input,
+      signal,
+      timeoutMs: input.timeoutMs ?? 120_000,
+      idleMs: input.idleMs ?? 10_000,
+      // The race only needs visible text; do not stream every loser's thoughts.
+      onReasoning: undefined,
+    })[Symbol.asyncIterator]()
+    return race(lane.label, iterator, controller, signal, index)
+  })
+
+  // A browser-solved fast lane (for example ChatGPT) can join as an alternate
+  // after the same head start. It has no provider lane health, but it is the
+  // only path that stays quick under a long prompt on every deployment.
+  for (const [index, alternate] of alternates.entries()) {
+    const controller = new AbortController()
+    const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal
+    firsts.push(race('Fast lane', alternate[Symbol.asyncIterator](), controller, signal, eligible.length + index))
+  }
+
+  let winner: Winner
+  try {
+    winner = await Promise.any(firsts)
+  } catch (error) {
+    for (const attempt of attempts) {
+      attempt.controller.abort()
+      void attempt.iterator.return?.().catch(() => {})
+    }
+    if (input.signal?.aborted) return
+    const failures = error instanceof AggregateError ? (error.errors as unknown[]) : []
+    const invalid = failures.find((failure) => failure instanceof AiError && failure.code === 'invalid_key')
+    if (invalid instanceof AiError) throw invalid
+    throw new AiError('busy', 'All available models are busy right now. Please try again in a moment.', 503)
+  }
+
+  for (const attempt of attempts) {
+    if (attempt === winner) continue
+    attempt.controller.abort()
+    void attempt.iterator.return?.().catch(() => {})
+  }
+
+  try {
+    yield winner.first
+    while (true) {
+      const next = await winner.iterator.next()
+      if (next.done) return
+      if (next.value.type === 'text') yield next.value
+    }
+  } finally {
+    winner.controller.abort()
+    void winner.iterator.return?.().catch(() => {})
+  }
+}
+
+/**
+ * Lanes ordered so a batch tries different providers before a second model on
+ * the same one. A free gateway's allowance is shared by every model it serves,
+ * so two lanes on one host are effectively one attempt.
+ */
+export function spreadLanesByHost(lanes: PublicLane[]): PublicLane[] {
+  const groups = new Map<string, PublicLane[]>()
+  for (const lane of lanes) {
+    let host = lane.url
+    try {
+      host = new URL(lane.url).host
+    } catch {
+      // A malformed URL still groups with itself instead of throwing here.
+    }
+    const group = groups.get(host)
+    if (group) group.push(lane)
+    else groups.set(host, [lane])
+  }
+  const queues = [...groups.values()]
+  const ordered: PublicLane[] = []
+  for (let index = 0; ordered.length < lanes.length; index++) {
+    let added = false
+    for (const queue of queues) {
+      const lane = queue[index]
+      if (!lane) continue
+      ordered.push(lane)
+      added = true
+    }
+    if (!added) break
+  }
+  return ordered
+}
+
+/**
+ * The race, repeated over the next group of lanes when the first group has
+ * nothing to say. Buffy Free used to try three lanes and give up: on a bad
+ * afternoon all three can be the same rate-limited gateway, so the picker
+ * answered "all models are busy" while a dozen other free lanes were healthy.
+ * Each group is still raced in parallel, so this adds a fallback without
+ * adding a queue.
+ */
+export async function* raceCompleteLadder(
+  lanes: PublicLane[],
+  input: LaneInput,
+  options: { batchSize?: number; maxBatches?: number } = {},
+): AsyncGenerator<StreamPiece> {
+  const eligible = spreadLanesByHost(activeLanes(lanes))
+  if (!eligible.length) throw new AiError('busy', 'All available models are busy right now. Please try again in a moment.', 503)
+  const batchSize = Math.max(1, options.batchSize ?? 3)
+  const maxBatches = Math.max(1, options.maxBatches ?? 3)
+  let lastError: unknown
+  for (let batch = 0; batch < maxBatches; batch++) {
+    const group = eligible.slice(batch * batchSize, (batch + 1) * batchSize)
+    if (!group.length) break
+    if (input.signal?.aborted) return
+    try {
+      yield* raceComplete(group, input)
+      return
+    } catch (error) {
+      lastError = error
+      if (input.signal?.aborted) return
+    }
+  }
+  // A bad key is worth reporting only when no other group answered.
+  if (lastError instanceof AiError && lastError.code === 'invalid_key') throw lastError
+  throw new AiError('busy', 'All available models are busy right now. Please try again in a moment.', 503)
 }

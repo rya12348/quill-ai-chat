@@ -3,6 +3,7 @@ import { deleteCookie } from 'hono/cookie'
 
 import { ANALYZE_DAILY_LIMIT, BUILD_DAILY_LIMIT, DAILY_MESSAGE_LIMIT, MODELS, RESEARCH_DAILY_LIMIT } from '../../shared/config'
 import type { Me, ModelInfo } from '../../shared/types'
+import { attachmentObjectKeys, deleteAttachmentObjects } from '../attachment-storage'
 import { aiConfigured, availableModels } from '../ai'
 import { ACCOUNT_COOKIE, GUEST_COOKIE, analyzeEnabledFor, authMode, buildEnabledFor, isAccountUser, isGuestUser, isOwner, privateJson, researchEnabledFor } from '../auth'
 import { guestUsageToday, now, utcDay, usageToday } from '../db'
@@ -11,6 +12,7 @@ import { familyForLane, isLocalBridgeRequest, laneKey, laneStrength, pickPickerF
 import { fallbackForUnavailableModel, isUnavailableHealth, replacementLane } from '../model-fallbacks'
 import { healthRows, type HealthRow } from '../provider-health'
 import { guestUsageKey } from '../rate-limit'
+import { rememberRoomPerson } from '../room-people'
 import { searchConfigured } from '../search'
 import { seedStatements } from '../seed'
 
@@ -33,9 +35,15 @@ account.get('/me', async (c) => {
     : publicLanes(c.env).filter((lane) => isLocalBridgeRequest(c.req.raw) || !lane.model.startsWith('buffy'))
   // Guests may have cleared their cookie; show the same address-keyed
   // allowance the chat route enforces instead of a misleading fresh count.
+  await rememberRoomPerson(db, user).catch((error) => console.warn('room_people_touch_failed', error))
   const counts = isGuestUser(user) ? await guestUsageToday(db, await guestUsageKey(c.req.raw)) : await usageToday(db, user.sub)
+  const profile = await db
+    .prepare(`SELECT display_name FROM room_profiles WHERE user_sub = ?`)
+    .bind(user.sub)
+    .first<{ display_name: string }>()
+  const displayName = profile?.display_name.trim() || user.name
   const body: Me = {
-    user: { sub: user.sub, name: user.name, email: user.email, picture: user.picture },
+    user: { sub: user.sub, name: displayName, email: user.email, picture: user.picture },
     capabilities: {
       ai: true,
       mode: aiConfigured(c.env) ? 'api' : 'public',
@@ -151,6 +159,7 @@ account.get('/models', async (c) => {
   const frontierDescriptions: Record<string, string> = {
     'stepfun-ai/step-5-preview': 'Frontier reasoning for long, hard tasks.',
     'deepseek-ai/deepseek-v4.1-flash': 'Strong coder; behind Opus 5.5 on long-horizon agent work.',
+    'DeepSeek-V4.1-Flash-1017': 'Strong coder; behind Opus 5.5 on long-horizon agent work.',
     'deepseek-flash': 'Strong coder; behind Opus 5.5 on long-horizon agent work.',
     'moonshotai/kimi-k3': 'Frontier reasoning, coding and agentic work.',
     'inclusionai/ling-3.2-flash:free': 'Long-context multimodal reasoning and documents.',
@@ -253,6 +262,14 @@ account.delete('/account', async (c) => {
   const user = c.get('user')
   const owner = user.sub
   const accountId = isAccountUser(user) ? user.sub.slice('account:'.length) : null
+  const attachmentRows = await db
+    .prepare(
+      `SELECT id, 'chat' AS scope FROM message_attachments WHERE owner_sub = ?
+       UNION ALL
+       SELECT id, 'room' AS scope FROM room_message_attachments WHERE owner_sub = ?`,
+    )
+    .bind(owner, owner)
+    .all<{ id: string; scope: string }>()
   const statements = [
     db.prepare(`DELETE FROM message_reasoning WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM message_sources WHERE owner_sub = ?`).bind(owner),
@@ -275,9 +292,15 @@ account.delete('/account', async (c) => {
     db.prepare(`DELETE FROM user_settings WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM provider_health WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM browser_session_slots WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM room_message_reactions WHERE author_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM room_messages WHERE author_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM room_message_attachments WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM room_access WHERE user_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM room_people_saved WHERE owner_sub = ? OR person_sub = ?`).bind(owner, owner),
+    db.prepare(`DELETE FROM room_people_labels WHERE owner_sub = ? OR person_sub = ?`).bind(owner, owner),
+    db.prepare(`DELETE FROM room_people WHERE user_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM room_profiles WHERE user_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM room_member_names WHERE user_sub = ? OR set_by = ?`).bind(owner, owner),
     db.prepare(`DELETE FROM humanizer_runs WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM conversation_shares WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM conversation_summaries WHERE owner_sub = ?`).bind(owner),
@@ -299,6 +322,10 @@ account.delete('/account', async (c) => {
       : []),
   ]
   await db.batch(statements)
+  await deleteAttachmentObjects(
+    c.env.FILES,
+    attachmentRows.results.flatMap((row) => attachmentObjectKeys(row.scope === 'room' ? 'room' : 'chat', row.id)),
+  )
   deleteCookie(c, ACCOUNT_COOKIE, { path: '/' })
   deleteCookie(c, GUEST_COOKIE, { path: '/' })
   return privateJson(c, { ok: true })
@@ -307,6 +334,10 @@ account.delete('/account', async (c) => {
 account.delete('/account/conversations', async (c) => {
   const db = c.get('db')
   const owner = c.get('user').sub
+  const attachmentRows = await db
+    .prepare(`SELECT id FROM message_attachments WHERE owner_sub = ?`)
+    .bind(owner)
+    .all<{ id: string }>()
   await db.batch([
     db.prepare(`DELETE FROM message_reasoning WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM message_sources WHERE owner_sub = ?`).bind(owner),
@@ -327,6 +358,7 @@ account.delete('/account/conversations', async (c) => {
     db.prepare(`DELETE FROM research_runs WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM proof_library WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM user_settings WHERE owner_sub = ?`).bind(owner),
+    db.prepare(`DELETE FROM room_message_reactions WHERE author_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM room_messages WHERE author_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM room_message_attachments WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM room_access WHERE user_sub = ?`).bind(owner),
@@ -338,5 +370,6 @@ account.delete('/account/conversations', async (c) => {
     db.prepare(`DELETE FROM messages WHERE owner_sub = ?`).bind(owner),
     db.prepare(`DELETE FROM conversations WHERE owner_sub = ?`).bind(owner),
   ])
+  await deleteAttachmentObjects(c.env.FILES, attachmentRows.results.flatMap((row) => attachmentObjectKeys('chat', row.id)))
   return privateJson(c, { ok: true })
 })

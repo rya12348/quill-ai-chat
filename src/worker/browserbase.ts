@@ -1,5 +1,15 @@
 import { questionLoopExpression } from '../shared/browser'
 import type { BrowserAction, BrowserInspectResult, BrowserScreen, BrowserSnapshot, BrowserTab, BrowserViewState } from '../shared/types'
+import {
+  playQuiz,
+  quizPollScript,
+  quizScript,
+  quizSummary,
+  type BrowserSessionLike,
+  type QuizPlan,
+  type QuizPlayed,
+  type VideoCommand,
+} from './browser-session'
 import type { Env } from './env'
 
 const API = 'https://api.browserbase.com/v1'
@@ -77,6 +87,17 @@ export function provider(env: Env): BrowserProvider {
   if (env.BROWSERBASE_API_KEY?.trim()) return 'browserbase'
   if (env.HYPERBROWSER_API_KEY?.trim()) return 'hyperbrowser'
   return 'steel'
+}
+
+/**
+ * The same environment, with one provider chosen.
+ *
+ * The deployment pins BROWSER_PROVIDER for the viewer, and the agent must not
+ * inherit that choice blindly: Browserbase is the one with a free allowance, so
+ * the agent asks for it explicitly and leaves the viewer's provider alone.
+ */
+export function withProvider(env: Env, kind: BrowserProvider): Env {
+  return { ...env, BROWSER_PROVIDER: kind }
 }
 
 export function isBrowserConfigured(env: Env): boolean {
@@ -324,15 +345,40 @@ export async function getSession(env: Env, sessionId: string): Promise<Browserba
   return bb<BrowserbaseSession>(env, `/sessions/${encodeURIComponent(sessionId)}`)
 }
 
-async function createSteelSession(env: Env, profileId?: string): Promise<SteelSession> {
+/** A headful Steel window gives the page this much less than its own size. */
+const STEEL_CHROME = { width: 8, height: 91 }
+const STEEL_MAX = { width: 1920, height: 1080 }
+
+/**
+ * The window to ask Steel for, so the page gets the pane's own viewport.
+ *
+ * A session used to be created with `fullscreen: true`, which Steel documents
+ * as filling a fixed 1920x1080 screen and *ignoring* dimensions. Every pane — a
+ * 1024px one included — was therefore streamed two megapixels per frame, three
+ * times what it could draw, and the page laid itself out for a desktop nobody
+ * was looking at. A window sized to the pane is about 60% fewer pixels a frame,
+ * which is the part of "snappy" a person actually feels.
+ */
+export function steelWindow(viewport?: BrowserViewport): BrowserViewport | undefined {
+  if (!viewport) return undefined
+  return {
+    width: Math.min(STEEL_MAX.width, Math.max(500, Math.round(viewport.width) + STEEL_CHROME.width)),
+    height: Math.min(STEEL_MAX.height, Math.max(400, Math.round(viewport.height) + STEEL_CHROME.height)),
+  }
+}
+
+async function createSteelSession(env: Env, profileId?: string, viewport?: BrowserViewport): Promise<SteelSession> {
+  const window = steelWindow(viewport)
   const created = await steel<SteelSession>(env, '/sessions', {
     method: 'POST',
     body: JSON.stringify({
       timeout: STEEL_SESSION_TIMEOUT,
-      // The page is the product, not a second desktop. Fullscreen removes
-      // Chrome's tabs/address bar from the stream, and the debug config hides
-      // Steel's remote cursor so the person only sees their own pointer.
-      fullscreen: true,
+      // A window sized to the pane instead of a fixed fullscreen screen.
+      ...(window ? { dimensions: window } : {}),
+      // Known ad and tracking hosts are refused inside the browser, so a page's
+      // third-party requests never cost a frame. Steel's default has moved
+      // between releases, so it is asked for explicitly.
+      blockAds: true,
       debugConfig: { interactive: true, systemCursor: false },
       // Steel Profiles keep cookies, localStorage and the Google sign-in
       // between sessions. A first session mints one; later ones reuse it.
@@ -349,10 +395,10 @@ export async function createSession(env: Env, contextId: string, viewport: Brows
     const savedProfile = contextId && contextId !== 'default' ? contextId : ''
     let created: SteelSession
     if (!savedProfile) {
-      created = await createSteelSession(env)
+      created = await createSteelSession(env, undefined, viewport)
     } else {
       try {
-        created = await createSteelSession(env, savedProfile)
+        created = await createSteelSession(env, savedProfile, viewport)
       } catch (error) {
         if (!(error instanceof BrowserServiceError)) throw error
         if (error.code === 'browser_profile_busy') {
@@ -361,13 +407,13 @@ export async function createSession(env: Env, contextId: string, viewport: Brows
           // profile instead of leaving the browser permanently unstartable.
           await sleep(5_000)
           try {
-            created = await createSteelSession(env, savedProfile)
+            created = await createSteelSession(env, savedProfile, viewport)
           } catch (retry) {
             if (!(retry instanceof BrowserServiceError) || retry.code !== 'browser_profile_busy') throw retry
-            created = await createSteelSession(env)
+            created = await createSteelSession(env, undefined, viewport)
           }
         } else if (error.code === 'browser_profile_missing') {
-          created = await createSteelSession(env)
+          created = await createSteelSession(env, undefined, viewport)
         } else {
           throw error
         }
@@ -603,7 +649,7 @@ class Cdp {
   }
 }
 
-async function openCdp(env: Env, wsUrl: string): Promise<Cdp> {
+async function openCdp(env: Env, wsUrl: string, headers?: Record<string, string>): Promise<Cdp> {
   const base = wsUrl.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:')
   // Hyperbrowser stops a session when its CDP client disconnects. Ink opens
   // one short CDP connection per action, so ask Hyperbrowser to keep the
@@ -611,11 +657,13 @@ async function openCdp(env: Env, wsUrl: string): Promise<Cdp> {
   const url = new URL(base)
   if (provider(env) === 'hyperbrowser') url.searchParams.set('keepAlive', 'true')
   const response = await fetch(url.toString(), {
-    headers: {
-      Upgrade: 'websocket',
-      ...(provider(env) === 'browserbase' ? { 'x-bb-api-key': apiKey(env) } : {}),
-      ...(provider(env) === 'steel' ? { 'steel-api-key': steelKey(env) } : {}),
-    },
+    headers:
+      headers ??
+      {
+        Upgrade: 'websocket',
+        ...(provider(env) === 'browserbase' ? { 'x-bb-api-key': apiKey(env) } : {}),
+        ...(provider(env) === 'steel' ? { 'steel-api-key': steelKey(env) } : {}),
+      },
   })
   const socket = (response as Response & { webSocket?: WebSocket }).webSocket
   if (!socket) {
@@ -1121,6 +1169,52 @@ export async function readScreen(env: Env, sessionId: string): Promise<BrowserSc
         height: Number(meta?.height) || VIEWPORT.height,
       },
       at: Number(meta?.at) || Date.now(),
+    }
+  })
+}
+
+/**
+ * Just the address and the title.
+ *
+ * The live pane is drawn by the provider's own player, so a caller that only
+ * labels the frame — the address bar, the tab title — should not pay for a DOM
+ * snapshot: reading text, labels and fields costs a round trip through the
+ * remote page and is discarded immediately. On a measured attach that was most
+ * of the wait.
+ */
+export async function readMeta(env: Env, sessionId: string): Promise<BrowserViewState> {
+  return withPage(env, sessionId, async (cdp, page) => {
+    // The viewport rides along in the same round trip: the caller needs it to
+    // know the shape of the window, and asking for it separately would put
+    // back the delay this function exists to remove.
+    const meta = (await evaluate(
+      cdp,
+      page,
+      '({ url: location.href, title: document.title, w: innerWidth, h: innerHeight })',
+    )) as { url?: string; title?: string; w?: number; h?: number } | null
+    const url = String(meta?.url || 'about:blank')
+    const title = String(meta?.title || '')
+    // An empty shell otherwise, deliberately: nothing here describes the page's
+    // contents, because the player is drawing it.
+    return {
+      url,
+      title,
+      snapshot: {
+        url,
+        title,
+        text: '',
+        viewport: {
+          width: Number(meta?.w) || 0,
+          height: Number(meta?.h) || 0,
+          scrollX: 0,
+          scrollY: 0,
+          pageHeight: 0,
+        },
+        active: '',
+        elements: [],
+        media: [],
+        at: Date.now(),
+      },
     }
   })
 }
@@ -2273,4 +2367,448 @@ export async function browserPostFromGemini(
   throw lastError instanceof Error
     ? lastError
     : new BrowserServiceError('browser_not_configured', 'The cloud browser is not available right now.', 503)
+}
+
+const clickScript = (target: string): string => `(() => {
+  const wanted = ${JSON.stringify(target)}.replace(/\s+/g, ' ').trim().toLowerCase()
+  const nodes = Array.from(document.querySelectorAll('button, a, [role="button"], [onclick], input[type="submit"], input[type="button"], summary, label'))
+  const label = (node) => String(node.innerText || node.value || node.getAttribute('aria-label') || node.getAttribute('title') || '').replace(/\s+/g, ' ').trim()
+  const node = nodes.find((item) => label(item).toLowerCase() === wanted) || nodes.find((item) => label(item).toLowerCase().includes(wanted))
+  if (!node) return { ok: false, label: '' }
+  node.scrollIntoView({ block: 'center' })
+  node.click()
+  return { ok: true, label: label(node).slice(0, 80) }
+})()`
+
+/**
+ * Types into whatever has focus, or the first real field when nothing does.
+ *
+ * Typing *replaces* the field. It used to append, which quietly ruined the
+ * answer whenever the model typed twice: the page's own text never shows an
+ * input's value, so a second look said "nothing changed" and it typed again —
+ * krillion ended up submitting "PeruPeruPeruPeru" and scored zero. The script
+ * now reports the value it left behind, so the next look proves the words are
+ * in the box without needing the page to echo them.
+ *
+ * The value goes in through the prototype's setter because React — which most
+ * of these sites are — tracks the value it last saw and ignores a plain
+ * assignment, leaving the app's state on the old string.
+ */
+const typeScript = (text: string): string => `(() => {
+  const focused = document.activeElement
+  const usable = (node) => Boolean(node) && (node.isContentEditable || /^(input|textarea|select)$/i.test(node.tagName))
+  const field = usable(focused)
+    ? focused
+    : document.querySelector('input:not([type="hidden"]), textarea, [contenteditable="true"]')
+  if (!field) return { ok: false }
+  const wanted = ${JSON.stringify(text)}
+  field.focus()
+  if ('value' in field) {
+    const proto = field.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+    if (typeof setter === 'function') setter.call(field, wanted)
+    else field.value = wanted
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    field.dispatchEvent(new Event('change', { bubbles: true }))
+    return { ok: true, value: String(field.value ?? '').slice(0, 120) }
+  }
+  field.textContent = wanted
+  field.dispatchEvent(new InputEvent('input', { bubbles: true, data: wanted, inputType: 'insertText' }))
+  return { ok: true, value: String(field.textContent ?? '').slice(0, 120) }
+})()`
+
+/** Play, mute, speed, jump — the same controls the Cloudflare path drives. */
+const videoScript = (command: VideoCommand): string => `(() => {
+  const video = document.querySelector('video')
+  if (!video) return { ok: false, detail: 'There is no video on this page.' }
+  const control = ${JSON.stringify(command)}
+  if (control.play === false) video.pause()
+  else if (control.play !== undefined) void video.play().catch(() => undefined)
+  if (control.mute === true) video.muted = true
+  if (typeof control.rate === 'number') video.playbackRate = control.rate
+  if (typeof control.seek === 'number') video.currentTime = control.seek
+  if (control.end === true) video.currentTime = Math.max(0, (video.duration || 0) - 1)
+  const clock = (value) => { const whole = Math.round(Number(value) || 0); return Math.floor(whole / 60) + 'm ' + String(whole % 60).padStart(2, '0') + 's' }
+  return { ok: true, detail: 'Video is ' + clock(video.duration) + ' long, now at ' + clock(video.currentTime) + ', ' + (video.paused ? 'paused' : 'playing at ' + video.playbackRate + '×') + '.' }
+})()`
+
+/**
+ * The agent's browser, on the cloud provider's minutes.
+ *
+ * Cloudflare Browser Rendering gives ten minutes a day, and one site task can
+ * spend them before it is finished. The provider configured here is the same
+ * kind of session the viewer drives and it has its own free allowance, so the
+ * agent works in that instead and Cloudflare's ten minutes become a second
+ * budget rather than the only one.
+ *
+ * Every action opens one short CDP connection and closes it again: the browser
+ * belongs to the provider, not to this Worker, so an abandoned step does not
+ * leave a session running against the allowance.
+ */
+export async function openAgentBrowser(env: Env): Promise<BrowserSessionLike | null> {
+  if (!isBrowserConfigured(env)) return null
+  const contextId = await createContext(env).catch(() => '')
+  return agentBrowserOver(env, await createSession(env, contextId))
+}
+
+/**
+ * The agent's controls over a browser it does not own.
+ *
+ * The viewer and the agent are meant to be one browser. When the agent drives
+ * the session a person is already watching, every click appears in the live
+ * view as it happens instead of in a screenshot taken afterwards. Closing a
+ * session the agent started stops it; closing the viewer's session must not,
+ * because the person is still looking at it.
+ */
+export function agentBrowserOver(
+  env: Env,
+  session: { id: string },
+  options: { release?: boolean } = {},
+): BrowserSessionLike {
+  const act = async (action: BrowserAction, detail: string) => {
+    const state = await performAction(env, session.id, action, true)
+    if (!state) throw new BrowserServiceError('browser_action', 'The cloud browser did not answer.', 502)
+    return { ok: true, detail: state.observation || detail, page: state.snapshot }
+  }
+
+  /**
+   * The control a person would name, not a CSS path.
+   *
+   * The agent says "Start" or "Next question". An exact label wins, a partial
+   * one is the fallback, and nothing is clicked when neither matches: a click on
+   * the wrong thing costs the step, while a miss costs only a retry.
+   */
+  return {
+    async open(url: string) {
+      await act({ type: 'navigate', url }, `Opened ${url}.`)
+      return (await readState(env, session.id)).snapshot
+    },
+    async read() {
+      return (await readState(env, session.id)).snapshot
+    },
+    async click(target: string) {
+      const { found, label, state } = await withPage(env, session.id, async (cdp, page) => {
+        const result = (await evaluate(cdp, page, clickScript(target))) as { ok?: boolean; label?: string } | null
+        await sleep(150)
+        return { found: Boolean(result?.ok), label: String(result?.label ?? ''), state: await readPage(cdp, page) }
+      })
+      return {
+        ok: found,
+        detail: found ? `Clicked "${label || target}".` : `No control labelled "${target}" on this page.`,
+        page: state.snapshot,
+      }
+    },
+    async type(text: string) {
+      const { ok, value, state } = await withPage(env, session.id, async (cdp, page) => {
+        const result = (await evaluate(cdp, page, typeScript(text))) as { ok?: boolean; value?: string } | null
+        await sleep(120)
+        return { ok: Boolean(result?.ok), value: String(result?.value ?? ''), state: await readPage(cdp, page) }
+      })
+      return {
+        ok,
+        detail: ok
+          ? `Typed "${text}"; the field now says "${value}". Press Enter or the page's submit control to send it.`
+          : 'There was no field on this page to type into.',
+        page: state.snapshot,
+      }
+    },
+    press: (key: string) => act({ type: 'press', key }, `Pressed ${key}.`),
+    async wait(seconds: number) {
+      await sleep(Math.max(250, Math.min(26, seconds) * 1000))
+      const state = await readState(env, session.id)
+      return { ok: true, detail: `Waited ${seconds}s.`, page: state.snapshot }
+    },
+    waitFor: (target: string, seconds: number) =>
+      act(
+        { type: 'waitFor', text: target, timeoutMs: Math.max(1, Math.min(26, seconds)) * 1000 },
+        `Waited for "${target}".`,
+      ),
+    async video(command: VideoCommand) {
+      const { detail, state } = await withPage(env, session.id, async (cdp, page) => {
+        const result = (await evaluate(cdp, page, videoScript(command))) as { ok?: boolean; detail?: string } | null
+        await sleep(150)
+        return { detail: String(result?.detail ?? 'There is no video on this page.'), state: await readPage(cdp, page) }
+      })
+      return { ok: true, detail, page: state.snapshot }
+    },
+    async autoplay(plan: QuizPlan) {
+      // One connection for the whole run: the page does the timing, this reads
+      // its progress, and nothing depends on a single call staying open.
+      const { raw, state } = await withPage(env, session.id, async (cdp, page) => {
+        await evaluate(cdp, page, quizScript(plan))
+        const end = Date.now() + Math.min(240_000, plan.budgetMs ?? 120_000) + 15_000
+        let last: QuizPlayed | null = null
+        while (Date.now() < end) {
+          await sleep(2_500)
+          const value = (await evaluate(cdp, page, quizPollScript())) as string | null
+          const parsed = (typeof value === 'string' ? JSON.parse(value) : null) as QuizPlayed | null
+          if (parsed) last = parsed
+          if (parsed?.done) break
+        }
+        await sleep(200)
+        return { raw: last ?? { steps: [], ended: 'the page never reported a prompt' }, state: await readPage(cdp, page) }
+      })
+      return { ...quizSummary(raw as QuizPlayed), page: state.snapshot }
+    },
+    scroll: (by: number) => act({ type: 'scroll', y: by }, `Scrolled by ${by}px.`),
+    back: () => act({ type: 'back' }, 'Went back.'),
+    async screenshot() {
+      const screen = await readScreen(env, session.id)
+      return screen.image
+    },
+    async close() {
+      if (options.release === false) return
+      await releaseSession(env, session.id)
+    },
+  }
+}
+/* ------------------------------------------------------------------------- */
+/* Browserless                                                               */
+/* ------------------------------------------------------------------------- */
+
+const BROWSERLESS_WS = 'wss://production-sfo.browserless.io'
+/** How long Browserless keeps the browser alive after this Worker disconnects. */
+const BROWSERLESS_KEEP_MS = 120_000
+
+export function browserlessConfigured(env: Env): boolean {
+  return Boolean(env.BROWSERLESS_API_KEY?.trim())
+}
+
+/**
+ * The agent's browser on Browserless.
+ *
+ * Browserless hands out one CDP endpoint with the token in the query string and
+ * no REST session to create or release: connect, work, then call
+ * Browserless.reconnect before dropping the socket so the browser — and the page
+ * the agent is on — is still there for the next action.
+ *
+ * Its free plan caps a session at two minutes, so a browser that has already
+ * gone is replaced and re-navigated rather than failing the step. One lost
+ * session costs a unit; a lost step costs the task.
+ */
+export async function openBrowserlessBrowser(env: Env): Promise<BrowserSessionLike | null> {
+  const token = env.BROWSERLESS_API_KEY?.trim()
+  if (!token) return null
+  /** Where to reconnect. Empty means "start a new browser". */
+  let resume = ''
+  let cdp: Cdp | null = null
+  let page = ''
+  /** The last page opened, so a replacement browser lands where the agent was. */
+  let lastUrl = ''
+
+  const endpoint = (): string => {
+    if (!resume) return `${BROWSERLESS_WS}?token=${encodeURIComponent(token)}`
+    return `${resume}${resume.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+  }
+
+  const connect = async (): Promise<void> => {
+    cdp = await openCdp(env, endpoint(), { Upgrade: 'websocket' })
+    page = await attachPage(cdp)
+  }
+
+  const detach = async (): Promise<void> => {
+    if (!cdp) return
+    try {
+      const kept = await cdp.send<{ browserWSEndpoint?: string }>(
+        'Browserless.reconnect',
+        { timeout: BROWSERLESS_KEEP_MS },
+        page,
+      )
+      // The returned endpoint carries no credentials; the next connection adds
+      // its own token, so this is the only place the token is ever written down.
+      resume = kept?.browserWSEndpoint ?? ''
+    } catch {
+      resume = ''
+    }
+    cdp.close()
+    cdp = null
+    page = ''
+  }
+
+  const work = async <T>(run: (live: Cdp, session: string) => Promise<T>): Promise<T> => {
+    if (!cdp) await connect()
+    try {
+      return await run(cdp!, page)
+    } catch {
+      resume = ''
+      cdp?.close()
+      cdp = null
+      page = ''
+      await connect()
+      if (lastUrl) await navigate(cdp!, page, lastUrl).catch(() => undefined)
+      return run(cdp!, page)
+    }
+  }
+
+  /** One action, then the page as the model sees it. */
+  const perform = async (run: (live: Cdp, session: string) => Promise<{ ok: boolean; detail: string }>) => {
+    try {
+      return await work(async (live, session) => {
+        const { ok, detail } = await run(live, session)
+        await sleep(120)
+        return { ok, detail, state: await readPage(live, session) }
+      })
+    } finally {
+      await detach()
+    }
+  }
+
+  return {
+    async open(url: string) {
+      try {
+        return await work(async (live, session) => {
+          await navigate(live, session, url)
+          lastUrl = url
+          return (await readPage(live, session)).snapshot
+        })
+      } finally {
+        await detach()
+      }
+    },
+    async read() {
+      try {
+        return await work(async (live, session) => (await readPage(live, session)).snapshot)
+      } finally {
+        await detach()
+      }
+    },
+    async click(target: string) {
+      const { ok, detail, state } = await perform(async (live, session) => {
+        const result = (await evaluate(live, session, clickScript(target))) as { ok?: boolean; label?: string } | null
+        return {
+          ok: Boolean(result?.ok),
+          detail: result?.ok
+            ? `Clicked "${String(result.label || target)}".`
+            : `No control labelled "${target}" on this page.`,
+        }
+      })
+      return { ok, detail, page: state.snapshot }
+    },
+    async type(text: string) {
+      const { ok, detail, state } = await perform(async (live, session) => {
+        const result = (await evaluate(live, session, typeScript(text))) as { ok?: boolean; value?: string } | null
+        return {
+          ok: Boolean(result?.ok),
+          detail: result?.ok
+            ? `Typed "${text}"; the field now says "${String(result.value ?? '')}". Press Enter or the page's submit control to send it.`
+            : 'There was no field on this page to type into.',
+        }
+      })
+      return { ok, detail, page: state.snapshot }
+    },
+    async press(key: string) {
+      const { detail, state } = await perform(async (live, session) => {
+        await cdpSendKey(live, session, 'rawKeyDown', key)
+        await cdpSendKey(live, session, 'keyUp', key)
+        return { ok: true, detail: `Pressed ${key}.` }
+      })
+      return { ok: true, detail, page: state.snapshot }
+    },
+    async wait(seconds: number) {
+      const held = Math.max(1, Math.min(26, seconds))
+      try {
+        await work(async () => undefined)
+        await sleep(held * 1000)
+        const snapshot = await work(async (live, session) => (await readPage(live, session)).snapshot)
+        return { ok: true, detail: `Waited ${held}s.`, page: snapshot }
+      } finally {
+        await detach()
+      }
+    },
+    async waitFor(target: string, seconds: number) {
+      const ms = Math.max(1, Math.min(26, seconds)) * 1000
+      const poll = `new Promise((resolve) => {
+        const wanted = ${JSON.stringify(target)}
+        const started = Date.now()
+        const look = () => {
+          const text = document.body && document.body.innerText ? document.body.innerText : ''
+          if (text.indexOf(wanted) >= 0) return resolve(true)
+          if (Date.now() - started > ${ms}) return resolve(false)
+          setTimeout(look, 400)
+        }
+        look()
+      })`
+      const { detail, state } = await perform(async (live, session) => {
+        const found = await evaluate(live, session, poll, ms + 5_000)
+        return {
+          ok: Boolean(found),
+          detail: found ? `"${target}" appeared.` : `"${target}" did not appear within ${seconds}s.`,
+        }
+      })
+      return { ok: true, detail, page: state.snapshot }
+    },
+    async video(command: VideoCommand) {
+      const { detail, state } = await perform(async (live, session) => {
+        const result = (await evaluate(live, session, videoScript(command))) as { ok?: boolean; detail?: string } | null
+        return { ok: Boolean(result?.ok), detail: String(result?.detail ?? 'There is no video on this page.') }
+      })
+      return { ok: true, detail, page: state.snapshot }
+    },
+    async autoplay(plan: QuizPlan) {
+      // A Browserless session is capped at two minutes, so every poll is its own
+      // connection: the reconnect support below replaces a browser that expired
+      // and navigates back to the page the run is on.
+      const once = async <T>(action: (cdp: Cdp, session: string) => Promise<T>): Promise<T> => {
+        try {
+          return await work(action)
+        } finally {
+          await detach()
+        }
+      }
+      const raw = await playQuiz(
+        () => once((cdp, session) => evaluate(cdp, session, quizScript(plan))),
+        () =>
+          once(async (cdp, session) => {
+            const value = await evaluate(cdp, session, quizPollScript())
+            return (typeof value === 'string' ? JSON.parse(value) : null) as QuizPlayed | null
+          }).catch(() => null),
+        plan.budgetMs ?? 120_000,
+      )
+      const state = await once((cdp, session) => readPage(cdp, session)).catch(() => null)
+      return { ...quizSummary(raw), page: state?.snapshot ?? { url: lastUrl, title: '', text: '' } }
+    },
+    async scroll(by: number) {
+      const { detail, state } = await perform(async (live, session) => {
+        await evaluate(live, session, `window.scrollBy(0, ${Math.round(by)})`)
+        return { ok: true, detail: `Scrolled by ${Math.round(by)}px.` }
+      })
+      return { ok: true, detail, page: state.snapshot }
+    },
+    async back() {
+      const { detail, state } = await perform(async (live, session) => {
+        await evaluate(live, session, 'history.back()')
+        return { ok: true, detail: 'Went back.' }
+      })
+      return { ok: true, detail, page: state.snapshot }
+    },
+    async screenshot() {
+      try {
+        const image = await work(async (live, session) => screenshot(live, session))
+        return image ?? ''
+      } finally {
+        await detach()
+      }
+    },
+    async close() {
+      // No reconnect command: the browser is released rather than kept alive.
+      cdp?.close()
+      cdp = null
+      page = ''
+    },
+  }
+}
+
+/** One raw key event, for a provider whose own key helper is not in use here. */
+async function cdpSendKey(
+  cdp: Cdp,
+  session: string,
+  type: 'rawKeyDown' | 'keyUp',
+  key: string,
+): Promise<void> {
+  const code = key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0
+  await cdp.send(
+    'Input.dispatchKeyEvent',
+    { type, key, ...(code ? { windowsVirtualKeyCode: code } : {}) },
+    session,
+  )
 }

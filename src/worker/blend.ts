@@ -37,6 +37,8 @@ type BlendInput = {
   quality?: ReadonlyMap<string, LaneRecord>
   /** A learned depth choice; absent means the regex prior decides. */
   depth?: Depth
+  /** Chat's speed-first path: race fast healthy lanes instead of the selected lane alone. */
+  fastChat?: boolean
   /** Real reasoning from the lane doing the current internal step. */
   onReasoning?: (text: string) => Promise<unknown> | unknown
   /** Keeps the internal lane keys used for this reply, never sent to the browser. */
@@ -438,37 +440,49 @@ async function reviseFinal(referee: PublicLane, candidate: string, issues: strin
 /**
  * Runs the quick path as a race instead of a queue. A simple question should
  * take the fastest working lane, not spend eight or fifteen seconds on each
- * resting model in selected-model order.
+ * resting model in selected-model order. A batch that is entirely out of quota
+ * is not the end of the roster: keep racing the next batch until every lane has
+ * had a turn. Only then report a generic busy message, never one provider's
+ * quota text.
  */
 async function* quickRace(lanes: PublicLane[], input: BlendInput): AsyncGenerator<StreamPiece> {
-  const controllers = lanes.map(() => new AbortController())
-  const deadline = new AbortController()
-  const timer = setTimeout(() => deadline.abort(), 5_000)
-  const attempts = lanes.map((lane, index) => {
-    const controller = controllers[index]!
-    const signal = AbortSignal.any(input.signal ? [input.signal, controller.signal, deadline.signal] : [controller.signal, deadline.signal])
-    return laneText(lane, {
-      messages: input.messages,
-      signal,
-      reasoning: false,
-      reasoningEffort: 'low',
-      maxTokens: 1_000,
-      timeoutMs: 4_500,
-      allowCooling: true,
-      onLaneResult: input.onLaneResult,
-    }).then((text) => ({ lane, text }))
-  })
-  try {
-    const winner = await Promise.any(attempts)
-    for (const controller of controllers) controller.abort()
-    yield* chunks(winner.text, input.signal, 0)
-  } catch (error) {
-    for (const controller of controllers) controller.abort()
-    const first = error instanceof AggregateError ? error.errors[0] : error
-    throw first instanceof Error ? first : new AiError('busy', 'The models are busy right now. Try again in a minute.', 503)
-  } finally {
-    clearTimeout(timer)
+  const queue = [...new Map(lanes.map((lane) => [laneKey(lane), lane])).values()]
+  const overallDeadline = Date.now() + 30_000
+  while (queue.length && Date.now() < overallDeadline) {
+    if (input.signal?.aborted) return
+    const batch = queue.splice(0, 6)
+    const controllers = batch.map(() => new AbortController())
+    const deadline = new AbortController()
+    const timer = setTimeout(() => deadline.abort(), 5_000)
+    const attempts = batch.map((lane, index) => {
+      const controller = controllers[index]!
+      const signal = AbortSignal.any(input.signal ? [input.signal, controller.signal, deadline.signal] : [controller.signal, deadline.signal])
+      return laneText(lane, {
+        messages: input.messages,
+        signal,
+        reasoning: false,
+        reasoningEffort: 'low',
+        maxTokens: 1_000,
+        timeoutMs: 4_500,
+        allowCooling: true,
+        onLaneResult: input.onLaneResult,
+      }).then((text) => ({ lane, text }))
+    })
+    try {
+      const winner = await Promise.any(attempts)
+      for (const controller of controllers) controller.abort()
+      yield* chunks(winner.text, input.signal, 0)
+      return
+    } catch {
+      if (input.signal?.aborted) return
+      // Every lane in this batch failed. Try the next batch rather than turning
+      // the first quota response into the person's answer.
+    } finally {
+      clearTimeout(timer)
+      for (const controller of controllers) controller.abort()
+    }
   }
+  throw new AiError('busy', 'All available models are busy right now. Please try again in a moment.', 503)
 }
 
 export async function* blendComplete(lanes: PublicLane[], baseInput: BlendInput): AsyncGenerator<StreamPiece> {
@@ -537,23 +551,34 @@ export async function* blendComplete(lanes: PublicLane[], baseInput: BlendInput)
     // keep the selected/strongest order, or a quick small model would win just
     // because it answered first. Arithmetic can safely include a degraded
     // lane as a last resort: a working answer beats an empty fast path.
-    const fastCandidates = input.health
-      ? [...lanes]
-          .sort((a, b) => {
-            const rank = (lane: PublicLane) => {
-              const row = input.health!.get(laneKey(lane))
-              const status = row?.status === 'healthy' ? 0 : row?.status === 'unknown' ? 1 : row?.status === 'degraded' ? 2 : 3
-              return status * 1_000_000_000 + (row?.latencyMs ?? 999_999_999)
-            }
-            return rank(a) - rank(b)
-          })
-          .slice(0, 5)
-      : lanes.slice(0, 5)
-    const candidates = (fastAnswer ? fastCandidates : pool).slice(0, 5)
+    // Prefer a lane that is known to answer quickly, not merely the strongest
+    // name. Kimi/Step/Ling reasoning lanes can take 30+ seconds before their
+    // first token; a short chat answer should start with the low-latency
+    // models. Health still breaks ties within a speed tier.
+    const speedRank = (lane: PublicLane): number => {
+      const text = `${lane.model} ${lane.label}`.toLowerCase()
+      if (/deepseek-v4\.1|gpt-oss-120b|gpt-oss-20b|codestral|gemini|qwen3\.8|qwen3\.5-(?:9b|27b)|mistral-small|llama-4-scout/.test(text)) return 0
+      if (/kimi|step-5|ling-3\.2|nemotron-3-ultra|glm-5\.3|minimax-m3|nemotron-3\.5-super/.test(text)) return 2
+      return 1
+    }
+    const fastPool = healthy.length ? healthy : lanes
+    const fastCandidates = [...fastPool].sort((a, b) => {
+      const rank = (lane: PublicLane) => {
+        const row = input.health?.get(laneKey(lane))
+        const status = row?.status === 'healthy' ? 0 : row?.status === 'unknown' || row?.status === undefined ? 1 : row?.status === 'degraded' ? 2 : 3
+        return speedRank(lane) * 1_000_000_000 + status * 10_000_000 + (row?.latencyMs ?? 999_999)
+      }
+      return rank(a) - rank(b)
+    })
+    // Chat is speed-first: race the fastest healthy lanes even when the question
+    // is not arithmetic. Deep and Team never set this flag, so their full pass
+    // is unchanged.
+    const candidates = fastAnswer || input.fastChat ? fastCandidates : pool
     if (!candidates.length) throw new AiError('busy', 'The models are busy right now. Try again in a minute.', 503)
     // Race the pool even for ordinary short questions. Running lanes one at a
     // time let one silent provider hold the composer for its full timeout
-    // before a healthy model was even attempted.
+    // before a healthy model was even attempted. quickRace works through every
+    // lane in batches, so five quota failures cannot strand a short question.
     for await (const piece of quickRace(candidates, input)) {
       yield piece
     }

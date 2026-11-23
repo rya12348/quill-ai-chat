@@ -58,6 +58,13 @@ const PUBLIC_ORIGINS = new Set([
   'https://www.7394.jo3.org',
   'https://7394.jo3.org',
   'https://ink-jo3.pages.dev',
+  // The same deployment on a hostname that is not under jo3.org. A network
+  // filter that blocks the jo3.org domain cannot reach the custom domain, so
+  // this origin has to be able to sign in and accept its own mutations.
+  'https://ink-harbor-2f9.pages.dev',
+  // The public .org address the app moved to (a CNAME to the Pages project).
+  'https://www.inkbrowser.dpdns.org',
+  'https://inkbrowser.dpdns.org',
 ])
 
 function publicForwardedOrigin(request: Request): string | undefined {
@@ -247,6 +254,30 @@ export function isOwner(env: Env, user: FreebuffUser, request: Request): boolean
   const configured = env.OWNER_SUB?.trim()
   if (configured) return user.sub === configured
   return authMode(env, request) === 'development' && user.sub === DEV_USER.sub
+}
+
+/** The address the request came from, as Cloudflare reports it. */
+export function callerAddress(request: Request): string {
+  return (request.headers.get('cf-connecting-ip') || '').trim()
+}
+
+/**
+ * Whether this request belongs to the person who runs the deployment.
+ *
+ * Two ways to be that person, because the deployment may not have accounts at
+ * all: the owner account (OWNER_SUB) when auth is on, or the address in
+ * AGENT_OWNER_IPS when it is not. With neither configured nobody matches, which
+ * is the safe default for a switch that removes spending limits.
+ */
+export function isDeploymentOwner(env: Env, user: FreebuffUser, request: Request): boolean {
+  if (isOwner(env, user, request)) return true
+  const address = callerAddress(request)
+  if (!address) return false
+  const allowed = (env.AGENT_OWNER_IPS ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  return allowed.includes(address)
 }
 
 let cached: { key: string; auth: FreebuffAuth } | undefined

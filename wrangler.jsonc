@@ -17,8 +17,18 @@
   // Local secrets come from `.env` (see .env.example): OPENAI_API_KEY is the
   // Freebuff API key. Do not add a `.dev.vars` file; its presence stops
   // Wrangler from reading `.env` and `.env.local`.
+  // Browser Rendering for the coding agent's browser tool. Local dev uses this
+  // binding; Pages deploys take the one from pages/wrangler.jsonc.
+  "browser": {
+    "binding": "BROWSER"
+  },
   "d1_databases": [
     { "binding": "DB", "database_name": "ai-chat", "database_id": "00000000-0000-0000-0000-000000000000" }
+  ],
+  // Local R2 for attachment bytes. Sites attaches the real FILES bucket on
+  // deploy (sites_add_storage); wrangler uses this local bucket in development.
+  "r2_buckets": [
+    { "binding": "FILES", "bucket_name": "ai-chat-files" }
   ],
   // Local realtime testing uses the helper Worker from
   // freebuff-realtime/wrangler.jsonc. Sites injects its own managed REALTIME

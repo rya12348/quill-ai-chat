@@ -1,6 +1,6 @@
 // External synthetic check for the custom domain. Run from CI or any network
 // that is not behind the owner's local content filter.
-const base = (process.env.PRODUCTION_URL?.trim() || 'https://ink.7394.jo3.org').replace(/\/$/, '')
+const base = (process.env.PRODUCTION_URL?.trim() || 'https://www.inkbrowser.dpdns.org').replace(/\/$/, '')
 const slowMs = Number(process.env.PRODUCTION_SLOW_MS || 5000)
 const errorLimit = Number(process.env.PRODUCTION_ERROR_LIMIT || 10)
 const checks = []

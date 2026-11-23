@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { installPokiGameBridge, isPokiGameWrapperUrl } from '../src/worker/poki-game'
+import { installPokiGameBridge, isPokiAssetHost, isPokiGameWrapperUrl, rewritePokiUrls, rewriteWrapperGameUri } from '../src/worker/poki-game'
 import { assetProxyPath, fetchSitePage, findSiteTarget, googleSearchQuery, installFrameBridge, normalizeSiteUrl, parseGoogleLuckyRedirect, renderProxyErrorPage, renderProxyPage, renderSearchResults, resolveProxyTarget, rewriteAssetContent, searchQueryFor, SiteError } from '../src/worker/site-proxy'
 
 const TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -51,6 +51,32 @@ test('standalone proxy sessions only accept public HTTP addresses', () => {
   assert.equal(normalizeSiteUrl('file:///etc/passwd'), undefined)
 })
 
+test('the proxy refuses every private and special-use address family', () => {
+  // Metadata endpoints, private, CGNAT, link local, multicast and the test nets.
+  assert.equal(normalizeSiteUrl('http://169.254.169.254/latest/meta-data/'), undefined)
+  assert.equal(normalizeSiteUrl('http://100.64.0.1/'), undefined)
+  assert.equal(normalizeSiteUrl('http://192.168.1.1/'), undefined)
+  assert.equal(normalizeSiteUrl('http://172.16.0.1/'), undefined)
+  assert.equal(normalizeSiteUrl('http://10.0.0.1/'), undefined)
+  assert.equal(normalizeSiteUrl('http://198.18.0.1/'), undefined)
+  assert.equal(normalizeSiteUrl('http://203.0.113.9/'), undefined)
+  assert.equal(normalizeSiteUrl('http://224.0.0.1/'), undefined)
+  assert.equal(normalizeSiteUrl('http://255.255.255.255/'), undefined)
+  // A decimal or hex address is normalised by the URL parser, then refused.
+  assert.equal(normalizeSiteUrl('http://2130706433/'), undefined)
+  assert.equal(normalizeSiteUrl('http://0x7f.0.0.1/'), undefined)
+  // IPv6 loopback, unique local, link local, multicast, mapped and NAT64.
+  assert.equal(normalizeSiteUrl('http://[::1]/'), undefined)
+  assert.equal(normalizeSiteUrl('http://[fd00::1]/'), undefined)
+  assert.equal(normalizeSiteUrl('http://[fe80::1]/'), undefined)
+  assert.equal(normalizeSiteUrl('http://[ff02::1]/'), undefined)
+  assert.equal(normalizeSiteUrl('http://[::ffff:127.0.0.1]/'), undefined)
+  assert.equal(normalizeSiteUrl('http://[64:ff9b::7f00:1]/'), undefined)
+  // Public addresses still pass.
+  assert.equal(normalizeSiteUrl('https://example.com/'), 'https://example.com/')
+  assert.equal(normalizeSiteUrl('http://8.8.8.8/'), 'http://8.8.8.8/')
+})
+
 test('a token can browse to another public site but never a private host', () => {
   assert.equal(
     resolveProxyTarget('https://www.google.com/', 'https://www.google.com/search?q=stet'),
@@ -74,12 +100,18 @@ test('Google landing pages use a local preview instead of failing with 429', asy
   try {
     const page = await fetchSitePage('https://www.google.com/')
     assert.equal(page.title, 'Google')
-    assert.match(page.html, /action="https:\/\/www\.google\.com\/search"/)
+    // The form posts back to the capability URL the route fills in, so a search
+    // opens the preview's own result list instead of leaving for google.com.
+    assert.match(page.html, /action="__ink_proxy_search__"/)
+    assert.doesNotMatch(page.html, /action="https:\/\/www\.google\.com\/search"/)
     assert.match(page.html, /name="q"/)
-    assert.match(page.html, /served locally/)
+    // A clean Google page: no development note about where it came from.
+    assert.doesNotMatch(page.html, /Live preview/i)
 
     const country = await fetchSitePage('https://www.google.co.uk/webhp?igu=1')
-    assert.match(country.html, /action="https:\/\/www\.google\.co\.uk\/search"/)
+    assert.equal(country.title, 'Google')
+    // Every country domain posts back to the same capability placeholder.
+    assert.match(country.html, /action="__ink_proxy_search__"/)
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -233,15 +265,57 @@ test('search results escape markup and provide a search-again form', () => {
   const html = renderSearchResults('poki <script>', 'https://www.google.com/search?q=poki', [
     { title: 'Poki <b>', url: 'https://poki.com/', snippet: 'Free games & fun' },
   ])
-  assert.match(html, /Live results fetched through the proxy/)
+  // The page is the result list itself: no development note above it.
+  assert.match(html, /<ol>/)
   assert.match(html, /Poki &lt;b&gt;/)
   assert.match(html, /href="https:\/\/poki\.com\/"/)
   assert.match(html, /action="https:\/\/www\.google\.com\/search"/)
   assert.match(html, /name="q"/)
-  assert.match(html, /Google's own result page requires JavaScript/)
+  assert.match(html, /Free games &amp; fun/)
   assert.doesNotMatch(html, /data-stet-external/)
   assert.doesNotMatch(html, /target="_blank"/)
   assert.doesNotMatch(html, /<script>/i)
+})
+
+test('Poki asset hosts are rewritten to the scoped CDN route', () => {
+  // Absolute URLs in a game bundle, a stylesheet or the page shell.
+  assert.equal(rewritePokiUrls('https://game-cdn.poki.com/v3/x.js'), '/api/poki-cdn/game-cdn.poki.com/v3/x.js')
+  assert.equal(rewritePokiUrls('//a.poki.com/fonts/x.woff2'), '/api/poki-cdn/a.poki.com/fonts/x.woff2')
+  assert.equal(rewritePokiUrls('https://leveldata.poki.io/animations'), '/api/poki-cdn/leveldata.poki.io/animations')
+  assert.equal(rewritePokiUrls('https://poki.com/sitelock'), '/api/poki-cdn/poki.com/sitelock')
+  // The image and font CDN is a separate Poki domain.
+  assert.equal(rewritePokiUrls('https://img.poki-cdn.com/cdn-cgi/image/x.jpg'), '/api/poki-cdn/img.poki-cdn.com/cdn-cgi/image/x.jpg')
+  assert.equal(isPokiAssetHost('img.poki-cdn.com'), true)
+  assert.equal(isPokiAssetHost('poki-cdn.com'), true)
+  // A page with its own <base> needs an absolute route on the app origin.
+  assert.equal(
+    rewritePokiUrls('url(https://a.poki-cdn.com/f.woff2)', 'https://ink.example'),
+    'url(https://ink.example/api/poki-cdn/a.poki-cdn.com/f.woff2)',
+  )
+  // Anything that only looks like Poki keeps its address.
+  assert.equal(rewritePokiUrls('https://example.com/poki.com'), 'https://example.com/poki.com')
+  assert.equal(rewritePokiUrls('https://poki.com.evil.example/x'), 'https://poki.com.evil.example/x')
+  // Hosts the route accepts are Poki's own, nothing else.
+  assert.equal(isPokiAssetHost('poki.com'), true)
+  assert.equal(isPokiAssetHost('games.poki.com'), true)
+  assert.equal(isPokiAssetHost('poki.io'), true)
+  assert.equal(isPokiAssetHost('poki.com.evil.example'), false)
+  assert.equal(isPokiAssetHost('evilpoki.com'), false)
+})
+
+test('the Poki wrapper loads its game through this origin', () => {
+  const token = 'a'.repeat(48)
+  const html = rewriteWrapperGameUri(
+    '{"gameUri":"https://5dd312fa-015f-11ea-ad56-9cb6d0d995f7.gdn.poki.com/ec5c789a-69d7-476d-aa4e-1a0064850d79/index.html?country=US"}',
+    token,
+    'https://ink.example',
+  )
+  assert.equal(
+    html,
+    `{"gameUri":"https://ink.example/api/poki-game/${token}/5dd312fa-015f-11ea-ad56-9cb6d0d995f7/ec5c789a-69d7-476d-aa4e-1a0064850d79/index.html?country=US"}`,
+  )
+  // Anything that is not a Poki game address is left alone.
+  assert.equal(rewriteWrapperGameUri('{"gameUri":"https://evil.example/x"}', token, 'https://ink.example'), '{"gameUri":"https://evil.example/x"}')
 })
 
 test('Poki wrapper URLs accept current and legacy shapes', () => {

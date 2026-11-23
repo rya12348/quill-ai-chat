@@ -1,8 +1,11 @@
-import { FileText, Globe2, Link2, Lock, Menu as MenuIcon, Monitor, Paperclip, Plus, Send, Users, X } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Check, Copy, Globe2, Link2, Lock, Menu as MenuIcon, Monitor, Paperclip, Pencil, Plus, Search, Send, Star, Trash2, UserPlus, Users, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
 import {
+  CHAT_REACTIONS,
+  cleanReactionEmoji,
+  ROOM_DISPLAY_NAME_CHARS,
   ROOM_ID,
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_TOTAL_BYTES,
@@ -13,18 +16,28 @@ import {
   ROOM_PASSWORD_MAX_CHARS,
   ROOM_PASSWORD_MIN_CHARS,
 } from '../../shared/config'
-import type { MessageAttachment, RoomMessage, RoomSummary, RoomVisibility } from '../../shared/types'
+import type { MessageAttachment, RoomMessage, RoomPerson, RoomReaction, RoomSummary, RoomVisibility } from '../../shared/types'
+import { AttachmentFile, AttachmentLightbox, AttachmentThumbnail } from '../components/AttachmentViews'
 import { announceRoomMessages } from '../components/RoomNotifications'
 import { useMobileNav } from '../components/Shell'
 import { Avatar, Button, Dialog, Input, Spinner, useToast } from '../components/ui'
 import {
   ApiError,
+  useAcceptRoomInvite,
   useCreateRoom,
+  useCreateRoomInvite,
+  useDeleteRoom,
+  useInviteRoomPeople,
   useMe,
+  useRenameRoomPerson,
+  useRoomPeople,
+  useSaveRoomPerson,
   useRoom,
   useRooms,
   useSendRoomMessage,
+  useSetRoomMessageReaction,
   useUnlockRoom,
+  useUpdateRoomProfile,
 } from '../lib/api'
 import { clearAttention } from '../lib/attention'
 import { cx } from '../lib/cx'
@@ -32,7 +45,6 @@ import {
   ATTACHMENT_ACCEPT,
   AttachmentError,
   clipboardFiles,
-  formatFileSize,
   readAttachment,
   type PendingAttachment,
 } from '../lib/attachments'
@@ -43,6 +55,20 @@ const fullTimeFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'mediu
 
 function roomMessageIsCurrent(message: RoomMessage, at = Date.now()): boolean {
   return message.createdAt + ROOM_MESSAGE_TTL_MS > at
+}
+
+/** A quiet marker for the owner's name; it should not compete with the message. */
+function OwnerBadge() {
+  return (
+    <span
+      role="img"
+      aria-label="Owner"
+      title="Owner"
+      className="inline-grid size-3.5 shrink-0 place-items-center rounded-full bg-accent-soft text-[8px] leading-none text-accent"
+    >
+      ✦
+    </span>
+  )
 }
 
 function mergeRoomMessages(current: RoomMessage[], incoming: RoomMessage[], roomId: string): RoomMessage[] {
@@ -86,6 +112,110 @@ function roomLinkUrl(raw: string): string | null {
   }
 }
 
+const ROOM_REACTION_NAMES: Record<string, string> = {
+  '❤️': 'Love',
+  '😂': 'Laugh',
+  '👍': 'Like',
+  '🔥': 'Fire',
+  '😮': 'Wow',
+  '🎉': 'Celebrate',
+}
+
+/** A pasted link to a GIF shows the animation itself instead of a link chip. */
+function gifLinkUrl(attachment: MessageAttachment): string | null {
+  if (attachment.mime !== 'text/uri-list' || !attachment.url) return null
+  try {
+    const url = new URL(attachment.url)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    return /\.gif$/i.test(url.pathname) ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
+function RoomReactionBar({
+  reactions,
+  onReact,
+  side,
+}: {
+  reactions?: RoomReaction[]
+  onReact: (reaction: string | null) => void
+  side: 'left' | 'right'
+}) {
+  const mine = reactions?.find((item) => item.mine)?.reaction ?? null
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  const pick = (value: string) => {
+    onReact(mine === value ? null : value)
+    setDraft('')
+    setPickerOpen(false)
+  }
+
+  return (
+    <div
+      className={cx(
+        'pointer-events-none absolute top-full z-20 mt-1 flex translate-y-1 scale-95 items-center gap-px rounded-full border border-line/80 bg-surface/95 p-0.5 opacity-0 shadow-[0_3px_10px_-5px_rgb(27_26_23/0.3)] backdrop-blur-sm transition-[opacity,translate,scale] duration-150 delay-0 ease-out',
+        'group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:scale-100 group-hover:opacity-100 group-hover:delay-100',
+        'group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:scale-100 group-focus-within:opacity-100',
+        side === 'right' ? 'right-0' : 'left-0',
+      )}
+    >
+      {CHAT_REACTIONS.map((value) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => onReact(mine === value ? null : value)}
+          aria-label={`${mine === value ? 'Remove' : 'React with'} ${ROOM_REACTION_NAMES[value] ?? value}`}
+          aria-pressed={mine === value}
+          title={`${value} ${ROOM_REACTION_NAMES[value] ?? 'React'}`}
+          className={cx(
+            'grid size-5 place-items-center rounded-full text-[12px] leading-none transition-colors hover:bg-surface-2',
+            mine === value && 'bg-accent-soft',
+          )}
+        >
+          <span aria-hidden="true">{value}</span>
+        </button>
+      ))}
+      {pickerOpen ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(event) => {
+            setDraft(event.target.value)
+            // The system emoji picker types into this field; the first complete
+            // emoji it leaves behind is applied straight away.
+            const reaction = cleanReactionEmoji(event.target.value)
+            if (reaction) pick(reaction)
+          }}
+          onBlur={() => {
+            if (!draft.trim()) setPickerOpen(false)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setDraft('')
+              setPickerOpen(false)
+            }
+          }}
+          aria-label="React with any emoji"
+          placeholder="Any emoji"
+          className="h-5 w-[70px] rounded-full border border-line bg-surface px-1.5 text-center text-[11.5px] text-fg outline-none placeholder:text-[10px] placeholder:text-faint focus:border-accent/50"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          aria-label="React with any emoji"
+          title="Any emoji"
+          className="grid h-5 min-w-5 place-items-center rounded-full px-0.5 text-[13px] font-semibold leading-none text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+        >
+          +
+        </button>
+      )}
+    </div>
+  )
+}
+
 function roomAttachmentPreview(attachments: PendingAttachment[]): MessageAttachment[] {
   return attachments.map((attachment) => ({
     id: attachment.id,
@@ -93,7 +223,11 @@ function roomAttachmentPreview(attachments: PendingAttachment[]): MessageAttachm
     mime: attachment.mime,
     size: attachment.size,
     kind: attachment.kind,
-    ...(attachment.kind === 'image' || attachment.mime === 'text/uri-list' ? { url: attachment.data } : {}),
+    ...(attachment.kind === 'image'
+      ? { url: attachment.data, thumbnailUrl: attachment.thumbnail ?? attachment.data }
+      : attachment.mime === 'text/uri-list'
+        ? { url: attachment.data }
+        : {}),
   }))
 }
 
@@ -109,8 +243,12 @@ export function Room() {
   const roomQuery = useRoom(selectedId, status === 'connected' ? 60_000 : 8_000)
   const selectedName = roomQuery.data?.name ?? activeRoom?.name ?? (selectedId === ROOM_ID ? ROOM_NAME : 'Room')
   const send = useSendRoomMessage(selectedId)
+  const setReaction = useSetRoomMessageReaction(selectedId)
+  const acceptInvite = useAcceptRoomInvite()
   const [messages, setMessages] = useState<RoomMessage[]>([])
   const [viewerId, setViewerId] = useState('')
+  const [viewerName, setViewerName] = useState('')
+  const [viewerOwner, setViewerOwner] = useState(false)
   const [viewerRoom, setViewerRoom] = useState('')
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
@@ -119,7 +257,12 @@ export function Room() {
   const [linkDraft, setLinkDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [nameOpen, setNameOpen] = useState(false)
+  const [renameTarget, setRenameTarget] = useState<{ authorId: string; name: string } | null>(null)
   const [unlockTarget, setUnlockTarget] = useState<RoomSummary | null>(null)
+  const [lightbox, setLightbox] = useState<MessageAttachment | null>(null)
   const toast = useToast()
   const scroller = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -128,6 +271,7 @@ export function Room() {
   const sendingRef = useRef(false)
   const seenMessagesRef = useRef<Set<string>>(new Set())
   const initialSnapshotRef = useRef(true)
+  const inviteAttemptRef = useRef('')
 
   const selectRoom = useCallback(
     (roomId: string) => {
@@ -139,6 +283,38 @@ export function Room() {
     },
     [setParams],
   )
+
+  // An invite link lands on the room route with a token. Redeem it once, then
+  // remove the token from the address bar so a refresh cannot replay it.
+  useEffect(() => {
+    const invite = params.get('invite')?.trim()
+    if (!invite) return
+    const attempt = `${selectedId}:${invite}`
+    if (inviteAttemptRef.current === attempt) return
+    inviteAttemptRef.current = attempt
+    acceptInvite.mutate(
+      { roomId: selectedId, invite },
+      {
+        onSuccess: ({ room }) => {
+          toast(`Joined ${room.name}`)
+          setParams((current) => {
+            const next = new URLSearchParams(current)
+            next.delete('invite')
+            next.set('room', room.id)
+            return next
+          })
+        },
+        onError: (failure) => {
+          toast(failure instanceof Error ? failure.message : 'Could not use that invite.', 'danger')
+          setParams((current) => {
+            const next = new URLSearchParams(current)
+            next.delete('invite')
+            return next
+          })
+        },
+      },
+    )
+  }, [params, selectedId])
 
   const appendForRoom = useCallback((roomId: string, incoming: RoomMessage[]) => {
     if (activeRoomRef.current !== roomId) return
@@ -162,6 +338,7 @@ export function Room() {
     activeRoomRef.current = selectedId
     setMessages([])
     setViewerId('')
+    setViewerOwner(false)
     setViewerRoom('')
     setStatus('connecting')
     setDraft('')
@@ -169,6 +346,8 @@ export function Room() {
     setAttachmentError('')
     setLinkOpen(false)
     setLinkDraft('')
+    setLightbox(null)
+    setRenameTarget(null)
     setError(null)
     seenMessagesRef.current = new Set()
     initialSnapshotRef.current = true
@@ -184,6 +363,8 @@ export function Room() {
     if (!data || activeRoomRef.current !== data.room) return
     setMessages((current) => mergeRoomMessages(current, data.messages, data.room))
     setViewerId(data.viewerId)
+    if (data.viewerName) setViewerName(data.viewerName)
+    setViewerOwner(data.viewerOwner === true)
     setViewerRoom(data.room)
     const previouslySeen = seenMessagesRef.current
     const unseen = data.messages.filter((message) => !previouslySeen.has(message.id))
@@ -216,6 +397,33 @@ export function Room() {
           return
         }
         if (event.type === 'presence') return
+        if (event.type === 'broadcast' && event.event === 'room_deleted') {
+          const deleted = event.data as { roomId?: unknown }
+          if (deleted.roomId === selectedId) {
+            setMessages([])
+            void roomsQuery.refetch()
+            selectRoom(roomsQuery.data?.defaultRoomId ?? ROOM_ID)
+          }
+          return
+        }
+        if (event.type === 'broadcast' && event.event === 'room_reaction') {
+          void refetchRoom()
+          return
+        }
+        if (event.type === 'broadcast' && event.event === 'room_profile') {
+          const profile = event.data as { authorId?: unknown; authorName?: unknown }
+          if (typeof profile.authorId === 'string' && typeof profile.authorName === 'string') {
+            if (profile.authorId === viewerId) setViewerName(profile.authorName)
+            setMessages((current) =>
+              current.map((message) =>
+                message.authorId === profile.authorId
+                  ? { ...message, authorName: profile.authorName as string }
+                  : message,
+              ),
+            )
+          }
+          return
+        }
         if (event.type === 'broadcast' && event.event === 'room_message' && isRoomMessage(event.data, selectedId)) {
           if (!seenMessagesRef.current.has(event.data.id)) {
             seenMessagesRef.current.add(event.data.id)
@@ -226,7 +434,7 @@ export function Room() {
       },
     })
     return () => connection.close()
-  }, [appendForRoom, noteIncoming, refetchRoom, selectedId, selectedName, viewerId, viewerRoom])
+  }, [appendForRoom, noteIncoming, refetchRoom, roomsQuery.data?.defaultRoomId, roomsQuery.refetch, selectRoom, selectedId, selectedName, viewerId, viewerRoom])
 
   // Drop a message exactly when its retention window closes, even if no
   // snapshot or broadcast happens to arrive at that moment.
@@ -348,8 +556,9 @@ export function Room() {
       room: roomId,
       body,
       ...(outgoing.length ? { attachments: roomAttachmentPreview(outgoing) } : {}),
-      authorName: me?.user.name ?? 'You',
+      authorName: viewerName || me?.user.name || 'You',
       authorId: viewerId || 'pending-self',
+      ...(viewerOwner ? { authorOwner: true } : {}),
       createdAt: Date.now(),
     }
     setError(null)
@@ -377,6 +586,24 @@ export function Room() {
     }
   }
 
+  const reactToMessage = (message: RoomMessage, next: string | null) => {
+    setReaction.mutate(
+      { messageId: message.id, reaction: next },
+      {
+        onSuccess: (result) => {
+          if (activeRoomRef.current !== message.room) return
+          setMessages((current) =>
+            current.map((item) =>
+              item.id === result.messageId ? { ...item, reactions: result.reactions } : item,
+            ),
+          )
+        },
+        onError: (failure) =>
+          toast(failure instanceof Error ? failure.message : 'Could not save the reaction.', 'danger'),
+      },
+    )
+  }
+
   const selectedVisibility: RoomVisibility =
     roomQuery.data?.visibility ?? activeRoom?.visibility ?? 'public'
   const isGeneral = selectedId === ROOM_ID
@@ -393,6 +620,9 @@ export function Room() {
   const refreshError = Boolean(queryError && roomQuery.data)
   const privateRooms = roomsQuery.data?.items.filter((room) => room.visibility === 'private') ?? []
   const publicRooms = roomsQuery.data?.items.filter((room) => room.visibility === 'public') ?? []
+  const canInvite = selectedVisibility === 'private' && Boolean(roomQuery.data?.createdByMe ?? activeRoom?.createdByMe)
+  const canDelete = canInvite
+  const displayName = viewerName || me?.user.name || 'You'
 
   const chooseRoom = (room: RoomSummary) => {
     if (room.visibility === 'private' && !room.unlocked) {
@@ -486,8 +716,29 @@ export function Room() {
         </aside>
 
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-4 md:px-6">
+          <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-line px-4 md:px-6">
             <h2 className="min-w-0 truncate text-[14px] font-semibold">{selectedName}</h2>
+            {canInvite || canDelete ? (
+              <div className="flex shrink-0 items-center gap-1">
+                {canInvite ? (
+                  <Button variant="secondary" size="sm" onClick={() => setInviteOpen(true)}>
+                    <UserPlus className="size-3.5" />
+                    Invite
+                  </Button>
+                ) : null}
+                {canDelete ? (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Delete room"
+                    title="Delete room"
+                    onClick={() => setDeleteOpen(true)}
+                  >
+                    <Trash2 className="text-danger" />
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div ref={scroller} onScroll={onScroll} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
@@ -502,7 +753,7 @@ export function Room() {
                   </p>
                   <p className="mt-0.5 text-[13.5px] leading-relaxed text-muted">
                     {selectedVisibility === 'private'
-                      ? 'Only people who know the password can read and send messages here.'
+                      ? 'Only people with the password or an invite link can read and send messages here.'
                       : isGeneral
                         ? 'A place for everyone using Ink to say hello or share what they’re working on.'
                         : 'Messages are visible to everyone using Ink. Don’t share anything private.'}
@@ -566,17 +817,34 @@ export function Room() {
                     {messages.map((message) => {
                       const pending = message.id.startsWith('pending:')
                       const mine = pending || message.authorId === viewerId
+                      const owner = message.authorOwner === true || (mine && viewerOwner)
                       const author = mine ? 'You' : message.authorName
                       return (
-                        <article key={message.id} className={cx('flex items-start gap-2.5', mine && 'flex-row-reverse', pending && 'opacity-70')}>
+                        <article key={message.id} className={cx('group flex items-start gap-2.5', mine && 'flex-row-reverse', pending && 'opacity-70')}>
                           <Avatar
-                            name={mine ? me?.user.name ?? 'You' : message.authorName}
+                            name={mine ? displayName : message.authorName}
                             src={mine ? me?.user.picture : undefined}
                             size={28}
                           />
-                          <div className={cx('min-w-0 max-w-[82%]', mine && 'text-right')}>
+                          <div className={cx('relative min-w-0 max-w-[82%]', mine && 'text-right')}>
                             <div className={cx('mb-1 flex items-center gap-2 text-[11px] text-faint', mine && 'justify-end')}>
-                              <span className="font-medium text-muted">{author}</span>
+                              <span className="inline-flex items-center gap-1">
+                                {mine ? (
+                                  <span className="font-medium text-muted">{author}</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setRenameTarget({ authorId: message.authorId, name: message.authorName })}
+                                    aria-label={`Change the name shown for ${message.authorName}`}
+                                    title="Change name"
+                                    className="group/name inline-flex items-center gap-1 font-medium text-muted transition-colors hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                                  >
+                                    {author}
+                                    <Pencil className="size-2.5 opacity-30 transition-opacity group-hover/name:opacity-60 group-focus-visible/name:opacity-60" />
+                                  </button>
+                                )}
+                                {owner ? <OwnerBadge /> : null}
+                              </span>
                               {pending ? (
                                 <span>Sending…</span>
                               ) : (
@@ -589,8 +857,9 @@ export function Room() {
                               )}
                             </div>
                             <div
+                              tabIndex={pending ? undefined : 0}
                               className={cx(
-                                'rounded-bubble px-4 py-3 text-left text-[14.5px] leading-relaxed',
+                                'rounded-bubble px-4 py-3 text-left text-[14.5px] leading-relaxed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
                                 mine
                                   ? 'bg-accent text-bg shadow-[0_3px_12px_-5px_rgb(168_73_20/0.55)]'
                                   : 'border border-line bg-surface text-fg',
@@ -602,57 +871,59 @@ export function Room() {
                               {message.attachments?.length ? (
                                 <div className={cx('flex flex-col gap-2', message.body && 'mt-2')}>
                                   {message.attachments.map((attachment) => {
-                                    if (attachment.kind === 'image' && attachment.url) {
-                                      return (
-                                        <a
-                                          key={attachment.id}
-                                          href={attachment.url}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          title={attachment.name}
-                                          className="block overflow-hidden rounded-[10px] border border-black/10 bg-surface-2"
-                                        >
-                                          <img
-                                            src={attachment.url}
-                                            alt={attachment.name}
-                                            className="max-h-72 w-auto max-w-full object-contain"
-                                          />
-                                        </a>
-                                      )
-                                    }
-                                    const isLink = attachment.mime === 'text/uri-list'
-                                    const chip = (
-                                      <>
-                                        {isLink ? <Link2 className="size-3.5 shrink-0" /> : <FileText className="size-3.5 shrink-0" />}
-                                        <span className="truncate">{attachment.name}</span>
-                                        {isLink ? null : (
-                                          <span className="shrink-0 text-faint">{formatFileSize(attachment.size)}</span>
-                                        )}
-                                      </>
-                                    )
-                                    return attachment.url ? (
-                                      <a
+                                    const gif = gifLinkUrl(attachment)
+                                    const image =
+                                      attachment.kind === 'image'
+                                        ? attachment
+                                        : gif
+                                          ? { ...attachment, kind: 'image' as const, url: gif, thumbnailUrl: gif }
+                                          : null
+                                    return image ? (
+                                      <AttachmentThumbnail
                                         key={attachment.id}
-                                        href={attachment.url}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        title={attachment.name}
-                                        className="inline-flex max-w-full items-center gap-1.5 self-start rounded-full border border-line bg-surface px-2.5 py-1 text-[12px] text-fg transition-colors hover:border-accent/40"
-                                      >
-                                        {chip}
-                                      </a>
+                                        attachment={image}
+                                        onOpen={() => setLightbox(image)}
+                                        className="h-28 w-40"
+                                      />
                                     ) : (
-                                      <span
-                                        key={attachment.id}
-                                        className="inline-flex max-w-full items-center gap-1.5 self-start rounded-full border border-line bg-surface px-2.5 py-1 text-[12px] text-fg"
-                                      >
-                                        {chip}
-                                      </span>
+                                      <AttachmentFile key={attachment.id} attachment={attachment} />
                                     )
                                   })}
                                 </div>
                               ) : null}
                             </div>
+                            {!pending ? (
+                              <div className={cx('mt-1 flex flex-wrap items-center gap-1', mine && 'justify-end')}>
+                                {message.reactions?.length
+                                  ? message.reactions.map((item) => (
+                                      <button
+                                        key={item.reaction}
+                                        type="button"
+                                        onClick={() => reactToMessage(message, item.mine ? null : item.reaction)}
+                                        aria-label={`${item.reaction} reaction, ${item.count} ${item.count === 1 ? 'person' : 'people'}`}
+                                        aria-pressed={item.mine}
+                                        title={item.mine ? 'Remove your reaction' : 'Add this reaction'}
+                                        className={cx(
+                                          'inline-flex h-6 items-center gap-1 rounded-full border px-2 text-[12px] leading-none transition-colors',
+                                          item.mine
+                                            ? 'border-accent/40 bg-accent-soft text-fg'
+                                            : 'border-line bg-surface text-muted hover:text-fg',
+                                        )}
+                                      >
+                                        <span aria-hidden="true">{item.reaction}</span>
+                                        <span>{item.count}</span>
+                                      </button>
+                                    ))
+                                  : null}
+                              </div>
+                            ) : null}
+                            {!pending ? (
+                              <RoomReactionBar
+                                reactions={message.reactions}
+                                onReact={(reaction) => reactToMessage(message, reaction)}
+                                side={mine ? 'right' : 'left'}
+                              />
+                            ) : null}
                           </div>
                         </article>
                       )
@@ -738,6 +1009,21 @@ export function Room() {
                     {attachmentError}
                   </p>
                 ) : null}
+                <div className="mb-1.5 flex items-center justify-between gap-3 px-1 text-[12px] leading-relaxed text-faint">
+                  <button
+                    type="button"
+                    onClick={() => setNameOpen(true)}
+                    aria-label="Change your chat name"
+                    className="inline-flex shrink-0 items-center gap-1 font-medium text-accent transition-opacity hover:opacity-80"
+                  >
+                    <Pencil className="size-3" />
+                    Change name
+                  </button>
+                  <span className="inline-flex min-w-0 items-center justify-end gap-1 truncate text-right">
+                    Chatting as <span className="font-medium text-muted">{displayName}</span>
+                    {viewerOwner ? <OwnerBadge /> : null}
+                  </span>
+                </div>
                 <form
                   onSubmit={(event) => {
                     event.preventDefault()
@@ -751,7 +1037,7 @@ export function Room() {
                         attachment.kind === 'image' ? (
                           <div key={attachment.id} className="relative">
                             <img
-                              src={attachment.data}
+                              src={attachment.thumbnail ?? attachment.data}
                               alt={attachment.name}
                               title={attachment.name}
                               className="size-14 rounded-[10px] border border-line object-cover"
@@ -766,25 +1052,22 @@ export function Room() {
                             </button>
                           </div>
                         ) : (
-                          <span
-                            key={attachment.id}
-                            className="inline-flex max-w-[230px] items-center gap-1.5 rounded-full border border-line bg-surface-2 px-2.5 py-1.5 text-[13px] text-muted"
-                            title={attachment.name}
-                          >
-                            {attachment.mime === 'text/uri-list' ? (
-                              <Link2 className="size-3.5 shrink-0" />
-                            ) : (
-                              <FileText className="size-3.5 shrink-0" />
-                            )}
-                            <span className="truncate">{attachment.name}</span>
-                            {attachment.mime === 'text/uri-list' ? null : (
-                              <span className="shrink-0 text-faint">{formatFileSize(attachment.size)}</span>
-                            )}
+                          <span key={attachment.id} className="inline-flex max-w-[260px] items-center gap-1">
+                            <AttachmentFile
+                              attachment={{
+                                id: attachment.id,
+                                name: attachment.name,
+                                mime: attachment.mime,
+                                size: attachment.size,
+                                kind: attachment.kind,
+                                ...(attachment.mime === 'text/uri-list' ? { url: attachment.data } : {}),
+                              }}
+                            />
                             <button
                               type="button"
                               onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}
                               aria-label={`Remove ${attachment.name}`}
-                              className="ml-0.5 grid size-4 shrink-0 place-items-center rounded-full text-faint transition-colors hover:bg-surface hover:text-fg"
+                              className="grid size-5 shrink-0 place-items-center rounded-full text-faint transition-colors hover:bg-surface-2 hover:text-fg"
                             >
                               <X className="size-3" />
                             </button>
@@ -822,7 +1105,7 @@ export function Room() {
                       <button
                         type="button"
                         aria-label="Attach files"
-                        title="Attach images, PDFs, documents or text files"
+                        title="Attach images or GIFs, PDFs, documents or text files"
                         onClick={() => fileRef.current?.click()}
                         className="grid size-8 shrink-0 place-items-center rounded-control text-muted transition-colors hover:bg-surface-2 hover:text-fg"
                       >
@@ -861,7 +1144,52 @@ export function Room() {
         </section>
       </div>
 
+      <AttachmentLightbox attachment={lightbox} onClose={() => setLightbox(null)} />
+      <InviteRoomDialog
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        roomId={selectedId}
+        roomName={selectedName}
+      />
+      <ChangeNameDialog
+        open={nameOpen || renameTarget !== null}
+        onClose={() => {
+          setNameOpen(false)
+          setRenameTarget(null)
+        }}
+        roomId={selectedId}
+        currentName={renameTarget?.name ?? displayName}
+        target={renameTarget}
+        onChanged={(name) => {
+          if (renameTarget) {
+            setMessages((current) =>
+              current.map((message) =>
+                message.authorId === renameTarget.authorId ? { ...message, authorName: name } : message,
+              ),
+            )
+            if (renameTarget.authorId === viewerId) setViewerName(name)
+            return
+          }
+          setViewerName(name)
+          setMessages((current) =>
+            current.map((message) =>
+              message.authorId === viewerId ? { ...message, authorName: name } : message,
+            ),
+          )
+        }}
+      />
       <CreateRoomDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={selectRoom} />
+      <DeleteRoomDialog
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        roomId={selectedId}
+        roomName={selectedName}
+        onDeleted={() => {
+          setDeleteOpen(false)
+          selectRoom(ROOM_ID)
+          toast('Room deleted')
+        }}
+      />
       <UnlockRoomDialog
         room={unlockTarget}
         onClose={() => setUnlockTarget(null)}
@@ -925,12 +1253,568 @@ function RoomGroup({
                   <Globe2 className="size-3.5 shrink-0" />
                 )}
                 <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{room.name}</span>
+                {room.invited ? (
+                  <span
+                    title="You joined this room through an invite"
+                    className="shrink-0 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-accent"
+                  >
+                    Invited
+                  </span>
+                ) : null}
               </button>
             )
           })
         )}
       </div>
     </section>
+  )
+}
+
+/**
+ * A private name for one person in the viewer's own list. A guest tag like
+ * #a1b2c3 is hard to remember, so this turns it into "Sam from class" without
+ * changing the name anyone else sees.
+ */
+function PersonRenameForm({
+  person,
+  onDone,
+  onRename,
+}: {
+  person: RoomPerson
+  onDone: () => void
+  onRename: (label: string | null) => void
+}) {
+  const [draft, setDraft] = useState(person.name)
+  useEffect(() => setDraft(person.name), [person.name])
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    const label = draft.trim()
+    const own = person.originalName ?? person.name
+    // Saving their own name clears the nickname instead of storing a copy of it.
+    onRename(!label || label === own ? null : label)
+    onDone()
+  }
+  return (
+    <form onSubmit={submit} className="flex min-w-0 items-center gap-1.5 rounded-control bg-surface-2 px-2 py-1.5">
+      <Avatar name={draft.trim() || person.name} size={26} />
+      <Input
+        autoFocus
+        aria-label={`Name for ${person.originalName ?? person.name}`}
+        value={draft}
+        maxLength={ROOM_DISPLAY_NAME_CHARS}
+        placeholder={person.originalName ?? person.name}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') onDone()
+        }}
+        className="h-8 min-w-0 flex-1 text-[12.5px]"
+      />
+      <button
+        type="submit"
+        aria-label="Save name"
+        className="grid size-7 shrink-0 place-items-center rounded-tile text-accent transition-colors hover:bg-accent-soft"
+      >
+        <Check className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={onDone}
+        aria-label="Cancel rename"
+        className="grid size-7 shrink-0 place-items-center rounded-tile text-faint transition-colors hover:bg-surface hover:text-fg"
+      >
+        <X className="size-3.5" />
+      </button>
+    </form>
+  )
+}
+
+function PersonCheckRow({
+  person,
+  checked,
+  onToggle,
+  onSave,
+  onRename,
+}: {
+  person: RoomPerson
+  checked: boolean
+  onToggle: () => void
+  onSave: () => void
+  onRename: (label: string | null) => void
+}) {
+  const [renaming, setRenaming] = useState(false)
+  if (renaming) {
+    return <PersonRenameForm person={person} onDone={() => setRenaming(false)} onRename={onRename} />
+  }
+  return (
+    <div className="flex items-center gap-1 rounded-control pr-1 transition-colors hover:bg-surface-2/70">
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={checked}
+        onClick={onToggle}
+        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-control px-2 py-2 text-left"
+      >
+        <Avatar name={person.name} size={30} />
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[13px] font-medium text-fg">{person.name}</span>
+            {person.online ? (
+              <span className="size-1.5 shrink-0 rounded-full bg-success" title="Online now" aria-label="Online now" />
+            ) : null}
+          </span>
+          <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-faint">
+            <span className="font-mono tracking-tight">#{person.id}</span>
+            <span aria-hidden>·</span>
+            <span>{person.guest ? 'Guest' : 'Signed in'}</span>
+            {person.renamed && person.originalName ? (
+              <>
+                <span aria-hidden>·</span>
+                <span className="truncate">was {person.originalName}</span>
+              </>
+            ) : null}
+            {!person.online ? (
+              <>
+                <span aria-hidden>·</span>
+                <span>Offline</span>
+              </>
+            ) : null}
+          </span>
+        </span>
+        <span
+          className={cx(
+            'grid size-5 shrink-0 place-items-center rounded-[6px] border transition-colors',
+            checked ? 'border-accent bg-accent text-bg' : 'border-line-strong bg-surface text-transparent',
+          )}
+          aria-hidden
+        >
+          <Check className="size-3.5" />
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => setRenaming(true)}
+        aria-label={`Rename ${person.name}`}
+        title="Give them a name you'll remember"
+        className="grid size-8 shrink-0 place-items-center rounded-tile text-faint transition-colors hover:bg-surface-2 hover:text-fg"
+      >
+        <Pencil className={cx('size-3.5', person.renamed && 'text-accent')} />
+      </button>
+      <button
+        type="button"
+        onClick={onSave}
+        aria-label={person.saved ? `Remove ${person.name} from saved people` : `Save ${person.name}`}
+        title={person.saved ? 'Saved for quick add' : 'Save for quick add'}
+        className={cx(
+          'grid size-8 shrink-0 place-items-center rounded-tile transition-colors',
+          person.saved ? 'text-accent hover:bg-accent-soft' : 'text-faint hover:bg-surface-2 hover:text-fg',
+        )}
+      >
+        <Star className={cx('size-3.5', person.saved && 'fill-current')} />
+      </button>
+    </div>
+  )
+}
+
+/** Match a people search against the viewer's nickname, their own name and their #id. */
+function filterPeople(people: RoomPerson[], query: string): RoomPerson[] {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return people
+  const id = needle.replace(/^#/, '')
+  return people.filter(
+    (person) =>
+      person.name.toLowerCase().includes(needle) ||
+      person.originalName?.toLowerCase().includes(needle) ||
+      person.id.includes(id),
+  )
+}
+
+/**
+ * Everyone in the directory, grouped so saved people stay on top and offline
+ * people are still pickable. Inviting works while they are away.
+ */
+function PersonSections({
+  people,
+  selected,
+  onToggle,
+  onSave,
+  onRename,
+  showOffline = true,
+}: {
+  people: RoomPerson[]
+  selected: Set<string>
+  onToggle: (id: string) => void
+  onSave: (person: RoomPerson) => void
+  onRename: (person: RoomPerson, label: string | null) => void
+  showOffline?: boolean
+}) {
+  const row = (person: RoomPerson) => (
+    <PersonCheckRow
+      key={person.id}
+      person={person}
+      checked={selected.has(person.id)}
+      onToggle={() => onToggle(person.id)}
+      onSave={() => onSave(person)}
+      onRename={(label) => onRename(person, label)}
+    />
+  )
+  const saved = people.filter((person) => person.saved)
+  const online = people.filter((person) => !person.saved && person.online)
+  const offline = people.filter((person) => !person.saved && !person.online)
+  return (
+    <>
+      {saved.length ? (
+        <section>
+          <p className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">Saved people</p>
+          <div className="space-y-0.5">{saved.map(row)}</div>
+        </section>
+      ) : null}
+      {online.length ? (
+        <section>
+          <p className="px-2 pb-1 pt-1 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
+            Online now · {online.length}
+          </p>
+          <div className="space-y-0.5">{online.map(row)}</div>
+        </section>
+      ) : null}
+      {showOffline && offline.length ? (
+        <section>
+          <p className="px-2 pb-1 pt-1 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
+            Offline · {offline.length}
+          </p>
+          <div className="space-y-0.5">{offline.map(row)}</div>
+        </section>
+      ) : null}
+    </>
+  )
+}
+
+function InviteRoomDialog({
+  open,
+  onClose,
+  roomId,
+  roomName,
+}: {
+  open: boolean
+  onClose: () => void
+  roomId: string
+  roomName: string
+}) {
+  const peopleQuery = useRoomPeople(open)
+  const savePerson = useSaveRoomPerson()
+  const renamePerson = useRenameRoomPerson()
+  const invite = useInviteRoomPeople()
+  const link = useCreateRoomInvite()
+  const toast = useToast()
+  const [query, setQuery] = useState('')
+  // Everyone is shown by default: the point of this list is inviting people
+  // who are away, so an online-only default hid the whole directory.
+  const [onlineOnly, setOnlineOnly] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [url, setUrl] = useState('')
+  const [formError, setFormError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    setQuery('')
+    setOnlineOnly(false)
+    setSelected(new Set())
+    setUrl('')
+    setFormError(null)
+  }, [open, roomId])
+
+  const copy = async () => {
+    if (!url) return
+    try {
+      await navigator.clipboard.writeText(url)
+      toast('Invite link copied')
+    } catch {
+      toast('Could not copy the link. Select it and copy it manually.', 'danger')
+    }
+  }
+
+  const toggle = (id: string) => {
+    setSelected((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const save = async () => {
+    if (!selected.size) return
+    setFormError(null)
+    try {
+      const result = await invite.mutateAsync({ roomId, personIds: [...selected] })
+      toast(result.invited === 1 ? 'Invitation sent' : `${result.invited} invitations sent`)
+      onClose()
+    } catch (failure) {
+      setFormError(failure instanceof Error ? failure.message : 'Could not send those invitations.')
+    }
+  }
+
+  const needle = query.trim()
+  const matched = filterPeople(peopleQuery.data?.items ?? [], query)
+  const savedPeople = matched.filter((person) => person.saved)
+  const onlinePeople = matched.filter((person) => !person.saved && person.online)
+  const shown = onlineOnly ? [...savedPeople, ...onlinePeople] : matched
+  const onlineCount = matched.filter((person) => person.online).length
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={`Invite to ${roomName}`}
+      description="Choose people by name or Ink id. They do not need to be online; the invitation waits for them."
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={invite.isPending} disabled={!selected.size} onClick={() => void save()}>
+            <UserPlus className="size-3.5" />
+            Invite {selected.size || ''}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-faint" />
+          <Input
+            aria-label="Search people"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search by name or #id"
+            className="pl-9"
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            aria-pressed={onlineOnly}
+            onClick={() => setOnlineOnly((current) => !current)}
+            className={cx(
+              'inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11.5px] font-medium transition-colors',
+              onlineOnly
+                ? 'border-success/30 bg-success-soft text-success'
+                : 'border-line-strong bg-surface text-muted hover:bg-surface-2 hover:text-fg',
+            )}
+          >
+            <span className={cx('size-1.5 rounded-full', onlineOnly ? 'bg-success' : 'bg-faint')} />
+            Online only
+          </button>
+          <span className="text-[11px] text-faint">
+            {onlineCount} {onlineCount === 1 ? 'person' : 'people'} online
+          </span>
+        </div>
+
+        {peopleQuery.isLoading ? (
+          <div className="flex items-center gap-2 rounded-control bg-surface-2 px-3 py-3 text-[13px] text-muted">
+            <Spinner className="size-4" />
+            Loading everyone on Ink…
+          </div>
+        ) : peopleQuery.error ? (
+          <p role="alert" className="rounded-control bg-danger-soft px-3 py-2 text-[12.5px] leading-relaxed text-danger">
+            Could not load the people list. Close and try again.
+          </p>
+        ) : !shown.length ? (
+          <p className="rounded-control bg-surface-2 px-3 py-4 text-center text-[12.5px] text-muted">
+            {needle
+              ? 'No one matches that search.'
+              : onlineOnly
+                ? 'No one is online right now. Turn off Online only to see everyone.'
+                : 'No one has opened Ink yet.'}
+          </p>
+        ) : (
+          <div className="scrollbar-thin max-h-[320px] space-y-2 overflow-y-auto pr-1">
+            <PersonSections
+              people={shown}
+              selected={selected}
+              onToggle={toggle}
+              onSave={(person) => savePerson.mutate({ personId: person.id, saved: !person.saved })}
+              onRename={(person, label) => renamePerson.mutate({ personId: person.id, label })}
+              showOffline={!onlineOnly}
+            />
+          </div>
+        )}
+
+        <p className="text-[11.5px] leading-relaxed text-faint">
+          Tap the star to save someone for quick adding when you make a private room. Tap the pencil to give
+          them a name only you see.
+        </p>
+
+        <div className="rounded-control border border-line bg-surface-2/60 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[12.5px] font-medium text-fg">Shareable link</p>
+              <p className="mt-0.5 text-[11.5px] leading-relaxed text-faint">Anyone with the link can join.</p>
+            </div>
+            {!url ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                loading={link.isPending}
+                onClick={() =>
+                  link.mutate(roomId, {
+                    onSuccess: (result) => setUrl(result.url),
+                    onError: (failure) =>
+                      setFormError(
+                        failure instanceof Error ? failure.message : 'Could not create an invite link.',
+                      ),
+                  })
+                }
+              >
+                <Link2 className="size-3.5" />
+                Create link
+              </Button>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={() => void copy()}>
+                <Copy className="size-3.5" />
+                Copy
+              </Button>
+            )}
+          </div>
+          {url ? (
+            <Input
+              aria-label="Invite link"
+              readOnly
+              value={url}
+              onFocus={(event) => event.currentTarget.select()}
+              className="mt-2"
+            />
+          ) : null}
+        </div>
+
+        {formError ? (
+          <p role="alert" className="rounded-control bg-danger-soft px-3 py-2 text-[12.5px] leading-relaxed text-danger">
+            {formError}
+          </p>
+        ) : null}
+      </div>
+    </Dialog>
+  )
+}
+
+function ChangeNameDialog({
+  open,
+  onClose,
+  roomId,
+  currentName,
+  target,
+  onChanged,
+}: {
+  open: boolean
+  onClose: () => void
+  roomId: string
+  currentName: string
+  target?: { authorId: string; name: string } | null
+  onChanged: (name: string) => void
+}) {
+  const update = useUpdateRoomProfile()
+  const toast = useToast()
+  const [name, setName] = useState('')
+  const [formError, setFormError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    setName(currentName)
+    setFormError(null)
+  }, [currentName, open])
+
+  const save = async () => {
+    const value = name.replace(/\s+/g, ' ').trim()
+    if (!value) {
+      setFormError('Enter the name you want people to see.')
+      return
+    }
+    if (value.length > ROOM_DISPLAY_NAME_CHARS) {
+      setFormError(
+        target
+          ? `Keep their chat name to ${ROOM_DISPLAY_NAME_CHARS} characters.`
+          : `Keep your display name to ${ROOM_DISPLAY_NAME_CHARS} characters.`,
+      )
+      return
+    }
+    setFormError(null)
+    try {
+      const result = await update.mutateAsync({
+        name: value,
+        room: roomId,
+        ...(target ? { targetId: target.authorId } : {}),
+      })
+      toast(
+        target
+          ? `Name in this room changed to “${result.name}”`
+          : `Display name changed to “${result.name}”`,
+      )
+      onChanged(result.name)
+      onClose()
+    } catch (failure) {
+      setFormError(
+        failure instanceof Error
+          ? failure.message
+          : target
+            ? 'Could not change that chat name.'
+            : 'Could not change your display name.',
+      )
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={target ? 'Change their name' : 'Display name'}
+      description={
+        target
+          ? `Choose the name everyone in this room sees beside ${target.name}’s messages.`
+          : 'This name appears across Ink, including Settings and every room.'
+      }
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            loading={update.isPending}
+            disabled={!name.trim()}
+            onClick={() => void save()}
+          >
+            Save name
+          </Button>
+        </>
+      }
+    >
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          void save()
+        }}
+      >
+        <label htmlFor="room-display-name" className="text-[13.5px] font-medium text-fg">
+          {target ? 'Name in this room' : 'Display name'}
+        </label>
+        <Input
+          id="room-display-name"
+          data-autofocus
+          value={name}
+          maxLength={ROOM_DISPLAY_NAME_CHARS}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="How should people see you?"
+          className="mt-2"
+        />
+        <p className="mt-1.5 text-[11.5px] leading-relaxed text-faint">
+          Up to {ROOM_DISPLAY_NAME_CHARS} characters.{' '}
+          {target
+            ? 'This changes their name in this room only.'
+            : 'This updates Settings, your sidebar, and existing room messages everywhere.'}
+        </p>
+        {formError ? (
+          <p role="alert" className="mt-3 rounded-control bg-danger-soft px-3 py-2 text-[12.5px] leading-relaxed text-danger">
+            {formError}
+          </p>
+        ) : null}
+      </form>
+    </Dialog>
   )
 }
 
@@ -945,9 +1829,14 @@ function CreateRoomDialog({
 }) {
   const create = useCreateRoom()
   const toast = useToast()
+  const savePerson = useSaveRoomPerson()
+  const renamePerson = useRenameRoomPerson()
   const [name, setName] = useState('')
   const [visibility, setVisibility] = useState<RoomVisibility>('public')
+  const peopleQuery = useRoomPeople(open && visibility === 'private')
   const [password, setPassword] = useState('')
+  const [search, setSearch] = useState('')
+  const [inviteIds, setInviteIds] = useState<Set<string>>(() => new Set())
   const [formError, setFormError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -955,8 +1844,21 @@ function CreateRoomDialog({
     setName('')
     setVisibility('public')
     setPassword('')
+    setSearch('')
+    setInviteIds(new Set())
     setFormError(null)
   }, [open])
+
+  const matchedPeople = filterPeople(peopleQuery.data?.items ?? [], search)
+  const onlineCount = matchedPeople.filter((person) => person.online).length
+  const toggleInvite = (id: string) => {
+    setInviteIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   const save = async () => {
     const value = name.replace(/\s+/g, ' ').trim()
@@ -973,9 +1875,15 @@ function CreateRoomDialog({
       const result = await create.mutateAsync({
         name: value,
         visibility,
-        ...(visibility === 'private' ? { password } : {}),
+        ...(visibility === 'private'
+          ? { password, ...(inviteIds.size ? { inviteIds: [...inviteIds] } : {}) }
+          : {}),
       })
-      toast(`Room “${result.room.name}” created`)
+      toast(
+        result.invited
+          ? `Room “${result.room.name}” created · ${result.invited} invited`
+          : `Room “${result.room.name}” created`,
+      )
       onCreated(result.room.id)
       onClose()
     } catch (failure) {
@@ -988,7 +1896,7 @@ function CreateRoomDialog({
       open={open}
       onClose={onClose}
       title="New room"
-      description="Private rooms are password protected. Public rooms are open to everyone."
+      description="Private rooms are password protected. Public rooms are open to everyone. A room stays until its creator deletes it."
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
@@ -1041,7 +1949,10 @@ function CreateRoomDialog({
                 name="room-visibility"
                 value="public"
                 checked={visibility === 'public'}
-                onChange={() => setVisibility('public')}
+                onChange={() => {
+                  setVisibility('public')
+                  setInviteIds(new Set())
+                }}
                 className="sr-only"
               />
               <Globe2 className="size-4 text-muted" />
@@ -1092,12 +2003,121 @@ function CreateRoomDialog({
           </div>
         ) : null}
 
+        {visibility === 'private' ? (
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[13.5px] font-medium text-fg">Invite people</p>
+              {inviteIds.size ? (
+                <span className="text-[11.5px] text-accent">{inviteIds.size} selected</span>
+              ) : null}
+            </div>
+            <p className="mt-1 text-[11.5px] leading-relaxed text-faint">
+              Pick anyone Ink has seen, online or not. They are invited the moment the room is created.
+            </p>
+            <div className="relative mt-2">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-faint" />
+              <Input
+                aria-label="Search people to invite"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search by name or #id"
+                className="pl-9"
+              />
+            </div>
+            {peopleQuery.isLoading ? (
+              <div className="mt-2 flex items-center gap-2 text-[12px] text-muted">
+                <Spinner className="size-3.5" /> Loading everyone on Ink…
+              </div>
+            ) : peopleQuery.error ? (
+              <p
+                role="alert"
+                className="mt-2 rounded-control bg-danger-soft px-3 py-2 text-[12px] leading-relaxed text-danger"
+              >
+                Could not load the people list. Close and try again.
+              </p>
+            ) : !matchedPeople.length ? (
+              <p className="mt-2 rounded-control bg-surface-2 px-3 py-3 text-center text-[12px] text-muted">
+                {search.trim() ? 'No one matches that search.' : 'No one else has opened Ink yet.'}
+              </p>
+            ) : (
+              <div className="scrollbar-thin mt-2 max-h-[260px] space-y-2 overflow-y-auto rounded-control border border-line p-1">
+                <PersonSections
+                  people={matchedPeople}
+                  selected={inviteIds}
+                  onToggle={toggleInvite}
+                  onSave={(person) => savePerson.mutate({ personId: person.id, saved: !person.saved })}
+                  onRename={(person, label) => renamePerson.mutate({ personId: person.id, label })}
+                />
+              </div>
+            )}
+            <p className="mt-1.5 text-[11px] text-faint">
+              {onlineCount} {onlineCount === 1 ? 'person' : 'people'} online right now · star someone to keep them at
+              the top next time.
+            </p>
+          </div>
+        ) : null}
+
         {formError ? (
           <p role="alert" className="rounded-control bg-danger-soft px-3 py-2 text-[12.5px] leading-relaxed text-danger">
             {formError}
           </p>
         ) : null}
       </form>
+    </Dialog>
+  )
+}
+
+function DeleteRoomDialog({
+  open,
+  onClose,
+  roomId,
+  roomName,
+  onDeleted,
+}: {
+  open: boolean
+  onClose: () => void
+  roomId: string
+  roomName: string
+  onDeleted: () => void
+}) {
+  const remove = useDeleteRoom()
+  const [formError, setFormError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    setFormError(null)
+  }, [open, roomId])
+
+  const save = async () => {
+    setFormError(null)
+    try {
+      await remove.mutateAsync(roomId)
+      onDeleted()
+    } catch (failure) {
+      setFormError(failure instanceof Error ? failure.message : 'Could not delete that room.')
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={`Delete “${roomName}”?`}
+      description="This permanently removes the room, its messages and its attachments. No one will be able to reopen it."
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="danger" loading={remove.isPending} onClick={() => void save()}>
+            Delete room
+          </Button>
+        </>
+      }
+    >
+      {formError ? (
+        <p role="alert" className="rounded-control bg-danger-soft px-3 py-2 text-[12.5px] leading-relaxed text-danger">
+          {formError}
+        </p>
+      ) : null}
     </Dialog>
   )
 }

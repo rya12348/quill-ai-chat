@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { Menu as MenuIcon, Bot, Code2, Eye, FileText, Globe2, Library as LibraryIcon, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PenLine, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, Users, X } from 'lucide-react'
+import { Menu as MenuIcon, Bot, ChevronDown, Code2, Eye, Fish, Globe2, Library as LibraryIcon, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PenLine, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, Users, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 
@@ -134,9 +134,20 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
   const { data } = useConversations()
   const turn = useTurn()
   const [query, setQuery] = useState('')
+  // Tools stay open; the chat history is the part that folds away. A versioned
+  // key makes the new default reach people who had folded Tools previously.
+  const [toolsOpen, setToolsOpen] = useState(() => localStorage.getItem('sidebar-tools:v2') !== 'closed')
+  useEffect(() => {
+    localStorage.setItem('sidebar-tools:v2', toolsOpen ? 'open' : 'closed')
+  }, [toolsOpen])
+  const [chatsOpen, setChatsOpen] = useState(false)
   const [params] = useSearchParams()
   const showTraffic = Boolean(me && (me.capabilities.auth !== 'guest' || isLocalTunnelHost(window.location.hostname)))
   const selectedProject = params.get('project')
+  // Opening a project is a request to see its chats, so reveal the history too.
+  useEffect(() => {
+    if (selectedProject) setChatsOpen(true)
+  }, [selectedProject])
   const allItems = data?.items ?? []
   const needle = query.trim().toLowerCase()
   const scoped = selectedProject ? allItems.filter((conversation) => conversation.projectId === selectedProject) : allItems
@@ -182,11 +193,21 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
           Library
         </NavLink>
 
-        <div className="mt-5 flex items-center gap-2 px-3 pb-1.5">
+        <button
+          type="button"
+          onClick={() => setToolsOpen((open) => !open)}
+          aria-expanded={toolsOpen}
+          aria-controls="sidebar-tools"
+          title={toolsOpen ? 'Hide tools' : 'Show tools'}
+          className="mt-4 flex h-8 w-full items-center gap-2 rounded-control px-3 text-left transition-colors hover:bg-surface-2/50"
+        >
           <span className="text-[12px] font-semibold uppercase tracking-[0.14em] text-faint">Tools</span>
           <span className="h-px flex-1 bg-line" />
-        </div>
+          <ChevronDown className={cx('size-3.5 shrink-0 text-faint transition-transform', toolsOpen && 'rotate-180')} />
+        </button>
 
+        {toolsOpen && (
+          <div id="sidebar-tools">
         <NavLink
           to="/buffy"
           className={({ isActive }) =>
@@ -244,7 +265,16 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
           Chat
         </NavLink>
         <NavLink
-          to="/proxy"
+          to="/butter"
+          className={({ isActive }) =>
+            cx('relative mt-0.5 flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
+          }
+        >
+          <Fish className="size-4" />
+          Butter Party
+        </NavLink>
+        <NavLink
+          to="/math"
           className={({ isActive }) =>
             cx('relative mt-0.5 flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
           }
@@ -252,49 +282,56 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
           <Globe2 className="size-4" />
             Browser
         </NavLink>
-        <NavLink
-          to="/tools/pdf"
-          className={({ isActive }) =>
-            cx('relative mt-0.5 flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
-          }
-        >
-          <FileText className="size-4" />
-          PDF Studio
-        </NavLink>
-      </div>
-      <ProjectNav selectedId={selectedProject} totalChats={allItems.length} />
-      <div className="px-3 pb-1 pt-1">
-        <label className="relative block">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search chats"
-            aria-label="Search chats"
-            className="block h-9 w-full rounded-control border border-line bg-surface pl-9 pr-3 text-[14px] text-fg placeholder:text-faint transition-[border-color,box-shadow] focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/15"
-          />
-        </label>
-      </div>
-      <nav className="scrollbar-thin flex-1 overflow-y-auto px-3 pb-3" aria-label="Chats">
-        {groups.map(({ group, items }) => (
-          <section key={group} className="mb-4">
-            <h2 className="px-3 pb-1.5 pt-1 text-[12.5px] font-medium text-faint">{group}</h2>
-            <ul className="space-y-0.5">
-              {items.map((conversation) => (
-                <ConversationRow key={conversation.id} conversation={conversation} streaming={turn?.conversationId === conversation.id} />
-              ))}
-            </ul>
-          </section>
-        ))}
-        {data && items.length === 0 && (
-          <p className="px-3 pt-6 text-center text-[13px] text-faint">
-            {needle ? 'No chats match that search.' : selectedProject ? 'No chats in this project yet.' : 'Your chats will appear here.'}
-          </p>
+          </div>
         )}
-      </nav>
-      <div className="border-t border-line p-3">
-        <NavLink to="/settings" className={({ isActive }) => cx('flex h-12 items-center gap-3 rounded-control px-2 transition-colors', isActive ? 'bg-surface shadow-card' : 'hover:bg-surface')}>
-          {me && <Avatar name={me.user.name ?? me.user.email ?? 'You'} src={me.user.picture} size={30} />}
+      </div>
+      <ProjectNav
+        selectedId={selectedProject}
+        totalChats={allItems.length}
+        chatsOpen={chatsOpen}
+        onToggleChats={() => {
+          const next = selectedProject ? true : !chatsOpen
+          setChatsOpen(next)
+          // Showing the history needs the room, so All chats folds Tools with it.
+          if (next) setToolsOpen(false)
+        }}
+      />
+      {chatsOpen && (
+        <>
+          <div className="px-3 pb-1 pt-1">
+            <label className="relative block">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search chats"
+                aria-label="Search chats"
+                className="block h-9 w-full rounded-control border border-line bg-surface pl-9 pr-3 text-[14px] text-fg placeholder:text-faint transition-[border-color,box-shadow] focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/15"
+              />
+            </label>
+          </div>
+          <nav id="sidebar-chat-history" className="scrollbar-thin flex-1 overflow-y-auto px-3 pb-3" aria-label="Chats">
+            {groups.map(({ group, items }) => (
+              <section key={group} className="mb-4">
+                <h2 className="px-3 pb-1.5 pt-1 text-[12.5px] font-medium text-faint">{group}</h2>
+                <ul className="space-y-0.5">
+                  {items.map((conversation) => (
+                    <ConversationRow key={conversation.id} conversation={conversation} streaming={turn?.conversationId === conversation.id} />
+                  ))}
+                </ul>
+              </section>
+            ))}
+            {data && items.length === 0 && (
+              <p className="px-3 pt-6 text-center text-[13px] text-faint">
+                {needle ? 'No chats match that search.' : selectedProject ? 'No chats in this project yet.' : 'Your chats will appear here.'}
+              </p>
+            )}
+          </nav>
+        </>
+      )}
+      <div className="mt-auto border-t border-line p-2">
+        <NavLink to="/settings" className={({ isActive }) => cx('flex h-10 items-center gap-2.5 rounded-control px-2 transition-colors', isActive ? 'bg-surface shadow-card' : 'hover:bg-surface')}>
+          {me && <Avatar name={me.user.name ?? me.user.email ?? 'You'} src={me.user.picture} size={28} />}
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[14.5px] font-medium">{me?.user.name ?? 'Account'}</span>
             <span className="block truncate text-[13px] text-faint">

@@ -12,6 +12,7 @@ import { agentComplete } from '../agent'
 import { AiError, aiConfigured, complete, isModelId, type ChatMessage } from '../ai'
 import { GEMINI_WEB_MODEL } from '../gemini-web'
 import { fallbackForUnavailableModel } from '../model-fallbacks'
+import { deleteAttachmentObjects, storeAttachmentObjects } from '../attachment-storage'
 import { AttachmentValidationError, attachmentMeta, loadAttachmentsForMessages, messageWithAttachments, parseAttachments, type StoredAttachment } from '../attachments'
 import { analyzeEnabledFor, appOrigin, buildEnabledFor, isGuestUser, isOwner, researchEnabledFor } from '../auth'
 import { blendComplete, depthFor, isTrivialPrompt, type Depth } from '../blend'
@@ -19,11 +20,21 @@ import { routeBuffyChat } from '../buffy-routing'
 import { chooseDepth, depthBucket, loadDepthQuality, loadLaneQuality, loadTaskQuality, type LaneRecord, type LaneRoute, type StoredLaneRoute } from '../lane-routing'
 import { analysisComplete, parseDataset } from '../analysis'
 import { buildComplete, buildEmbed, buildReference, isProxyRequest } from '../build'
+import {
+  CODE_EDIT_IDLE_MS,
+  CODE_EDIT_MAX_TOKENS,
+  CODE_EDIT_TIMEOUT_MS,
+  REBUILD_REQUEST,
+  buildFromWorkspace,
+  runCodeEditTurn,
+} from '../code-edit'
 import { canvasComplete } from '../canvas'
+import { fetchReadablePage, needsResearch, researchNotes } from '../doc-fetch'
 import { kindFor, proofComplete, proofSignature, streamChunks } from '../proof'
 import { analysisToday, buildToday, claimGuestTurn, claimGuestUsage, guestUsageToday, id, mapConversation, mapMessage, now, parseBuild, repliesToday, researchToday, titleFrom, usageToday, utcDay } from '../db'
 import { hasConversationOverflow, MIN_MEMORY_MESSAGES, refreshConversationSummary, shouldRefreshMemory, withPendingTurns } from '../memory'
-import { activeLanes, isLocalBridgeRequest, laneKey, orderLanes, publicComplete, publicLanes, type LaneResult } from '../public-ai'
+import { workspaceFromPages } from '../../shared/workspace'
+import { activeLanes, isLocalBridgeRequest, laneKey, orderLanes, publicComplete, publicLanes, raceComplete, raceCompleteLadder, type LaneResult } from '../public-ai'
 import { healthRows, recordProviderResult } from '../provider-health'
 import { planAndRetrieve } from '../plan'
 import { guestUsageKey, RATE_WINDOWS, rateLimit, tooManyRequests } from '../rate-limit'
@@ -147,8 +158,11 @@ chat.post('/', async (c) => {
   // spend the whole answer deadline thinking about a one-line question. A
   // greeting is never a reasoning task, even when Deep or Max is selected.
   const exposeReasoning = input.strategy !== 'fast'
-  const wantReasoning = !trivialContent && exposeReasoning && (effort ? effort !== 'low' : input.reasoning === true)
-  const reasoningEffort = effort === 'low' ? 'low' : effort === 'max' ? 'high' : effort === 'default' ? 'medium' : 'high'
+  // Default chat is latency-first. Provider-side reasoning is opt-in through
+  // Max, because a reasoning budget can turn a short question into minutes of
+  // silence. Models still think internally when they need to.
+  const wantReasoning = !trivialContent && exposeReasoning && (effort ? effort === 'max' : input.reasoning === true)
+  const reasoningEffort = effort === 'max' ? 'high' : effort === 'low' ? 'low' : 'medium'
   const regenerate = input.regenerate === true
   const attachments = regenerate ? [] : incomingAttachments
   const content = typeof input.content === 'string' ? input.content.replace(/\r\n?/g, '\n').trim() : ''
@@ -316,6 +330,29 @@ chat.post('/', async (c) => {
       ...lanes.filter((lane) => lane.model !== 'buffy' && lane.billing !== 'paid'),
     ]
   }
+  // A concrete picker row means that model answers, not a multi-model team.
+  // Brand rows already behave this way through Duck/Gemini. Hosted rows used to
+  // enter the full plan/draft/review harness, which is why DeepSeek, Kimi,
+  // Nemotron and the other families could take minutes while Claude, Gemini and
+  // ChatGPT replied immediately. Explicit Team mode remains the only opt-in to
+  // the ensemble.
+  const deepReview = input.strategy === 'blend' && input.effort === 'max'
+  const selectedHosted = Boolean(
+    selectedLane &&
+      !duckFree &&
+      !nativeBuffyFree &&
+      !buffy.model &&
+      !selectedLane.selectedOnly &&
+      // A paid row is still one model. Leaving it out of this branch sent Kimi
+      // and the other paid picks through the fallback ladder and then the full
+      // plan/draft/review harness, which is where their five-minute replies
+      // came from. Spending is controlled by keeping paid lanes out of every
+      // other turn and out of the backups below, not by making this pick slow.
+      // Deep + Max is the explicit quality pass. Plain Deep and every normal
+      // pick stay on the single selected model.
+      !deepReview,
+  )
+  if (selectedHosted && input.strategy !== 'team') engineLanes = [selectedLane!]
   // Health is used by every model-backed mode, not only the blended chat.
   // Research, Build and Canvas used to retry the selected resting lane first
   // and could spend their whole deadline on it.
@@ -324,15 +361,55 @@ chat.post('/', async (c) => {
   // daily allowance. Keep that selection usable with a healthy equivalent
   // instead of turning the picker into a dead end.
   const fallback = selectedLane ? fallbackForUnavailableModel(selectedLane.model, lanes, health) : undefined
-  // A selected model is one choice, not a request for a multi-model blend. Use
-  // the healthy stand-in as a single lane: keeping the full pool would spend
-  // one deadline on drafts the person did not ask for and can leave a quota
-  // fallback looking just as unavailable as the exact route.
-  if (fallback) engineLanes = [fallback.lane]
+  // A selected model is one choice, not a request for a multi-model blend. Put
+  // the healthy stand-in first, but keep the other free lanes behind it: one
+  // fallback that is also rate-limited must not turn the selection into a dead
+  // end. The resting exact lane is removed so the reply is attributed to the
+  // model that actually answered.
+  if (fallback) {
+    const resting = selectedLane ? laneKey(selectedLane) : undefined
+    engineLanes = [
+      fallback.lane,
+      ...engineLanes.filter((lane) => laneKey(lane) !== laneKey(fallback.lane) && laneKey(lane) !== resting),
+    ]
+  }
   const avoid = new Set(health.filter((row) => row.status === 'degraded' || row.status === 'down').map((row) => row.provider_id))
   const laneHealth = new Map(health.map((row) => [row.provider_id, { status: row.status, latencyMs: row.latency_ms }]))
   const availableLanes = engineLanes.filter((lane) => !avoid.has(laneKey(lane)))
-  const modeLanes = availableLanes.length ? availableLanes : engineLanes
+  let modeLanes = availableLanes.length ? availableLanes : engineLanes
+  // Two measured-fast backups keep a selected model from becoming a dead end
+  // if its exact provider is slow or fails before the first token. RaceComplete
+  // stops after the first lane that produces text, so this does not turn the
+  // choice back into a queue of every configured model.
+  if (selectedHosted && input.strategy !== 'team') {
+    const primary = modeLanes[0]
+    // Gemini web is the one no-key lane that stays quick under a long prompt.
+    // It is normally selected-only to protect shared capacity, but an explicit
+    // hosted pick needs a genuinely fast fallback or the race has nothing to
+    // win with. Keep it out of image turns, where its text endpoint is wrong.
+    const speedLane = !needsVision ? lanes.find((lane) => lane.model === GEMINI_WEB_MODEL && !avoid.has(laneKey(lane))) : undefined
+    const backups = primary
+      ? [
+          ...(speedLane && laneKey(speedLane) !== laneKey(primary) ? [speedLane] : []),
+          ...[...lanes]
+            .filter(
+              (lane) =>
+                laneKey(lane) !== laneKey(primary) &&
+                lane.model !== GEMINI_WEB_MODEL &&
+                !lane.model.startsWith('buffy') &&
+                lane.billing !== 'paid' &&
+                !lane.selectedOnly &&
+                !avoid.has(laneKey(lane)),
+            )
+            .sort(
+              (a, b) =>
+                (laneHealth.get(laneKey(a))?.latencyMs ?? Number.POSITIVE_INFINITY) -
+                (laneHealth.get(laneKey(b))?.latencyMs ?? Number.POSITIVE_INFINITY),
+            ),
+        ].slice(0, 3)
+      : []
+    if (primary && backups.length) modeLanes = [primary, ...backups]
+  }
   if (!usingApi && needsVision && !wantsResearch && !wantsAnalysis && !lanes.length) {
     return c.json({ error: 'vision_unavailable', message: 'No image-capable model is configured right now. Add an OpenRouter or Gemini key and try again.' }, 503)
   }
@@ -437,7 +514,28 @@ chat.post('/', async (c) => {
   // A frontier lane must not be downgraded to a one-shot answer just because
   // the person left the speed switch on Fast. Its extra passes are the point.
   const selectedFrontier = Boolean(engineLanes.find((lane) => lane.frontier && lane.model === input.model))
-  const blend = !duckFree && !nativeBuffyFree && !selectedFullAgent && !proof && !research && !analyze && !build && !canvas && !agent && (input.strategy !== 'fast' || selectedFrontier || buffy.local || buffy.fast) && engineLanes.length > 1
+  const blend = !duckFree && !nativeBuffyFree && !selectedHosted && !selectedFullAgent && !proof && !research && !analyze && !build && !canvas && !agent && (input.strategy !== 'fast' || selectedFrontier || buffy.local || buffy.fast) && engineLanes.length > 1
+  // Chat should not wait on one slow reasoning lane. Race the selected free
+  // model with the fastest healthy lanes and use the first usable answer. This
+  // is only the plain Chat path: Deep/Team, tools, modes and the keyed API keep
+  // their existing behaviour.
+  const fastChat =
+    !usingApi &&
+    !duckFree &&
+    !selectedHosted &&
+    input.strategy === 'fast' &&
+    !buffy.local &&
+    !selectedFullAgent &&
+    !selectedFrontier &&
+    !selectedPaid &&
+    !selectedLane?.selectedOnly &&
+    !proof &&
+    !research &&
+    !analyze &&
+    !build &&
+    !canvas &&
+    !agent &&
+    engineLanes.length > 0
   const existingModel = conversationRow?.model
   const model: string = duckFree && duck
     ? duck.model
@@ -453,6 +551,15 @@ chat.post('/', async (c) => {
           : DEFAULT_MODEL
       : (engineLanes.find((lane) => lane.model === input.model) ?? engineLanes.find((lane) => !lane.selectedOnly))?.model ?? DEFAULT_MODEL
   const statements: D1PreparedStatement[] = []
+  let attachmentStorage: Awaited<ReturnType<typeof storeAttachmentObjects>> = new Map()
+  if (attachments.length) {
+    try {
+      attachmentStorage = await storeAttachmentObjects(c.env.FILES, 'chat', attachments)
+    } catch (error) {
+      console.warn('attachment_upload_failed', error)
+      return c.json({ error: 'attachment_storage', message: 'Could not store those attachments right now. Try again.' }, 503)
+    }
+  }
   if (!conversationRow) {
     conversationRow = { id: id(), owner_sub: owner, title: titleFrom(content || attachments[0]?.name || ''), model, created_at: t, updated_at: t, project_id: projectId, reaction: null }
     statements.push(
@@ -477,7 +584,7 @@ chat.post('/', async (c) => {
       .bind(owner, conversation.id, MAX_CONTEXT_MESSAGES)
       .all()
   ).results.map((r) => mapMessage(r as Record<string, unknown>)).reverse()
-  const historyAttachments = await loadAttachmentsForMessages(db, owner, historyRows.map((message) => message.id))
+  const historyAttachments = await loadAttachmentsForMessages(db, owner, historyRows.map((message) => message.id), c.env.FILES)
   const history = historyRows.map((message) => {
     const files = historyAttachments.get(message.id)
     return files?.length ? { ...message, attachments: files.map((attachment) => attachmentMeta(attachment)) } : message
@@ -545,13 +652,14 @@ chat.post('/', async (c) => {
       db.prepare(`INSERT INTO messages (id, owner_sub, conversation_id, role, content, model, created_at) VALUES (?, ?, ?, 'user', ?, NULL, ?)`).bind(userMessage.id, owner, conversation.id, content, t),
     )
     for (const [position, attachment] of attachments.entries()) {
+      const stored = attachmentStorage.get(attachment.id) ?? { r2Key: null, thumbnailKey: null, data: attachment.data }
       statements.push(
         db
           .prepare(
-            `INSERT INTO message_attachments (id, message_id, conversation_id, owner_sub, name, mime, size, kind, data, position, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO message_attachments (id, message_id, conversation_id, owner_sub, name, mime, size, kind, data, r2_key, position, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
-          .bind(attachment.id, userMessage.id, conversation.id, owner, attachment.name, attachment.mime, attachment.size, attachment.kind, attachment.data, position, t),
+          .bind(attachment.id, userMessage.id, conversation.id, owner, attachment.name, attachment.mime, attachment.size, attachment.kind, stored.data, stored.r2Key, position, t),
       )
     }
     if (attachments.length) historyAttachments.set(userMessage.id, attachments)
@@ -564,7 +672,15 @@ chat.post('/', async (c) => {
   statements.push(
     db.prepare(`INSERT INTO messages (id, owner_sub, conversation_id, role, content, model, created_at) VALUES (?, ?, ?, 'assistant', '', ?, ?)`).bind(assistantMessageId, owner, conversation.id, model, replyAt),
   )
-  await db.batch(statements)
+  try {
+    await db.batch(statements)
+  } catch (error) {
+    await deleteAttachmentObjects(
+      c.env.FILES,
+      [...attachmentStorage.values()].flatMap((stored) => [stored.r2Key, stored.thumbnailKey].filter((key): key is string => Boolean(key))),
+    )
+    throw error
+  }
 
   const startedAt = Date.now()
   inflight.set(owner, [...(inflight.get(owner) ?? []), startedAt])
@@ -947,7 +1063,7 @@ chat.post('/', async (c) => {
           pending = dropped
         }
         if (pending.length) {
-          pendingAttachments = await loadAttachmentsForMessages(db, owner, pending.map((message) => message.id))
+          pendingAttachments = await loadAttachmentsForMessages(db, owner, pending.map((message) => message.id), c.env.FILES)
         }
       }
 
@@ -1156,14 +1272,85 @@ chat.post('/', async (c) => {
         const [buildQuality, buildReferences] = target
           ? [new Map(), []]
           : await Promise.all([loadTaskQuality(db, owner, 'build'), loadBuildReferences(db, owner)])
-        const outcome = target
-          ? await buildEmbed({
-              target,
-              proxyPath: webProxyPath(embedToken!),
-              signal: controller.signal,
-              onStatus: (status) => { void send({ type: 'status', text: status }) },
+        // The same workspace and diff-edit path Buffy Code uses, so a Build
+        // follow-up stops reprinting the whole document. No stored workspace,
+        // a paid API key, or a request for a different project still goes
+        // through the page builder below.
+        let edited: { build: BuildInfo; text: string } | null = null
+        if (!target && !usingApi && previous?.files?.length && !REBUILD_REQUEST.test(userMessage.content)) {
+          await send({
+            type: 'status',
+            text: `Editing ${previous.files.length} project file${previous.files.length === 1 ? '' : 's'}…`,
+          })
+          let editLabel = ''
+          let research = ''
+          if (needsResearch(userMessage.content)) {
+            await send({ type: 'status', text: 'Looking that up first…' })
+            research = await researchNotes(c.env, userMessage.content, controller.signal).catch(() => '')
+          }
+          const edit = await runCodeEditTurn({
+            files: previous.files,
+            prompt: userMessage.content,
+            research,
+            interactive: Boolean(previous.interactive),
+            // One read round and two edit rounds: a chat turn should not spend
+            // four model calls, but it may finish a two-step request.
+            readRounds: 1,
+            rounds: 2,
+            fetchDocument: (url) => fetchReadablePage(url, controller.signal),
+            signal: controller.signal,
+            onStatus: (status) => { void send({ type: 'status', text: status }) },
+            complete: async (messages) => {
+              let raw = ''
+              for await (const piece of publicComplete(orderLanes(modeLanes, model), {
+                messages,
+                signal: controller.signal,
+                temperature: 0.15,
+                maxTokens: CODE_EDIT_MAX_TOKENS,
+                idleMs: CODE_EDIT_IDLE_MS,
+                timeoutMs: CODE_EDIT_TIMEOUT_MS,
+                onLaneResult: (result) => {
+                  if (result.ok) editLabel = result.lane.label
+                  recordLane(result)
+                },
+              })) {
+                if (piece.type === 'text') raw += piece.text
+              }
+              return raw
+            },
+          })
+          if (edit.status === 'applied') {
+            const built = buildFromWorkspace(edit.files, {
+              interactive: Boolean(previous.interactive),
+              question: userMessage.content,
+              ...(editLabel ? { label: editLabel } : {}),
+              repaired: edit.repaired,
+              problems: edit.problems,
             })
-          : await buildComplete({
+            if (built) {
+              edited = {
+                build: built,
+                text: 'Updated the existing project. Preview it below, then ask for another change.',
+              }
+            }
+          } else if (edit.status === 'rejected') {
+            await send({
+              type: 'status',
+              text: 'That edit made the page checks worse — rebuilding the page instead…',
+            })
+          }
+        }
+        if (gone) return
+        const outcome = edited
+          ? null
+          : target
+            ? await buildEmbed({
+                target,
+                proxyPath: webProxyPath(embedToken!),
+                signal: controller.signal,
+                onStatus: (status) => { void send({ type: 'status', text: status }) },
+              })
+            : await buildComplete({
               lanes: orderLanes(modeLanes, model),
               health: new Map(
                 (await healthRows(db, owner)).map((row) => [row.provider_id, { status: row.status, latencyMs: row.latency_ms }]),
@@ -1178,11 +1365,22 @@ chat.post('/', async (c) => {
               proxyPath: buildProxyPath,
             })
         if (gone) return
-        buildInfo = outcome.build
-        laneRoute = outcome.route
+        if (edited) {
+          buildInfo = edited.build
+        } else {
+          buildInfo = outcome!.build
+          laneRoute = outcome!.route
+        }
+        // Every page build becomes a workspace once, so the next turn in this
+        // conversation can send diffs instead of a full document.
+        if (buildInfo.kind === 'page' && !buildInfo.files?.length) {
+          const pages = buildInfo.pages?.length ? buildInfo.pages : [{ name: 'index.html', html: buildInfo.html }]
+          const files = workspaceFromPages(pages)
+          if (files.length) buildInfo.files = files
+        }
         if (buildInfo.kind === 'embed') embedUrl = buildInfo.sourceUrl
         if (buildInfo.kind === 'page') await storeBuildProxy()
-        for await (const piece of streamChunks(outcome.text, controller.signal)) {
+        for await (const piece of streamChunks(edited ? edited.text : outcome!.text, controller.signal)) {
           if (gone) return
           text += piece.text
           if (!(await send({ type: 'delta', text: piece.text }))) return await abandon()
@@ -1268,6 +1466,54 @@ chat.post('/', async (c) => {
       } else {
         const pieces = usingApi
           ? complete(c.env, { model: model as ModelId, messages: prompt, signal: controller.signal })
+          : selectedHosted
+            ? raceComplete(orderLanes(modeLanes, model), {
+                messages: prompt,
+                signal: controller.signal,
+                reasoning: wantReasoning,
+                reasoningEffort,
+                idleMs: 10_000,
+                timeoutMs: 75_000,
+                onLaneResult: recordLane,
+              })
+          : nativeBuffyFree
+            ? raceCompleteLadder(
+                modeLanes
+                  .filter((lane) => !lane.model.startsWith('buffy'))
+                  // Measured-fast lanes first, but Gemini web last: it is a
+                  // useful last resort and a slow first choice on a long prompt.
+                  .sort((a, b) => {
+                    const gemini = Number(a.model === GEMINI_WEB_MODEL) - Number(b.model === GEMINI_WEB_MODEL)
+                    if (gemini) return gemini
+                    return (
+                      (laneHealth.get(laneKey(a))?.latencyMs ?? Number.POSITIVE_INFINITY) -
+                      (laneHealth.get(laneKey(b))?.latencyMs ?? Number.POSITIVE_INFINITY)
+                    )
+                  }),
+                {
+                  messages: prompt,
+                  signal: controller.signal,
+                  reasoning: wantReasoning,
+                  reasoningEffort,
+                  idleMs: 8_000,
+                  timeoutMs: 60_000,
+                  onLaneResult: recordLane,
+                },
+                // Three groups of three: enough providers to survive two
+                // rate-limited gateways without opening every free lane at once.
+                { batchSize: 3, maxBatches: 3 },
+              )
+          : fastChat
+            ? blendComplete(orderLanes(modeLanes, model), {
+                messages: prompt,
+                signal: controller.signal,
+                depth: 'quick',
+                fastChat: true,
+                avoid,
+                health: laneHealth,
+                onRoute: (route) => { laneRoute = route },
+                onLaneResult: recordLane,
+              })
           : blend
             ? blendComplete(orderLanes(modeLanes, model), {
                 messages: prompt,
@@ -1291,7 +1537,13 @@ chat.post('/', async (c) => {
                 onStatus: (text) => send({ type: 'status', text }),
                 onLaneResult: recordLane,
               })
-            : publicComplete(orderLanes(modeLanes, model), { messages: prompt, signal: controller.signal, reasoning: wantReasoning, reasoningEffort, onLaneResult: recordLane })
+            : publicComplete(orderLanes(modeLanes, model), {
+                messages: prompt,
+                signal: controller.signal,
+                reasoning: wantReasoning,
+                reasoningEffort,
+                onLaneResult: recordLane,
+              })
         for await (const piece of pieces) {
           if (gone) return
           if (piece.type === 'reasoning') {

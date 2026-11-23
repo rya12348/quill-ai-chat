@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import type { BuildInfo } from '../src/shared/types'
-import { auditDesign, buildMessages, designScore, ensureViewport, extractPages, gameInitializationIssues, hasInertButtons, hasInteractiveCode, hasProxyCode, injectBaseControls, isFunctionalRequest, isGameRequest, isInteractiveRequest, isProxyRequest, repairGameInitialization, requestedControlIssues, requestedPageLimit, singleH1, verifyPage } from '../src/worker/build'
+import { auditDesign, buildMessages, designScore, ensureViewport, extractPages, gameInitializationIssues, hasInertButtons, hasInteractiveCode, hasProxyCode, injectBaseControls, isFunctionalRequest, isGameRequest, isInteractiveRequest, isProxyRequest, repairGameInitialization, requestCoverage, requestedControlIssues, requestedPageLimit, singleH1, verifyPage } from '../src/worker/build'
+import { applyPageShell } from '../src/worker/page-shell'
+import { isBuildRequest } from '../src/shared/agent'
 
 const page = (body: string, script = '') =>
   `<!doctype html><html><head><title>Neon Runner</title></head><body>${body}${script ? `<script>${script}</script>` : ''}</body></html>`
@@ -345,4 +347,166 @@ test('page links keep real file names and preserve anchors', () => {
   )
   assert.match(linked[0]!.html, /href="menu\.html#drinks"/)
   assert.doesNotMatch(linked[0]!.html, /href="#page:/)
+})
+
+/**
+ * The bakery run scored 85 with `<link rel="stylesheet" href="styles.css">` and
+ * no styles.css in the project: a page that renders unstyled. The checks now
+ * compare the page's local references with the workspace.
+ */
+test('a page that links a file it never wrote fails its checks', () => {
+  const html =
+    '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Bakery</title><link rel="stylesheet" href="styles.css"></head><body><h1>Bakery</h1><script src="script.js"></script></body></html>'
+
+  const broken = verifyPage(html, { files: ['index.html'] })
+  assert.ok(broken.failures.some((failure) => /styles\.css/.test(failure)), 'the dead stylesheet link is a failure')
+  assert.ok(broken.score < 85, 'and it is not good enough to stop on')
+
+  // Even when the files exist: the preview renders the document alone, so a
+  // linked stylesheet or script never loads and the page arrives unstyled with
+  // dead buttons.
+  const resolved = verifyPage(html, { files: ['index.html', 'styles.css', 'script.js'] })
+  assert.ok(
+    resolved.failures.some((failure) => /does not load in the preview/.test(failure)),
+    'linked code is refused even when the file exists',
+  )
+
+  // A relative image, on the other hand, resolves against the page's folder.
+  const nested = verifyPage(html, {
+    files: ['pages/index.html', 'pages/img/hero.jpg'],
+    pagePath: 'pages/index.html',
+  })
+  assert.ok(nested.failures.some((failure) => /does not load in the preview/.test(failure)), 'the linked code still fails')
+  const picture = nested.checks.some((check) => /linked file/i.test(check.detail ?? '') && /hero/i.test(check.detail ?? ''))
+  assert.equal(picture, false, 'a missing image is not reported against an existing one')
+
+  // Absolute URLs and anchors are not local files.
+  const external = verifyPage(
+    '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>t</title><link rel="stylesheet" href="https://cdn.example/x.css"></head><body><h1>t</h1><a href="#top">top</a></body></html>',
+    { files: ['index.html'] },
+  )
+  assert.equal(external.failures.some((failure) => /linked file/i.test(failure)), false)
+})
+
+/**
+ * The 100/100 bakery page still had a header that clipped on a phone: its
+ * breakpoint changed padding and centred the nav, nothing else.
+ */
+test('a breakpoint that does not stack the header fails the reflow check', () => {
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Bakery</title>
+<style>header{display:flex;justify-content:space-between;align-items:center}.nav a{margin-left:2rem}${'.row{padding:1rem}'.repeat(60)}
+@media(max-width:640px){.hero{padding:64px 0}.nav{justify-content:center}}</style></head>
+<body><header><span>Sweet Crumb Bakery</span><nav class="nav"><a href="#menu">Menu</a><a href="#contact">Contact</a></nav></header><main><h1>Bakery</h1><p>${'Fresh bread every morning. '.repeat(10)}</p></main></body></html>`
+
+  const cramped = verifyPage(html)
+  assert.ok(cramped.failures.some((failure) => /Header reflows on a phone/.test(failure)), 'the cramped header fails')
+
+  const stacked = verifyPage(html.replace('.nav{justify-content:center}', '.nav{justify-content:center}header{flex-direction:column;gap:.5rem}'))
+  assert.equal(stacked.failures.some((failure) => /Header reflows/.test(failure)), false, 'a stacked header passes')
+})
+
+test('a fixed header over the content and undefined tokens are both caught', () => {
+  const css = (body: string) => `<style>${body}</style>`
+  const run = (style: string) =>
+    verifyPage(
+      `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Coffee</title>${css(style)}</head><body><header><nav><a href="#a">Menu</a><a href="#b">About</a></nav></header><main><section id="a"><h1>Coffee</h1><p>${'Real copy about the shop. '.repeat(8)}</p></section><section id="b"><h2>About</h2><p>${'More words here. '.repeat(10)}</p></section></main></body></html>`,
+    )
+
+  const broken = run(`header{position:fixed;top:0;left:0;right:0}.nav{display:flex;gap:var(--space-4)}.nav a{color:#333}body{font-family:system-ui}`)
+  assert.ok(
+    broken.failures.some((failure) => /header does not cover/.test(failure)),
+    'a fixed header with no offset is reported',
+  )
+  assert.ok(
+    broken.failures.some((failure) => /CSS variable is defined/.test(failure)),
+    'an undefined var() is reported',
+  )
+
+  const fixed = run(
+    `:root{--space-4:24px}body{font-family:system-ui;padding-top:72px}header{position:fixed;top:0;left:0;right:0}.nav{display:flex;gap:var(--space-4)}.nav a{color:#333}`,
+  )
+  assert.equal(fixed.failures.some((failure) => /header does not cover|CSS variable/.test(failure)), false)
+})
+
+/**
+ * The page shell exists because quality used to depend on a free lane emitting
+ * a whole stylesheet inside a ~2,400-character reply. When that reply was cut
+ * off the page shipped at design 0–45 with browser-default controls. The
+ * foundation is now deterministic, so the only thing the model must get right
+ * is structure and copy.
+ */
+test('the design system is injected once, before the page’s own styles', () => {
+  const page = '<!doctype html><html lang="en"><head><title>Blue Room</title><style>:root{--accent:#8a2b3c}</style></head><body><h1>Blue Room</h1></body></html>'
+  const once = applyPageShell(page)
+  const twice = applyPageShell(once)
+  assert.equal((twice.match(/data-ink-shell/g) ?? []).length, 1, 'never two copies')
+  assert.equal(twice, once, 're-injecting is idempotent')
+  assert.ok(once.indexOf('data-ink-shell') < once.indexOf('--accent:#8a2b3c'), 'the page styles come last and win')
+})
+
+test('content alone clears the design bar, without the model writing a stylesheet', () => {
+  const bare = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Blue Room</title></head><body>
+<header><a href="#top">Blue Room</a><nav><a href="#shows">Shows</a><a href="#contact">Contact</a></nav></header>
+<main id="top"><section><h1>Four nights, one room.</h1><p>Doors at seven, first set at eight, every Wednesday to Saturday. Tables are small, the sound is close and the band starts on time.</p><button id="book">Reserve a table</button></section>
+<section id="shows"><h2>Upcoming shows</h2><article><h3>Marcus Hale Quartet</h3><p>Hard bop, 8:00 pm, $28.</p></article><article><h3>Ines Duarte Trio</h3><p>Brazilian standards, 9:00 pm, $34.</p></article></section>
+<section id="contact"><h2>Find us</h2><address>18 Quay Street</address></section></main>
+<footer><p>The Blue Room</p></footer><script>document.getElementById('book').addEventListener('click',function(){this.textContent='Held'})</script></body></html>`
+
+  const before = designScore(bare)
+  const after = designScore(applyPageShell(bare))
+  assert.ok(before < 40, `an unstyled page is plainly unstyled (was ${before})`)
+  assert.ok(after >= 84, `the shell brings it to the bar (was ${after})`)
+  assert.deepEqual(verifyPage(applyPageShell(bare), { files: ['index.html'] }).failures, [])
+})
+
+test('a page cut off after its first section is still a designed page', () => {
+  const fragment =
+    '<header><nav><a href="#shows">Shows</a><a href="#contact">Contact</a></nav></header><section><h1>Four nights, one room</h1><p>Doors at seven, first set at eight, every Wednesday to Saturday.</p></section>'
+  const shelled = applyPageShell(fragment)
+  assert.match(shelled, /data-ink-shell/)
+  assert.ok(designScore(shelled) >= 75, `a half-built page keeps its foundation (was ${designScore(shelled)})`)
+  assert.ok(designScore(shelled) > designScore(fragment) + 40)
+})
+
+test('an artifact-first request is a build, not an edit of the last project', () => {
+  assert.equal(isBuildRequest('A page for a jazz club: its four upcoming shows with day, time, act and price.'), true)
+  assert.equal(isBuildRequest('A small bakery site with today’s bread list and a pre-order form.'), true)
+  assert.equal(isBuildRequest('The page is slow on a phone.'), false, 'a complaint about the current page is not a new page')
+})
+
+/**
+ * The page checks used to grade markup; they never asked whether the page did
+ * what the request said. A measured jazz page passed 88/100 with two of its four
+ * shows and an empty membership list. The brief is now part of the verdict.
+ */
+test('the brief is checked, not just the markup', () => {
+  const jazz = 'A page for a jazz club: its four upcoming shows with day, time, act and price, a membership section and contact details.'
+  const schedule = `<!doctype html><html lang="en"><head><title>Blue Room</title><meta name="viewport" content="width=device-width"></head><body>
+<header><nav><a href="#week">This week</a><a href="#membership">Membership</a><a href="#contact">Contact</a></nav></header>
+<main><section id="week"><h1>Blue Room</h1><table><tr><th>Day</th><th>Time</th><th>Act</th><th>Price</th></tr>
+<tr><td>Wednesday</td><td>8:30 pm</td><td>The Midnight Set</td><td>$15</td></tr>
+<tr><td>Thursday</td><td>9:00 pm</td><td>Ella and the Blue Notes</td><td>$20</td></tr>
+<tr><td>Friday</td><td>9:30 pm</td><td>River City Quartet</td><td>$25</td></tr>
+<tr><td>Saturday</td><td>8:00 pm</td><td>House Band</td><td>$20</td></tr></table></section>
+<section id="membership"><h2>Membership</h2><p>Members get reserved seating for $60 a year.</p></section>
+<section id="contact"><h2>Find us</h2><address>18 Quay Street</address><p>hello@blueroom.example</p></section></main></body></html>`
+  assert.deepEqual(requestCoverage(jazz, schedule), [], 'a dated, priced run of shows is the schedule, even without the word')
+  assert.deepEqual(verifyPage(applyPageShell(schedule), { question: jazz }).failures, [])
+
+  const bakery = 'A page for a small bakery: today bread list with prices, a short about section, opening hours and a pre-order form.'
+  const noHours = '<!doctype html><html lang="en"><head><title>Sweet Crumb</title><meta name="viewport" content="width=device-width"></head><body><h1>Sweet Crumb</h1><p>Sourdough $6. Croissant $4.</p><form><input aria-label="name"><button>Send</button></form></body></html>'
+  const missing = requestCoverage(bakery, noHours)
+  assert.ok(missing.some((item) => /opening hours/.test(item)), `hours are missing: ${missing.join('; ')}`)
+  assert.ok(
+    verifyPage(noHours, { question: bakery }).failures.some((failure) => /covers the brief/.test(failure)),
+    'and the page cannot call itself finished without them',
+  )
+})
+
+test('a page that writes its own design-system block ends with exactly one, and it is ours', () => {
+  const imitation = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Blue Note</title><style data-ink-shell>:root{--ink-color:#1a1a2e}body{color:var(--ink-color)}</style></head><body><h1>Blue Note</h1><p>${'Real copy about the club. '.repeat(8)}</p></body></html>`
+  const shipped = applyPageShell(imitation)
+  assert.equal((shipped.match(/data-ink-shell/g) ?? []).length, 1, 'no second design system')
+  assert.ok(shipped.includes('--ink-bg:#f6f4f0'), 'the runtime block is there')
+  assert.ok(!shipped.includes('--ink-color:#1a1a2e'), 'and the imitation is gone rather than duplicated')
 })

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>room shape test</title>
+<style>
+  body { margin:0; background:#0a1520; color:#d8ecff; font:15px/1.5 system-ui,sans-serif; }
+  .pf-hud { padding:10px 16px; letter-spacing:2px; }
+  .pf-prompt { margin:16px; padding:14px; border:2px solid #2b4a63; font:20px/1.4 ui-monospace,monospace; }
+  .pf-up { margin:0 16px 8px; color:#9fd0f0; }
+  .pf-answer { display:flex; gap:10px; margin:0 16px 20px; }
+  .pf-answer input { flex:1; padding:10px; background:#0d2233; border:2px solid #3c6f93; color:#fff; font:16px ui-monospace,monospace; }
+  .pf-answer button { padding:10px 28px; background:#c8477a; color:#fff; border:0; font:16px ui-monospace,monospace; }
+  .pf-chat { position:fixed; right:10px; top:120px; width:300px; border:2px solid #2b4a63; padding:10px; background:#0c1a26; }
+  .pf-chat .log { height:110px; overflow:hidden; color:#8fb4cc; font-size:12px; }
+  .pf-chat input { width:100%; box-sizing:border-box; padding:8px; margin-top:8px; background:#0d2233; border:1px solid #3c6f93; color:#fff; }
+  .pf-chat button { margin-top:6px; padding:6px 14px; background:#233; color:#dff; border:1px solid #456; }
+</style>
+</head>
+<body>
+<div class="pf-hud">UNRATED 4-6 &nbsp; ENVQ &nbsp; CATEGORY 3 &nbsp; FLOATING 4/6</div>
+<div class="pf-prompt" id="prompt">Name something used to sweeten coffee</div>
+<div class="pf-up">&#9656; tester is up</div>
+<div class="pf-answer">
+  <input class="ds-input" id="answer" placeholder="tester is up..." autocomplete="off">
+  <button class="ds-dive-btn" id="send" disabled>SEND</button>
+</div>
+
+<div class="pf-chat">
+  <div>CHAT &nbsp; <button type="button">Players</button> <button type="button">Turn chat off</button></div>
+  <div class="log" id="chatlog">&#9656; dude joined</div>
+  <input class="ds-input" id="chatbox" placeholder="say something...">
+  <button type="button" id="chatsend">SEND</button>
+</div>
+
+<script>
+  window.__answers = [];
+  window.__chats = [];
+  var answer = document.getElementById('answer');
+  var send = document.getElementById('send');
+  var chatbox = document.getElementById('chatbox');
+  var chatlog = document.getElementById('chatlog');
+
+  // Same contract as the real room: SEND enables only once the box has text.
+  answer.addEventListener('input', function () { send.disabled = !answer.value.trim(); });
+  send.addEventListener('click', function () {
+    var v = answer.value.trim();
+    if (!v) return;
+    window.__answers.push(v);
+    answer.value = '';
+    send.disabled = true;
+    answer.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  chatbox.addEventListener('input', function () {});
+  document.getElementById('chatsend').addEventListener('click', function () {
+    var v = chatbox.value.trim();
+    if (!v) return;
+    window.__chats.push(v);
+    chatlog.innerHTML += '<br>' + v;
+    chatbox.value = '';
+  });
+</script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono'
 
 import type { AgentInfo, AgentStep, AgentTool, AnalysisInfo, BuildInfo, CanvasInfo, Conversation, Message, Project, ProofCheck, ProofInfo, ResearchClaim, ResearchInfo, Source, TeamInfo } from '../shared/types'
+import { PLAN_LIMIT, normalizeWorkspace, type PlanItem, type WorkspaceFile } from '../shared/workspace'
 import type { AppContext } from './env'
 
 // Schema lives with the Worker: D1 has no migration tool on Freebuff Sites, so
@@ -186,8 +187,9 @@ const SCHEMA = [
     updated_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS proof_library_owner ON proof_library(owner_sub, kind, updated_at DESC)`,
-  // Attachment bytes live beside their message. Images are served from a
-  // separate owner-checked route, so conversation reads stay small.
+  // Attachment bytes live in R2; this row keeps the metadata and the object
+  // key. data remains as a legacy/read fallback until the background migration
+  // has copied an older row, then it is blanked.
   `CREATE TABLE IF NOT EXISTS message_attachments (
     id TEXT PRIMARY KEY,
     message_id TEXT NOT NULL,
@@ -198,6 +200,7 @@ const SCHEMA = [
     size INTEGER NOT NULL,
     kind TEXT NOT NULL,
     data TEXT NOT NULL,
+    r2_key TEXT,
     position INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   )`,
@@ -311,8 +314,20 @@ const SCHEMA = [
   )`,
   `CREATE INDEX IF NOT EXISTS room_messages_room_created ON room_messages(room, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS room_messages_author_created ON room_messages(author_sub, room, created_at DESC)`,
-  // Room media uses the same short retention as its message. The row keeps the
-  // bytes so a private room's images still require the room access check.
+  // One reaction per person per room message. Room messages expire, so their
+  // reactions are removed by the same retention sweep.
+  `CREATE TABLE IF NOT EXISTS room_message_reactions (
+    message_id TEXT NOT NULL,
+    room TEXT NOT NULL,
+    author_sub TEXT NOT NULL,
+    reaction TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, author_sub)
+  )`,
+  `CREATE INDEX IF NOT EXISTS room_message_reactions_room ON room_message_reactions(room, message_id)`,
+  // Room media uses the same short retention as its message. Bytes live in R2
+  // so a private room's images still require the room access check without
+  // spending D1's row/value budget.
   `CREATE TABLE IF NOT EXISTS room_message_attachments (
     id TEXT PRIMARY KEY,
     message_id TEXT NOT NULL,
@@ -323,11 +338,15 @@ const SCHEMA = [
     size INTEGER NOT NULL,
     kind TEXT NOT NULL,
     data TEXT NOT NULL,
+    r2_key TEXT,
     position INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS room_message_attachments_message ON room_message_attachments(room, message_id, position)`,
   `CREATE INDEX IF NOT EXISTS room_message_attachments_created ON room_message_attachments(room, created_at)`,
+  `CREATE INDEX IF NOT EXISTS room_message_attachments_owner_created ON room_message_attachments(owner_sub, created_at)`,
+  `CREATE INDEX IF NOT EXISTS room_message_attachments_expiry ON room_message_attachments(created_at)`,
+  `CREATE INDEX IF NOT EXISTS room_messages_expiry ON room_messages(created_at)`,
   // Humanizer usage only. The pasted draft and the rewrite are never stored;
   // these rows exist to enforce the per-user daily cap and cooldown.
   `CREATE TABLE IF NOT EXISTS humanizer_runs (
@@ -435,7 +454,9 @@ const SCHEMA = [
     visibility TEXT NOT NULL CHECK (visibility IN ('public', 'private')),
     password_hash TEXT,
     created_by TEXT NOT NULL,
-    created_at INTEGER NOT NULL
+    invite_token TEXT,
+    created_at INTEGER NOT NULL,
+    last_active_at INTEGER NOT NULL DEFAULT 0
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS chat_rooms_name ON chat_rooms(name COLLATE NOCASE)`,
   `CREATE INDEX IF NOT EXISTS chat_rooms_visibility_created ON chat_rooms(visibility, created_at DESC)`,
@@ -443,20 +464,165 @@ const SCHEMA = [
     room_id TEXT NOT NULL,
     user_sub TEXT NOT NULL,
     created_at INTEGER NOT NULL,
+    invited INTEGER NOT NULL DEFAULT 0,
+    invited_at INTEGER NOT NULL DEFAULT 0,
+    invited_by TEXT,
+    invite_seen INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (room_id, user_sub)
   )`,
   `CREATE INDEX IF NOT EXISTS room_access_user ON room_access(user_sub, created_at DESC)`,
   `INSERT OR IGNORE INTO chat_rooms (id, name, visibility, password_hash, created_by, created_at)
    VALUES ('general', 'General', 'public', NULL, 'system', 0)`,
+  // The name other people see beside a room message. It is separate from the
+  // account name so a guest or account holder can introduce themselves in
+  // chat without changing their login identity.
+  `CREATE TABLE IF NOT EXISTS room_profiles (
+    user_sub TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+  // A room can give someone a local nickname without changing the name they
+  // chose for every other room. The target can overwrite it by changing their
+  // own chat name.
+  `CREATE TABLE IF NOT EXISTS room_member_names (
+    room_id TEXT NOT NULL,
+    user_sub TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    set_by TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, user_sub)
+  )`,
+  `CREATE INDEX IF NOT EXISTS room_member_names_user ON room_member_names(user_sub)`,
+  // One durable directory row per person who has used Ink. The public author
+  // tag is the id people share; the private account subject never leaves the
+  // server. last_seen_at powers the online indicator and the directory also
+  // makes it possible to invite someone while they are offline.
+  `CREATE TABLE IF NOT EXISTS room_people (
+    user_sub TEXT PRIMARY KEY,
+    author_id TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    account_name TEXT NOT NULL,
+    is_guest INTEGER NOT NULL DEFAULT 0,
+    last_seen_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS room_people_seen ON room_people(last_seen_at DESC)`,
+  // A room creator's short list for quick invites when making a new room.
+  `CREATE TABLE IF NOT EXISTS room_people_saved (
+    owner_sub TEXT NOT NULL,
+    person_sub TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (owner_sub, person_sub)
+  )`,
+  `CREATE INDEX IF NOT EXISTS room_people_saved_owner ON room_people_saved(owner_sub, created_at DESC)`,
+  // A private nickname one viewer gives someone in their own people list. Guest
+  // tags like #a1b2c3 are hard to remember, so this turns one into a name that
+  // viewer recognises without changing the name anyone else sees.
+  `CREATE TABLE IF NOT EXISTS room_people_labels (
+    owner_sub TEXT NOT NULL,
+    person_sub TEXT NOT NULL,
+    label TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (owner_sub, person_sub)
+  )`,
   // Preserve recent messages from the old single-room deployment. This is
   // idempotent, so it is safe on the per-isolate schema pass.
   `UPDATE room_messages SET room = 'general' WHERE room = 'lobby'`,
+  // The current Buffy Code project per person. The browser still holds a copy,
+  // but this is what survives a reload on another device, and it is the state
+  // the sandbox and the next turn actually edit.
+  `CREATE TABLE IF NOT EXISTS code_workspaces (
+    owner_sub TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+  // The previous states of that project, so one bad turn can be undone. Only
+  // the newest few are kept; this is undo, not an archive.
+  `CREATE TABLE IF NOT EXISTS code_workspace_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_sub TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS code_workspace_versions_owner ON code_workspace_versions(owner_sub, created_at DESC)`,
 ]
 
 let ready: Promise<void> | undefined
 
+/**
+ * Add a column to a table that may already exist. CREATE TABLE IF NOT EXISTS
+ * cannot grow an old table, and D1 has no migration tool, so each new column
+ * gets its own guarded ALTER. A duplicate-column error means the migration was
+ * already applied and is safe to ignore.
+ */
+async function addAttachmentColumn(db: D1Database, table: 'message_attachments' | 'room_message_attachments') {
+  try {
+    await db.prepare(`ALTER TABLE ${table} ADD COLUMN r2_key TEXT`).run()
+  } catch (error) {
+    if (!/duplicate column|already exists/i.test(String(error))) throw error
+  }
+}
+
+async function addRoomInviteNotificationColumns(db: D1Database) {
+  let added = false
+  for (const sql of [
+    `ALTER TABLE room_access ADD COLUMN invited_at INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE room_access ADD COLUMN invited_by TEXT`,
+    `ALTER TABLE room_access ADD COLUMN invite_seen INTEGER NOT NULL DEFAULT 0`,
+  ]) {
+    try {
+      await db.prepare(sql).run()
+      added = true
+    } catch (error) {
+      if (!/duplicate column|already exists/i.test(String(error))) throw error
+    }
+  }
+  if (added) {
+    // Old link-invite grants predate notifications. They are already open, so
+    // do not replay every historical invite on the first request after deploy.
+    await db.prepare(`UPDATE room_access SET invited_at = created_at WHERE invited_at = 0`).run()
+    await db.prepare(`UPDATE room_access SET invite_seen = 1 WHERE invited = 1 AND invite_seen = 0`).run()
+  }
+}
+
+async function addRoomActivityColumn(db: D1Database) {
+  try {
+    await db.prepare(`ALTER TABLE chat_rooms ADD COLUMN last_active_at INTEGER NOT NULL DEFAULT 0`).run()
+  } catch (error) {
+    if (!/duplicate column|already exists/i.test(String(error))) throw error
+  }
+  // Existing rooms get a full grace window when this ships. Their real last
+  // activity cannot be reconstructed once old messages have expired.
+  await db.prepare(`UPDATE chat_rooms SET last_active_at = ? WHERE last_active_at = 0`).bind(Date.now()).run()
+}
+
+async function addRoomInviteColumns(db: D1Database) {
+  for (const sql of [
+    `ALTER TABLE chat_rooms ADD COLUMN invite_token TEXT`,
+    `ALTER TABLE room_access ADD COLUMN invited INTEGER NOT NULL DEFAULT 0`,
+  ]) {
+    try {
+      await db.prepare(sql).run()
+    } catch (error) {
+      if (!/duplicate column|already exists/i.test(String(error))) throw error
+    }
+  }
+}
+
 export function ensureSchema(db: D1Database): Promise<void> {
-  ready ??= db.batch(SCHEMA.map((sql) => db.prepare(sql))).then(
+  ready ??= (async () => {
+    await db.batch(SCHEMA.map((sql) => db.prepare(sql)))
+    await addAttachmentColumn(db, 'message_attachments')
+    await addAttachmentColumn(db, 'room_message_attachments')
+    await addRoomInviteColumns(db)
+    await addRoomInviteNotificationColumns(db)
+    await addRoomActivityColumn(db)
+    await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS chat_rooms_invite_token ON chat_rooms(invite_token)`).run()
+  })().then(
     () => undefined,
     (error) => {
       ready = undefined
@@ -854,6 +1020,9 @@ export function parseBuild(value: unknown): BuildInfo | undefined {
     const models = Array.isArray(info.models)
       ? info.models.filter((model): model is string => typeof model === 'string' && Boolean(model.trim())).map((model) => model.trim().slice(0, 80)).slice(0, 4)
       : []
+    // The workspace is what makes the next Build turn edit files instead of
+    // reprinting them. normalizeWorkspace already enforces the size budget.
+    const files = kind === 'page' ? normalizeWorkspace(info.files) : []
     return {
       status: info.status,
       kind,
@@ -862,6 +1031,7 @@ export function parseBuild(value: unknown): BuildInfo | undefined {
       ...(sourceUrl ? { sourceUrl } : {}),
       ...(proxyUrl ? { proxyUrl } : {}),
       ...(pages.length > 1 ? { pages } : {}),
+      ...(files.length ? { files } : {}),
       ...(info.interactive === true ? { interactive: true } : {}),
       models,
       asOf: Number.isFinite(Number(info.asOf)) ? Number(info.asOf) : Date.now(),
@@ -1150,4 +1320,141 @@ export function titleFrom(content: string): string {
   const cut = line.slice(0, 48)
   const space = cut.lastIndexOf(' ')
   return `${(space > 24 ? cut.slice(0, space) : cut).replace(/[\s,.;:!?-]+$/, '')}…`
+}
+
+export type StoredCodeWorkspace = {
+  title: string
+  files: WorkspaceFile[]
+  plan: PlanItem[]
+  updatedAt: number
+}
+
+/**
+ * The current Buffy Code project. One row per person: the browser keeps a copy,
+ * but this is what survives a reload elsewhere, and it is the workspace the
+ * next turn and the sandbox actually edit.
+ */
+export const CODE_WORKSPACE_VERSIONS = 5
+
+export async function saveCodeWorkspace(
+  db: D1Database,
+  owner: string,
+  value: { title: string; files: WorkspaceFile[]; plan?: PlanItem[] | null },
+  at = Date.now(),
+): Promise<void> {
+  const files = normalizeWorkspace(value.files)
+  if (!files.length) return
+  const title = value.title.replace(/\s+/g, ' ').trim().slice(0, 120) || 'Buffy project'
+  const plan = (value.plan ?? [])
+    .flatMap((item) =>
+      item && typeof item.text === 'string' && item.text.trim()
+        ? [{ text: item.text.trim().slice(0, 120), done: item.done === true }]
+        : [],
+    )
+    .slice(0, PLAN_LIMIT)
+  const content = JSON.stringify({ files, plan })
+  // Keep the state this save replaces, so the turn can be undone.
+  const existing = await db
+    .prepare(`SELECT title, content, updated_at FROM code_workspaces WHERE owner_sub = ?`)
+    .bind(owner)
+    .first<{ title: string; content: string; updated_at: number }>()
+  if (existing && existing.content !== content) {
+    await db
+      .prepare(
+        `INSERT INTO code_workspace_versions (owner_sub, title, content, created_at) VALUES (?, ?, ?, ?)`,
+      )
+      .bind(owner, existing.title, existing.content, existing.updated_at || at)
+      .run()
+  }
+  await db
+    .prepare(
+      `INSERT INTO code_workspaces (owner_sub, title, content, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(owner_sub) DO UPDATE SET title = excluded.title, content = excluded.content, updated_at = excluded.updated_at`,
+    )
+    .bind(owner, title, content, at)
+    .run()
+  if (existing) {
+    await db
+      .prepare(
+        `DELETE FROM code_workspace_versions
+         WHERE owner_sub = ?
+           AND id NOT IN (SELECT id FROM code_workspace_versions WHERE owner_sub = ? ORDER BY created_at DESC, id DESC LIMIT ${CODE_WORKSPACE_VERSIONS})`,
+      )
+      .bind(owner, owner)
+      .run()
+  }
+}
+
+/** How many undo steps this project has. */
+export async function countCodeWorkspaceVersions(db: D1Database, owner: string): Promise<number> {
+  const row = await db
+    .prepare(`SELECT COUNT(*) AS n FROM code_workspace_versions WHERE owner_sub = ?`)
+    .bind(owner)
+    .first<{ n: number }>()
+  return Number(row?.n ?? 0)
+}
+
+/** Puts the newest saved state back as the current one, and drops that step. */
+export async function revertCodeWorkspace(db: D1Database, owner: string): Promise<StoredCodeWorkspace | undefined> {
+  const version = await db
+    .prepare(
+      `SELECT id, title, content, created_at FROM code_workspace_versions WHERE owner_sub = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
+    )
+    .bind(owner)
+    .first<{ id: number; title: string; content: string; created_at: number }>()
+  if (!version) return undefined
+  await db
+    .prepare(
+      `INSERT INTO code_workspaces (owner_sub, title, content, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(owner_sub) DO UPDATE SET title = excluded.title, content = excluded.content, updated_at = excluded.updated_at`,
+    )
+    .bind(owner, version.title, version.content, Date.now())
+    .run()
+  await db
+    .prepare(`DELETE FROM code_workspace_versions WHERE owner_sub = ? AND id = ?`)
+    .bind(owner, version.id)
+    .run()
+  return loadCodeWorkspace(db, owner)
+}
+
+/**
+ * Forgets the saved project and its undo history. "New" has to clear this too:
+ * the browser dropping its copy only makes the restore read the server's copy,
+ * and the next turn would edit the project the person just left.
+ */
+export async function clearCodeWorkspace(db: D1Database, owner: string): Promise<void> {
+  await db.prepare(`DELETE FROM code_workspace_versions WHERE owner_sub = ?`).bind(owner).run()
+  await db.prepare(`DELETE FROM code_workspaces WHERE owner_sub = ?`).bind(owner).run()
+}
+
+/** Reads that project back, or undefined when there is none worth restoring. */
+export async function loadCodeWorkspace(db: D1Database, owner: string): Promise<StoredCodeWorkspace | undefined> {
+  const row = await db
+    .prepare(`SELECT title, content, updated_at FROM code_workspaces WHERE owner_sub = ?`)
+    .bind(owner)
+    .first<{ title: string; content: string; updated_at: number }>()
+  if (!row) return undefined
+  try {
+    const parsed = JSON.parse(row.content) as { files?: unknown; plan?: unknown }
+    const files = normalizeWorkspace(parsed.files)
+    if (!files.length) return undefined
+    const plan: PlanItem[] = Array.isArray(parsed.plan)
+      ? parsed.plan
+          .flatMap((item) => {
+            if (!item || typeof item !== 'object') return []
+            const raw = item as { text?: unknown; done?: unknown }
+            if (typeof raw.text !== 'string' || !raw.text.trim()) return []
+            return [{ text: raw.text.trim().slice(0, 120), done: raw.done === true }]
+          })
+          .slice(0, PLAN_LIMIT)
+      : []
+    return {
+      title: row.title.trim().slice(0, 120) || 'Buffy project',
+      files,
+      plan,
+      updatedAt: Number(row.updated_at) || Date.now(),
+    }
+  } catch {
+    return undefined
+  }
 }

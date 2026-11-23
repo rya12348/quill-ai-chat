@@ -1,0 +1,412 @@
+[
+ {
+  "name": "disney-princess",
+  "has": "disney princess",
+  "list": "Snow White|Cinderella|Aurora|Ariel|Belle|Jasmine|Pocahontas|Mulan|Tiana|Rapunzel|Merida|Moana"
+ },
+ {
+  "name": "world-cup-host",
+  "has": "world cup",
+  "list": "Uruguay|Italy|France|Brazil|Switzerland|Sweden|Chile|England|Mexico|West Germany|Argentina|Spain|United States|Japan|South Korea|Germany|South Africa|Russia|Qatar|Canada"
+ },
+ {
+  "name": "country-ending-o",
+  "has": "country",
+  "re": "ends? (?:in|with) (?:the letter )?[\"o]",
+  "list": "Kosovo|Lesotho|Monaco|Mexico|Morocco|San Marino|Togo|Burkina Faso|Congo|Trinidad and Tobago"
+ },
+ {
+  "name": "country-ending-e",
+  "has": "country",
+  "re": "ends? (?:in|with) (?:the letter )?[\"e]",
+  "list": "Belize|Cape Verde|Chile|Côte d'Ivoire|France|Greece|Mozambique|Singapore|Suriname|Timor-Leste|Sierra Leone"
+ },
+ {
+  "name": "country-ending-a",
+  "has": "country",
+  "re": "ends? (?:in|with) (?:the letter )?[\"a]",
+  "list": "Angola|Argentina|Australia|Austria|Bolivia|Cambodia|China|Colombia|Costa Rica|Croatia|Cuba|Estonia|Ethiopia|Gambia|Georgia|Ghana|Guatemala|Guinea|Guyana|India|Indonesia|Jamaica|Kenya|Latvia|Liberia|Libya|Lithuania|Malaysia|Malta|Mauritania|Micronesia|Moldova|Mongolia|Namibia|Nigeria|North Korea|Panama|Paraguay|Romania|Russia|Rwanda|Samoa|Saudi Arabia|Serbia|Slovakia|Slovenia|Somalia|South Africa|South Korea|Syria|Tanzania|Tunisia|Uganda|Venezuela|Zambia"
+ },
+ {
+  "name": "country-over-100m",
+  "has": "more than 100 million",
+  "list": "China|India|United States|Indonesia|Pakistan|Brazil|Nigeria|Bangladesh|Russia|Mexico|Japan|Philippines|Ethiopia|Egypt|Vietnam|Democratic Republic of the Congo|Turkey|Iran|Germany|Thailand"
+ },
+ {
+  "name": "contractions",
+  "has": "contraction",
+  "list": "don't|can't|won't|isn't|aren't|wasn't|weren't|hasn't|haven't|hadn't|doesn't|didn't|couldn't|shouldn't|wouldn't|you're|we're|they're|it's|that's|let's|I'm|I've"
+ },
+ {
+  "name": "vitamin-mineral",
+  "has": "vitamin",
+  "list": "Vitamin A|Vitamin B1|Vitamin B2|Vitamin B3|Vitamin B6|Vitamin B9|Vitamin B12|Vitamin C|Vitamin D|Vitamin E|Vitamin K|Calcium|Iron|Magnesium|Zinc|Potassium|Sodium|Iodine|Selenium|Copper|Manganese|Phosphorus|Chromium|Folate"
+ },
+ {
+  "name": "language-two-countries",
+  "has": "language",
+  "re": "spoken in at least two|most spoken in",
+  "list": "English|French|Spanish|Portuguese|Arabic|German|Russian|Italian|Dutch|Chinese|Swahili|Malay|Persian|Turkish|Hindi"
+ },
+ {
+  "name": "country-alps-andes-himalayas",
+  "has": "alps",
+  "list": "Switzerland|Austria|France|Italy|Germany|Slovenia|Liechtenstein|Monaco|Chile|Argentina|Peru|Bolivia|Colombia|Venezuela|Ecuador|Nepal|Bhutan|India|China|Pakistan"
+ },
+ {
+  "name": "flag-with-animal",
+  "has": "animal on its flag",
+  "list": "Bhutan|Sri Lanka|Albania|Kenya|Uganda|Zambia|Zimbabwe|Papua New Guinea|Mexico|Ecuador|Bolivia|Peru|Montenegro|Serbia|Egypt|India|Spain|Netherlands|Belgium|Finland|Norway|Denmark|Estonia|Morocco|Kazakhstan|Fiji|Cyprus"
+ },
+ {
+  "name": "sports-logo-red",
+  "has": "logo",
+  "re": "^(?!.*\\b(?:nfl|nba|mlb|nhl)\\b)",
+  "list": "Chicago Bulls|Houston Rockets|Atlanta Hawks|Miami Heat|Portland Trail Blazers|Kansas City Chiefs|San Francisco 49ers|Detroit Lions|Arizona Cardinals|Cleveland Cavaliers"
+ },
+ {
+  "name": "country-two-consonants",
+  "has": "country",
+  "re": "starts? with two consonants",
+  "list": "Brazil|Brunei|France|Greece|Spain|Sweden|Switzerland|Thailand|Trinidad and Tobago|Czechia|Chad|Chile|China|Croatia|Ghana|Grenada|Norway|Poland|Slovakia|Slovenia|Sri Lanka"
+ },
+ {
+  "name": "city-la-las-los-el",
+  "has": "city",
+  "re": "starts? with the word (?:la|las|los|el)",
+  "list": "Los Angeles|Las Vegas|La Paz|El Paso|Los Alamos|Las Cruces|La Plata|El Cajon|La Serena|Los Mochis|Las Palmas|El Alto"
+ },
+ {
+  "name": "flag-red-white",
+  "has": "flag",
+  "re": "red.*white|white.*red",
+  "list": "Austria|Latvia|Peru|Poland|Indonesia|Monaco|Singapore|Malta|Bahrain|Denmark|Switzerland|Tonga|Tunisia|Turkey|Japan|Canada|Georgia|Lebanon|Switzerland"
+ },
+ {
+  "name": "country-starting-l",
+  "has": "country",
+  "re": "starts? with the letter [\"l]",
+  "list": "Laos|Latvia|Lebanon|Lesotho|Liberia|Libya|Liechtenstein|Lithuania|Luxembourg"
+ },
+ {
+  "name": "noodle-dish",
+  "has": "noodle",
+  "list": "Ramen|Pho|Pad thai|Udon|Soba|Somen|Lanzhou beef noodles|Biang biang noodles|Dandan noodles|Wonton noodles|Char kway teow|Laksa|Mi goreng|Naengmyeon|Bún bò Huế|Kuy teav"
+ },
+ {
+  "name": "hot-drink",
+  "has": "hot drink",
+  "list": "Espresso|Cortado|Flat white|Ristretto|Matcha|Chai|Yerba mate|Glühwein|Sbiten|Kompot|Horchata|Masala chai|London fog|Cascara"
+ },
+ {
+  "name": "stranger-things-character",
+  "has": "stranger things",
+  "list": "Eleven|Mike Wheeler|Jim Hopper|Joyce Byers|Dustin Henderson|Lucas Sinclair|Nancy Wheeler|Steve Harrington|Max Mayfield|Eddie Munson|Robin Buckley|Murray Bauman|Vecna|Demogorgon"
+ },
+ {
+  "name": "logo-nfl",
+  "has": "nfl",
+  "list": "Kansas City Chiefs|San Francisco 49ers|Detroit Lions|Tampa Bay Buccaneers|Arizona Cardinals|Houston Texans|Atlanta Falcons|Carolina Panthers|New England Patriots|Buffalo Bills|Washington Commanders|Cleveland Browns|Los Angeles Chargers|Las Vegas Raiders"
+ },
+ {
+  "name": "logo-nba",
+  "has": "nba",
+  "list": "Chicago Bulls|Houston Rockets|Atlanta Hawks|Miami Heat|Portland Trail Blazers|Toronto Raptors|Washington Wizards|Sacramento Kings|Phoenix Suns|Cleveland Cavaliers|Denver Nuggets|Los Angeles Clippers"
+ },
+ {
+  "name": "films-samuel-l",
+  "has": "samuel l",
+  "list": "Pulp Fiction|Jurassic Park|Django Unchained|The Avengers|Snakes on a Plane|The Hateful Eight|Unbreakable|Jackie Brown|Shaft"
+ },
+ {
+  "name": "films-harrison-ford",
+  "has": "harrison ford",
+  "list": "Star Wars|Indiana Jones|Blade Runner|The Fugitive|Air Force One|Witness|Patriot Games|Clear and Present Danger|Working Girl"
+ },
+ {
+  "name": "films-tom-hanks",
+  "has": "tom hanks",
+  "list": "Forrest Gump|Toy Story|Saving Private Ryan|Cast Away|The Green Mile|Philadelphia|Big|Apollo 13|Catch Me If You Can"
+ },
+ {
+  "name": "films-leonardo-dicaprio",
+  "has": "leonardo dicaprio",
+  "list": "Titanic|Inception|The Departed|The Revenant|The Wolf of Wall Street|Django Unchained|Catch Me If You Can|Shutter Island|The Aviator"
+ },
+ {
+  "name": "films-tom-cruise",
+  "has": "tom cruise",
+  "list": "Top Gun|Mission: Impossible|Rain Man|Jerry Maguire|Risky Business|Minority Report|Edge of Tomorrow|A Few Good Men|The Last Samurai"
+ },
+ {
+  "name": "films-brad-pitt",
+  "has": "brad pitt",
+  "list": "Fight Club|Se7en|Ocean's Eleven|Inglourious Basterds|Once Upon a Time in Hollywood|Troy|Moneyball|The Big Short|World War Z"
+ },
+ {
+  "name": "films-robert-de-niro",
+  "has": "robert de niro",
+  "list": "Taxi Driver|Goodfellas|Raging Bull|The Godfather Part II|Heat|Casino|The Deer Hunter|Joker|Meet the Parents"
+ },
+ {
+  "name": "films-al-pacino",
+  "has": "al pacino",
+  "list": "The Godfather|Scarface|Heat|Dog Day Afternoon|Scent of a Woman|Serpico|The Irishman|Donnie Brasco"
+ },
+ {
+  "name": "films-will-smith",
+  "has": "will smith",
+  "list": "Men in Black|Independence Day|I Am Legend|The Pursuit of Happyness|Aladdin|Hitch|Bad Boys|Wild Wild West"
+ },
+ {
+  "name": "films-johnny-depp",
+  "has": "johnny depp",
+  "list": "Pirates of the Caribbean|Edward Scissorhands|Sweeney Todd|Alice in Wonderland|Charlie and the Chocolate Factory|Donnie Brasco|Blow"
+ },
+ {
+  "name": "films-morgan-freeman",
+  "has": "morgan freeman",
+  "list": "The Shawshank Redemption|Se7en|Bruce Almighty|Driving Miss Daisy|Million Dollar Baby|Now You See Me|Lean on Me"
+ },
+ {
+  "name": "films-meryl-streep",
+  "has": "meryl streep",
+  "list": "The Devil Wears Prada|Mamma Mia|Sophie's Choice|Kramer vs. Kramer|The Iron Lady|Julie & Julia|Doubt"
+ },
+ {
+  "name": "films-scarlett-johansson",
+  "has": "scarlett johansson",
+  "list": "Black Widow|Lost in Translation|Marriage Story|Jojo Rabbit|Lucy|Her|Under the Skin"
+ },
+ {
+  "name": "films-jennifer-lawrence",
+  "has": "jennifer lawrence",
+  "list": "The Hunger Games|Silver Linings Playbook|American Hustle|X-Men|Joy|Mother!|Winter's Bone"
+ },
+ {
+  "name": "syn-delicious",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+delicious\\b",
+  "list": "tasty|scrumptious|delectable|mouthwatering|yummy|savory|luscious|divine|succulent"
+ },
+ {
+  "name": "syn-tasty",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+tasty\\b",
+  "list": "delicious|flavorful|savory|appetizing|palatable|delectable|yummy"
+ },
+ {
+  "name": "syn-big",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+big\\b",
+  "list": "large|huge|enormous|gigantic|massive|colossal|vast|immense"
+ },
+ {
+  "name": "syn-small",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+small\\b",
+  "list": "tiny|little|minute|minuscule|petite|miniature|slight|diminutive"
+ },
+ {
+  "name": "syn-happy",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+happy\\b",
+  "list": "joyful|cheerful|elated|content|glad|blissful|jubilant|delighted"
+ },
+ {
+  "name": "syn-sad",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+sad\\b",
+  "list": "unhappy|sorrowful|melancholy|gloomy|miserable|dejected|downcast|blue"
+ },
+ {
+  "name": "syn-angry",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+angry\\b",
+  "list": "furious|irate|enraged|livid|mad|incensed|wrathful|annoyed"
+ },
+ {
+  "name": "syn-fast",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+fast\\b",
+  "list": "quick|rapid|swift|speedy|brisk|hasty|fleet"
+ },
+ {
+  "name": "syn-slow",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+slow\\b",
+  "list": "sluggish|leisurely|gradual|unhurried|plodding|laggard"
+ },
+ {
+  "name": "syn-beautiful",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+beautiful\\b",
+  "list": "gorgeous|stunning|lovely|pretty|exquisite|radiant|attractive|fair"
+ },
+ {
+  "name": "syn-ugly",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+ugly\\b",
+  "list": "hideous|unsightly|grotesque|homely|repulsive|unattractive"
+ },
+ {
+  "name": "syn-smart",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+smart\\b",
+  "list": "clever|intelligent|bright|brilliant|astute|sharp|brainy|wise"
+ },
+ {
+  "name": "syn-stupid",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+stupid\\b",
+  "list": "foolish|dumb|silly|idiotic|dense|obtuse|thick"
+ },
+ {
+  "name": "syn-funny",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+funny\\b",
+  "list": "hilarious|comical|amusing|witty|humorous|droll|hysterical"
+ },
+ {
+  "name": "syn-scary",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+scary\\b",
+  "list": "frightening|terrifying|spooky|creepy|eerie|chilling|hair-raising"
+ },
+ {
+  "name": "syn-cold",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+cold\\b",
+  "list": "freezing|chilly|frigid|icy|frosty|bitter|arctic"
+ },
+ {
+  "name": "syn-hot",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+hot\\b",
+  "list": "scorching|sweltering|blistering|boiling|sizzling|torrid"
+ },
+ {
+  "name": "syn-old",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+old\\b",
+  "list": "ancient|aged|elderly|antique|vintage|archaic|antiquated"
+ },
+ {
+  "name": "syn-new",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+new\\b",
+  "list": "fresh|novel|modern|recent|contemporary|brand-new|original"
+ },
+ {
+  "name": "syn-rich",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+rich\\b",
+  "list": "wealthy|affluent|prosperous|well-off|moneyed|loaded"
+ },
+ {
+  "name": "syn-poor",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+poor\\b",
+  "list": "impoverished|destitute|broke|penniless|needy|indigent"
+ },
+ {
+  "name": "syn-strong",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+strong\\b",
+  "list": "powerful|sturdy|robust|mighty|stout|muscular|tough"
+ },
+ {
+  "name": "syn-weak",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+weak\\b",
+  "list": "feeble|frail|fragile|flimsy|delicate|puny|infirm"
+ },
+ {
+  "name": "syn-quiet",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+quiet\\b",
+  "list": "silent|hushed|muted|still|noiseless|tranquil|soft"
+ },
+ {
+  "name": "syn-loud",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+loud\\b",
+  "list": "noisy|deafening|booming|thunderous|blaring|raucous"
+ },
+ {
+  "name": "syn-tired",
+  "re": "(?:means|synonym[s]?\\s+(?:for|of))\\s+tired\\b",
+  "list": "exhausted|weary|fatigued|sleepy|drained|worn-out|spent"
+ },
+ {
+  "name": "ape-species",
+  "has": "great ape",
+  "list": "Gorilla|Orangutan|Chimpanzee|Bonobo|Gibbon|Siamang|Lar gibbon|Eastern gorilla|Bornean orangutan|Sumatran orangutan"
+ },
+ {
+  "name": "wine-variety",
+  "has": "variety of wine",
+  "list": "Merlot|Chardonnay|Cabernet Sauvignon|Pinot Noir|Sauvignon Blanc|Riesling|Syrah|Malbec|Zinfandel|Tempranillo|Sangiovese|Grenache|Pinot Grigio|Chenin Blanc"
+ },
+ {
+  "name": "interjection",
+  "has": "interjection",
+  "list": "Wow|Hey|Ouch|Oops|Hooray|Yikes|Ugh|Hmm|Whoa|Yay|Ahem|Huh|Phew|Ahoy|Oof|Eek"
+ },
+ {
+  "name": "yellow-shade",
+  "has": "shade of yellow",
+  "list": "Amber|Gold|Lemon|Mustard|Canary|Saffron|Honey|Cream|Banana|Butterscotch|Flax|Daffodil|Marigold|Straw"
+ },
+ {
+  "name": "late-reason",
+  "has": "reason to be late",
+  "list": "Traffic|Overslept|Alarm didn't go off|Car trouble|Flat tire|Bad weather|Missed the bus|Lost keys|Stuck in a meeting|Parking trouble"
+ },
+ {
+  "name": "grammar-term",
+  "has": "grammar",
+  "list": "Noun|Verb|Adjective|Adverb|Pronoun|Preposition|Conjunction|Interjection|Article|Clause|Phrase|Tense|Participle|Gerund|Infinitive|Subject|Predicate|Object|Syntax|Morphology|Consonant|Vowel|Prefix|Suffix"
+ },
+ {
+  "name": "punctuation-mark",
+  "has": "punctuation",
+  "list": "Comma|Period|Semicolon|Colon|Apostrophe|Hyphen|Dash|Question mark|Exclamation mark|Ellipsis|Bracket|Parenthesis|Quotation mark|Slash|Ampersand"
+ },
+ {
+  "name": "figure-of-speech",
+  "has": "figure of speech",
+  "list": "Simile|Metaphor|Hyperbole|Personification|Alliteration|Onomatopoeia|Idiom|Pun|Irony|Oxymoron|Euphemism|Anaphora"
+ },
+ {
+  "name": "dog-command",
+  "has": "dog",
+  "re": "\\b(?:command|commands|trick|tricks|obey|obedience|training|train)\\b",
+  "not": "breed",
+  "list": "Sit|Stay|Come|Heel|Down|Fetch|Leave it|Drop it|Roll over|Shake|Speak|Wait|Off|Kennel|Watch me|Settle|Stand|Back up"
+ },
+ {
+  "name": "school-club",
+  "has": "school club",
+  "list": "Chess club|Debate club|Drama club|Choir|Band|Student council|Yearbook|Robotics club|Key club|Model UN|Newspaper|Science club|Photography club|Orchestra|Art club|Honor society|Anime club|DECA|JROTC|Book club|Dance team|Mock trial|Environmental club|Math league|Glee club|Film club"
+ },
+ {
+  "name": "phineas-ferb",
+  "has": "phineas",
+  "list": "Phineas|Ferb|Candace|Perry|Dr. Doofenshmirtz|Isabella|Baljeet|Buford|Linda|Lawrence|Stacy|Jeremy|Vanessa|Major Monogram|Carl|Norm|Meap|Pinky|Suzy|Irving|Albert|Vivian|Roger|Charlene|Heinz"
+ },
+ {
+  "name": "sporting-goods",
+  "has": "sporting",
+  "list": "Nike|Adidas|Puma|Reebok|Under Armour|New Balance|Wilson|Spalding|Callaway|Titleist|Rawlings|Easton|Bauer|Columbia|North Face|Patagonia|Decathlon|Mizuno|Asics|Brooks|Gatorade|Speedo|Yonex|Dunlop|Head|Prince|Slazenger|Umbro|Kappa|Fila|Lululemon|Gymshark"
+ },
+ {
+  "name": "muppet",
+  "has": "muppet",
+  "list": "Kermit|Miss Piggy|Fozzie Bear|Gonzo|Animal|Beaker|Rowlf|Scooter|Bunsen Honeydew|Swedish Chef|Sam Eagle|Rizzo|Pepe|Walter|Statler|Waldorf|Sweetums|Camilla|Dr. Teeth|Floyd Pepper|Janice|Zoot|Robin|Uncle Deadly|Crazy Harry"
+ },
+ {
+  "name": "starter-pokemon",
+  "has": "starter pok",
+  "list": "Bulbasaur|Charmander|Squirtle|Pikachu|Chikorita|Cyndaquil|Totodile|Treecko|Torchic|Mudkip|Turtwig|Chimchar|Piplup|Snivy|Tepig|Oshawott|Chespin|Fennekin|Froakie|Rowlet|Litten|Popplio|Grookey|Scorbunny|Sobble|Sprigatito|Fuecoco|Quaxly"
+ },
+ {
+  "name": "zendaya-movie",
+  "has": "zendaya",
+  "list": "The Greatest Showman|Spider-Man: Homecoming|Spider-Man: Far From Home|Spider-Man: No Way Home|Dune|Dune: Part Two|Malcolm & Marie|Challengers|Smallfoot|The Space Between Us|Frenemies|Zapped"
+ },
+ {
+  "name": "car-racing-movie",
+  "has": "racing",
+  "re": "(?:car[- ]?racing|racing|race[- ]?cars?)[^.]*\\b(?:movie|film)s?\\b",
+  "list": "Ford v Ferrari|Rush|Days of Thunder|Talladega Nights|Cars|Cars 3|Speed Racer|The Fast and the Furious|2 Fast 2 Furious|Need for Speed|Le Mans|Grand Prix|The Cannonball Run|Death Race|Herbie: Fully Loaded|Turbo|Senna|Initial D"
+ },
+ {
+  "name": "animal-starting-p",
+  "has": "animal",
+  "re": "start(?:s|ing)? (?:with|in) (?:the letter )?[\"']?p\\b",
+  "list": "Panda|Penguin|Panther|Parrot|Peacock|Pelican|Pig|Pigeon|Piranha|Platypus|Polar bear|Porcupine|Poodle|Puma|Python|Pangolin|Puffin|Praying mantis|Prairie dog|Possum|Pika|Pufferfish|Pheasant|Pony|Parakeet"
+ },
+ {
+  "name": "us-state",
+  "has": "state",
+  "not": "capital",
+  "re": "^(?!.*\\b(?:letter|start\\w*|begin\\w*|end\\w*|contain\\w*|border\\w*|india|australia|brazil|mexico|germany|nigeria|canada)\\b).*\\bstate\\b.*$",
+  "list": "Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming"
+ }
+]

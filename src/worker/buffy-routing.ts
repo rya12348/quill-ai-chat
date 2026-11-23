@@ -31,7 +31,10 @@ export function routeBuffyChat(input: {
     selected &&
     !trivial &&
     (input.strategy === 'agent' || input.hasAttachments === true || needsBuffyTools(input.content))
-  const fast = selected && !trivial && !fullAgent
+  // Both Buffy rows are ordinary chat unless the turn explicitly needs the
+  // full agent. The hosted Buffy row (buffy-lite) must not fall into a blend
+  // just because it is a brand row rather than the bridge row.
+  const fast = (selected || free) && !trivial && !fullAgent
   return {
     local: trivial,
     fast,

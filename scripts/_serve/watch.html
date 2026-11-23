@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>puffer bot · live</title>
+<style>
+  body { margin:0; background:#0b1016; color:#d7e6f2; font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  header { position:sticky; top:0; background:#0e1720; border-bottom:1px solid #22384a; padding:10px 14px; }
+  .row { display:flex; gap:18px; flex-wrap:wrap; }
+  .k { color:#7fa6c0; letter-spacing:1px; font-size:11px; text-transform:uppercase; }
+  .v { color:#eaf6ff; }
+  .cat { font-size:17px; color:#ffd479; margin-top:4px; }
+  .box { color:#7ef0b0; }
+  .stale { color:#ff6b6b; }
+  .ok { color:#7ef0b0; }
+  #ev { padding:8px 14px 40px; }
+  .e { padding:2px 0; border-bottom:1px solid #14212c; white-space:pre-wrap; word-break:break-word; }
+  .t { color:#4f6d84; }
+  .hi { color:#ffd479; }
+  .bad { color:#ff8b8b; }
+  .sent { color:#8fd3ff; }
+  .tail { padding:8px 14px; color:#8aa6bb; border-top:1px solid #22384a; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <div><span class="k">bot</span> <span class="v" id="ver">-</span></div>
+    <div><span class="k">player</span> <span class="v" id="name">-</span></div>
+    <div><span class="k">turn</span> <span class="v" id="up">-</span></div>
+    <div><span class="k">sent</span> <span class="v" id="sent">0</span></div>
+    <div><span class="k">refused</span> <span class="v" id="bad">0</span></div>
+    <div><span class="k">heartbeat</span> <span class="v" id="age">-</span></div>
+  </div>
+  <div class="cat" id="cat">waiting for the bot…</div>
+  <div><span class="k">box</span> <span class="box" id="box">(empty)</span></div>
+</header>
+<div id="ev"></div>
+<div class="tail" id="tail"></div>
+<script>
+  var last = 0, n = 0;
+  function esc(s) { return String(s == null ? '' : s); }
+  function fmt(e) {
+    var parts = [];
+    for (var k in e) {
+      if (k === 'ms') continue;
+      parts.push(k + ':' + (typeof e[k] === 'object' ? JSON.stringify(e[k]) : e[k]));
+    }
+    return parts.join(' ');
+  }
+  function draw(d) {
+    document.getElementById('ver').textContent = d.ver || '-';
+    document.getElementById('name').textContent = d.name || '-';
+    document.getElementById('up').textContent = d.up ? 'ours' : 'waiting';
+    document.getElementById('sent').textContent = d.sent || 0;
+    document.getElementById('bad').textContent = d.bad || 0;
+    document.getElementById('cat').textContent = d.cat || 'waiting for the bot…';
+    document.getElementById('box').textContent = d.box ? d.box : '(empty)';
+    var age = d.at ? Math.round((Date.now() - d.at) / 100) / 10 : -1;
+    var a = document.getElementById('age');
+    a.textContent = age < 0 ? 'never' : age + 's ago';
+    a.className = 'v' + (age > 6 ? ' stale' : '');
+    var ev = d.events || [];
+    if (ev.length !== n) {
+      var html = ev.map(function (x) {
+        var e = x.e || {};
+        var cls = 'e' + (e.sent || e.forceSend ? ' sent' : '') + (e.bad || e.catBad ? ' bad' :
+                  (e.ok ? ' ok' : (e.hold || e.holdFiller || e.holdJunk || e.holdForceFiller ? ' hi' : '')));
+        return '<div class="' + cls + '">' + esc(fmt(e)) + '</div>';
+      }).join('');
+      document.getElementById('ev').innerHTML = html;
+      n = ev.length;
+      window.scrollTo(0, document.body.scrollHeight);
+    }
+    document.getElementById('tail').textContent = d.page ? d.page.slice(-220) : '';
+  }
+  function poll() {
+    fetch('/live', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { last = Date.now(); draw(d); })
+      .catch(function () {})
+      .then(function () { setTimeout(poll, 700); });
+  }
+  poll();
+</script>
+</body>
+</html>

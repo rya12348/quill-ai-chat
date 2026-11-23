@@ -1,12 +1,21 @@
-import { ArrowUpRight } from 'lucide-react'
+import { ArrowUpRight, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 
 import { MAX_INSTRUCTIONS_CHARS } from '../../shared/config'
 import { modelDisplayName } from '../../shared/model-display'
 import { isLocalTunnelHost } from '../../shared/traffic'
-import { Avatar, Badge, Button, ConfirmDialog, useToast } from '../components/ui'
-import { useDeleteAccount, useDeleteAllConversations, useMe, useModels, useSettings, useUpdateSettings } from '../lib/api'
+import { Avatar, Badge, Button, ConfirmDialog, Spinner, useToast } from '../components/ui'
+import {
+  useDeleteAccount,
+  useDeleteAllConversations,
+  useMe,
+  useModels,
+  useRoomPeople,
+  useSaveRoomPerson,
+  useSettings,
+  useUpdateSettings,
+} from '../lib/api'
 import { cx } from '../lib/cx'
 import { untilLabel } from '../lib/format'
 import { setNotificationSetting, useNotificationSettings } from '../lib/notifications'
@@ -24,6 +33,11 @@ export function Settings() {
   const { data: models } = useModels()
   const { data: settings } = useSettings()
   const update = useUpdateSettings()
+  const peopleQuery = useRoomPeople()
+  const savePerson = useSaveRoomPerson()
+  const savedPeople = (peopleQuery.data?.items ?? [])
+    .filter((person) => person.saved)
+    .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name))
   const notificationSettings = useNotificationSettings()
   const [browserPermission, setBrowserPermission] = useState<NotificationPermission | 'unsupported'>(() =>
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
@@ -227,6 +241,67 @@ export function Settings() {
           <p className="mt-2 text-[12px] leading-relaxed text-faint">
             While Ink is visible, only the in-app notice appears. Browser notifications are for when you switch to another tab; the two never fire together. Turn either off here; there is no separate enable button elsewhere.
           </p>
+        </section>
+
+        <section className="mt-8">
+          <h2 className="text-[17px] font-semibold">Saved people</h2>
+          <p className="mt-1 max-w-[540px] text-[13.5px] leading-relaxed text-faint">
+            People you starred for quick invites. They appear when you create a private room or open Invite. Removing someone here only removes the shortcut; it does not remove them from Ink or take away room access.
+          </p>
+          <div className="mt-3 divide-y divide-line rounded-card bg-surface shadow-card">
+            {peopleQuery.isLoading ? (
+              <div className="flex items-center gap-2 px-4 py-4 text-[13px] text-muted">
+                <Spinner className="size-4" /> Loading saved people…
+              </div>
+            ) : peopleQuery.error ? (
+              <p role="alert" className="px-4 py-4 text-[12.5px] leading-relaxed text-danger">
+                Could not load saved people. Refresh the page and try again.
+              </p>
+            ) : !savedPeople.length ? (
+              <p className="px-4 py-4 text-[13px] leading-relaxed text-muted">
+                No saved people yet. Open a room and star someone in Invite to save them for quick adding.
+              </p>
+            ) : (
+              savedPeople.map((person) => (
+                <div key={person.id} className="flex min-w-0 items-center gap-3 px-4 py-2.5">
+                  <Avatar name={person.name} size={34} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <p className="truncate text-[13.5px] font-medium text-fg">{person.name}</p>
+                      {person.online ? (
+                        <span className="size-1.5 shrink-0 rounded-full bg-success" title="Online now" aria-label="Online now" />
+                      ) : null}
+                    </div>
+                    <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px] text-faint">
+                      <span className="truncate font-mono tracking-tight">#{person.id}</span>
+                      <span aria-hidden>·</span>
+                      <span>{person.guest ? 'Guest' : 'Signed in'}</span>
+                      <span aria-hidden>·</span>
+                      <span>{person.online ? 'Online' : 'Offline'}</span>
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={savePerson.isPending}
+                    aria-label={`Remove ${person.name} from saved people`}
+                    onClick={() =>
+                      savePerson.mutate(
+                        { personId: person.id, saved: false },
+                        {
+                          onSuccess: () => toast(`Removed ${person.name} from saved people`),
+                          onError: () => toast('Could not remove that saved person', 'danger'),
+                        },
+                      )
+                    }
+                  >
+                    <X className="size-3.5" />
+                    Remove
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
         </section>
 
         <section className="mt-8">
