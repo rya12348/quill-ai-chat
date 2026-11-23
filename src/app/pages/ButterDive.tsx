@@ -903,7 +903,7 @@ export function ButterDive() {
                   </span>
                 ))}
               </div>
-              <div className="ds-tagline">THE DAILY DIVE</div>
+              <div className="ds-tagline">THE DAILY CHURN</div>
               <div className="ds-subline">7 prompts · 25 seconds each · rarer answers sink deeper</div>
             </div>
             <img className="ds-floor" src="/water-bg.webp" alt="" style={{ top: 14_020 }} />
