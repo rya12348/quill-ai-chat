@@ -189,8 +189,11 @@ function geometry(w: number, h: number, mode: 'door' | 'round', seats: number, r
   const mobile = w < 1100
   if (mode === 'door') {
     const d = mobile ? clamp(h / 844, 0.75, 1) : clamp(h / 800, 0.8, 1.1)
-    const cx = w / 2
-    const cy = mobile ? Math.round(214 * d + 14) : Math.round(0.5 * h)
+    // The door frames the reef off-centre: the art's anchor sits at 9/16 of
+    // both axes and the pane is a twelfth larger than the cover fit, which is
+    // what leaves open water behind the cards instead of the bright reef edge.
+    const cx = Math.round(w * 0.5625)
+    const cy = mobile ? Math.round(214 * d + 14) : Math.round(h * 0.5625)
     return {
       cx,
       cy,
@@ -200,7 +203,7 @@ function geometry(w: number, h: number, mode: 'door' | 'round', seats: number, r
       perch: Math.round(72 * d),
       fs: Math.round((mobile ? 104 : 150) * d),
       scale: 1,
-      pane: paneFor(w, h, cx, cy),
+      pane: paneFor(w, h, cx, cy, mobile ? 1 : 1.125),
     }
   }
   const crowded = seats > 8
@@ -256,10 +259,10 @@ function geometry(w: number, h: number, mode: 'door' | 'round', seats: number, r
 
 /** Where the reef art lands: the pane is sized to cover the page, then offset so
  *  its anchor (the middle of the stone circle) sits where we asked. */
-function paneFor(w: number, h: number, cx: number, cy: number) {
+function paneFor(w: number, h: number, cx: number, cy: number, zoomMul = 1) {
   const key: 'm' | 'd' = w < 1100 ? 'm' : 'd'
   const reef = REEF[key]
-  const s = Math.max(w / reef.iw, h / reef.ih) * reef.zoom
+  const s = Math.max(w / reef.iw, h / reef.ih) * reef.zoom * zoomMul
   const ox = clamp(cx - reef.ax * s, w - reef.iw * s, 0)
   const oy = clamp(cy - reef.ay * s, Math.min(0, h - 90 - reef.ih * s), 0)
   return { k: key, s, ox, oy, w: reef.iw * s, h: reef.ih * s }
