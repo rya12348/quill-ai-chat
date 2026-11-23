@@ -181,6 +181,285 @@ function TierIcon({ tier, size = 20, glow = false }: { tier: TierId | 'miss'; si
   )
 }
 
+/* ------------------------------------------------ the result screen's parts */
+
+/** The shipped ladder, shallowest first: the answer sheet's tier chips walk it. */
+const TIER_ORDER: TierId[] = ['plankton', 'tooclever', 'schooler', 'rare', 'deepcut', 'krillion']
+/** Seven prompts, a hundred points at the top of the ladder: the curve's x axis. */
+const MAX_DAY_SCORE = ROUNDS * 100
+
+/** One answer on a day's card, as the sheet reports it. */
+type SheetAnswer = { answer: string; tier: TierId; score?: number; quip?: string; aliases?: string[] }
+type SheetPrompt = { id: string; text: string; answers: SheetAnswer[]; resultsNote?: string }
+
+/** `formatPercentile`, exactly: two decimals only at the very top of the field. */
+function formatPercentile(value: number): string {
+  return value >= 99.5 ? value.toFixed(2) : String(value)
+}
+
+/**
+ * The score curve under the result, drawn the way the shipped one is: twenty
+ * histogram buckets smoothed with a 1-4-6-4-1 kernel, laid across 320 units,
+ * joined with Catmull-Rom control points into a filled hill, ticked every
+ * hundred points, and marked at your score — everything to the left of the
+ * marker filled in as the share of players you beat.
+ */
+function ScoreCurve({
+  dist,
+  score,
+  betterThan,
+}: {
+  dist: number[]
+  score: number
+  betterThan: number | null
+}) {
+  const kernel = [0.06, 0.24, 0.4, 0.24, 0.06]
+  const smoothed = dist.map((_, index) => {
+    let total = 0
+    let weight = 0
+    for (let offset = -2; offset <= 2; offset += 1) {
+      const at = index + offset
+      if (at < 0 || at >= dist.length) continue
+      const share = kernel[offset + 2]
+      total += dist[at] * share
+      weight += share
+    }
+    return weight > 0 ? total / weight : 0
+  })
+  const peak = Math.max(...smoothed)
+  if (!(peak > 0)) return null
+
+  const points: [number, number][] = [[0, 78]]
+  smoothed.forEach((value, index) => {
+    points.push([((index + 0.5) / smoothed.length) * 320, 78 - (value / peak) * 68])
+  })
+  points.push([320, 78])
+
+  const x = (Math.min(score, MAX_DAY_SCORE) / MAX_DAY_SCORE) * 320
+  let y = 78
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const [x1, y1] = points[index]
+    const [x2, y2] = points[index + 1]
+    if (x >= x1 && x <= x2) {
+      y = y1 + (y2 - y1) * (x2 === x1 ? 0 : (x - x1) / (x2 - x1))
+      break
+    }
+  }
+
+  let curve = `M ${points[0][0]} ${points[0][1]}`
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const before = points[Math.max(0, index - 1)]
+    const from = points[index]
+    const to = points[index + 1]
+    const after = points[Math.min(points.length - 1, index + 2)]
+    const c1x = from[0] + (to[0] - before[0]) / 6
+    const c1y = from[1] + (to[1] - before[1]) / 6
+    const c2x = to[0] - (after[0] - from[0]) / 6
+    const c2y = to[1] - (after[1] - from[1]) / 6
+    curve += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${to[0]} ${to[1]}`
+  }
+  const hill = `${curve} L 320 78 L 0 78 Z`
+  const labelX = Math.min(Math.max(x, 14), 306)
+
+  return (
+    <div className="mt-3">
+      <svg
+        viewBox="0 0 320 96"
+        className="w-full h-auto"
+        role="img"
+        aria-label={
+          betterThan === null
+            ? "Score distribution of today's players"
+            : `Score distribution of today's players; your score beats ${formatPercentile(betterThan)}% of them`
+        }
+      >
+        <defs>
+          <linearGradient id="pc-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--color-lumen-cyan)" stopOpacity="0.45" />
+            <stop offset="100%" stopColor="var(--color-lumen-cyan)" stopOpacity="0.02" />
+          </linearGradient>
+          <clipPath id="pc-beaten">
+            <rect x="0" y="0" width={x} height="96" />
+          </clipPath>
+        </defs>
+        <path d={hill} fill="url(#pc-fill)" opacity="0.28" />
+        <path d={hill} fill="url(#pc-fill)" clipPath="url(#pc-beaten)" />
+        <path d={curve} fill="none" stroke="var(--color-lumen-cyan)" strokeWidth="1.4" strokeOpacity="0.75" />
+        <line x1="0" y1="78" x2="320" y2="78" stroke="var(--hairline)" />
+        {[100, 200, 300, 400, 500, 600].map((tick) => {
+          const at = (tick / MAX_DAY_SCORE) * 320
+          const crowded = Math.abs(at - x) < 18
+          return (
+            <g key={tick}>
+              <line x1={at} y1="78" x2={at} y2="81.5" stroke="var(--color-drift)" strokeOpacity="0.5" />
+              {!crowded && (
+                <text x={at} y="90" textAnchor="middle" className="font-mono-ui" fontSize="9" fill="var(--color-drift)" opacity="0.55">
+                  {tick}
+                </text>
+              )}
+            </g>
+          )
+        })}
+        <line x1={x} y1={Math.min(y, 74) - 3} x2={x} y2="78" stroke="var(--color-lumen-pink)" strokeWidth="1.2" />
+        <circle cx={x} cy={y} r="2.6" fill="var(--color-lumen-pink)" />
+        <text x={labelX} y="90" textAnchor="middle" className="font-mono-ui" fontSize="9" letterSpacing="0.12em" fill="var(--color-lumen-pink)">
+          YOU
+        </text>
+        <text x="0" y="90" className="font-mono-ui" fontSize="9" fill="var(--color-drift)" opacity="0.6">
+          0
+        </text>
+        <text x="320" y="90" textAnchor="end" className="font-mono-ui" fontSize="9" fill="var(--color-drift)" opacity="0.6">
+          {MAX_DAY_SCORE}
+        </text>
+      </svg>
+      {betterThan !== null && (
+        <p
+          className="font-mono-ui text-[13px] tracking-[0.14em] uppercase text-lumen-cyan mt-1"
+          style={{ textShadow: '0 0 6px var(--color-abyss), 0 1px 0 var(--color-abyss)' }}
+        >
+          better than {formatPercentile(betterThan)}% of today&apos;s players
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * One round's answer sheet: the tier chips, a search box once a card is long
+ * enough to need one, and the answers themselves in the card's own order, each
+ * with its tier icon, its quip and the points it pays. Your own answer is lit.
+ */
+function AnswerSheet({ answers, playerAnswer }: { answers: SheetAnswer[]; playerAnswer: string | null }) {
+  const [query, setQuery] = useState('')
+  const [limit, setLimit] = useState(100)
+  const [tier, setTier] = useState<'all' | TierId>('all')
+  const listRef = useRef<HTMLUListElement | null>(null)
+  const counts = useMemo(() => {
+    const map = new Map<TierId, number>()
+    for (const answer of answers) map.set(answer.tier, (map.get(answer.tier) ?? 0) + 1)
+    return map
+  }, [answers])
+  const filtered = useMemo(
+    () => (tier === 'all' ? answers : answers.filter((answer) => answer.tier === tier)),
+    [answers, tier],
+  )
+  const matched = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    if (!needle) return filtered
+    const named: SheetAnswer[] = []
+    const aliased: SheetAnswer[] = []
+    for (const answer of filtered) {
+      if (answer.answer.toLowerCase().includes(needle)) named.push(answer)
+      else if (answer.aliases?.some((alias) => alias.toLowerCase().includes(needle))) aliased.push(answer)
+    }
+    return [...named, ...aliased]
+  }, [filtered, query])
+  const shown = matched.slice(0, limit)
+  const more = shown.length < matched.length
+  const mine = playerAnswer?.toLowerCase()
+  const chips =
+    answers.length > 100
+      ? [
+          { id: 'all' as const, name: 'All', color: 'var(--color-foam)' },
+          ...TIER_ORDER.map((id) => ({ id, name: TIERS[id].name, color: TIERS[id].color })),
+        ].filter((chip) => chip.id === 'all' || counts.has(chip.id))
+      : []
+
+  return (
+    <div className="mt-2 mb-1 pl-[27px]">
+      {chips.length > 0 && (
+        <div role="group" aria-label="Filter answers by tier" className="mb-2 flex flex-wrap gap-1.5">
+          {chips.map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              aria-pressed={tier === chip.id}
+              onClick={() => {
+                setTier(chip.id)
+                setQuery('')
+                setLimit(100)
+                if (listRef.current) listRef.current.scrollTop = 0
+              }}
+              className="rounded border px-2 py-1 font-mono-ui text-[12px]"
+              style={{
+                color: chip.color,
+                borderColor: tier === chip.id ? chip.color : 'var(--hairline)',
+                background: tier === chip.id ? 'rgba(255,255,255,0.08)' : 'transparent',
+              }}
+            >
+              {chip.name}{' '}
+              <span className="opacity-70">
+                {(chip.id === 'all' ? answers.length : (counts.get(chip.id) ?? 0)).toLocaleString()}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      {answers.length > 100 && (
+        <input
+          type="search"
+          aria-label="Search answers"
+          placeholder={tier === 'all' ? 'Search all answers…' : `Search ${TIERS[tier].name} answers…`}
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value)
+            setLimit(100)
+          }}
+          className="w-full mb-2 rounded border px-2 py-1 text-sm text-foam"
+          style={{ background: 'rgba(16,29,51,0.5)', borderColor: 'var(--hairline)' }}
+        />
+      )}
+      <ul
+        ref={listRef}
+        aria-label="Answers"
+        tabIndex={0}
+        onScroll={(event) => {
+          const el = event.currentTarget
+          if (more && el.scrollHeight - el.scrollTop - el.clientHeight <= 200) {
+            setLimit(Math.min(limit + 100, matched.length))
+          }
+        }}
+        className="flex flex-col gap-1 max-h-72 overflow-y-auto pr-1"
+      >
+        {shown.map((answer) => (
+          <li
+            key={answer.answer}
+            className="flex items-start gap-2 px-1.5 py-1"
+            style={answer.answer.toLowerCase() === mine ? { background: 'rgba(16,29,51,0.5)' } : undefined}
+          >
+            <span className="mt-0.5">
+              <TierIcon tier={answer.tier} size={14} />
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="text-[14px] text-foam">{answer.answer}</span>
+              {answer.answer.toLowerCase() === mine && (
+                <span className="ml-2 font-mono-ui text-[10px] tracking-[0.14em] uppercase text-lumen-cyan">you</span>
+              )}
+              {answer.quip && <span className="block text-[13px] leading-snug text-drift/70">{answer.quip}</span>}
+            </span>
+            <span
+              className="font-mono-ui text-[11px] tabular-nums ml-auto shrink-0 min-w-7 text-right"
+              style={{ color: TIERS[answer.tier].color }}
+            >
+              +{answer.score ?? TIERS[answer.tier].score}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {answers.length > 100 && (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 font-mono-ui text-[12px] text-drift/70">
+          <span role="status">
+            {shown.length === 0
+              ? 'No matching answers'
+              : `${shown.length.toLocaleString()} of ${matched.length.toLocaleString()} answers`}
+          </span>
+          {more && <span>Scroll for more</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Every dive this browser has finished, newest key last. The results page's
  *  logbook is read straight off these, the way the real one reads its history. */
 function diveHistory(): Record<string, Result[]> {
@@ -327,6 +606,12 @@ export function ButterDive() {
   // How many people are at open party tables right now, shown the way the real
   // game shows its own live count next to "Puffer Party" on the front door.
   const [playing, setPlaying] = useState<number | null>(null)
+  // The result screen's two extras: the day's answer sheets (`undefined` while
+  // they are still surfacing, `null` when they could not be fetched) and where
+  // this dive landed among everyone else's.
+  const [sheet, setSheet] = useState<SheetPrompt[] | null | undefined>(undefined)
+  const [curve, setCurve] = useState<{ dist: number[]; betterThan: number } | null>(null)
+  const [openRound, setOpenRound] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const runIdRef = useRef('')
   // Only the finished dives feed the logbook, so it is read when the dive ends.
@@ -726,6 +1011,56 @@ export function ButterDive() {
       : results.length >= ROUNDS
         ? 'DIVE COMPLETE'
         : `PROMPT ${Math.min(landed + 1, ROUNDS)} OF ${ROUNDS}`
+
+  // Both reads happen when the dive ends, on the shipped game's own endpoints:
+  // the answer sheet behind each round, and the score histogram the curve is
+  // drawn from. Neither can fail loudly — a missing sheet still leaves the
+  // headline, the log and the bearing readable.
+  useEffect(() => {
+    if (phase !== 'done' || !day) return
+    let live = true
+    setSheet(undefined)
+    setCurve(null)
+    setOpenRound(null)
+    const loadSheet = async () => {
+      try {
+        const res = await fetch(`/api/butter-dive/sheet?date=${encodeURIComponent(day.date)}`)
+        const body = res.ok
+          ? ((await res.json().catch(() => null)) as { prompts?: SheetPrompt[] } | null)
+          : null
+        if (live) setSheet(Array.isArray(body?.prompts) ? body.prompts : null)
+      } catch {
+        if (live) setSheet(null)
+      }
+    }
+    const loadCurve = async () => {
+      try {
+        const res = await fetch('/api/butter-dive/catch', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            date: day.date,
+            playerId: playerId(),
+            score: points,
+            runId: runIdRef.current,
+          }),
+        })
+        const body = res.ok
+          ? ((await res.json().catch(() => null)) as { betterThan?: number; dist?: number[] } | null)
+          : null
+        if (live && typeof body?.betterThan === 'number') {
+          setCurve({ betterThan: body.betterThan, dist: Array.isArray(body.dist) ? body.dist : [] })
+        }
+      } catch {
+        /* the hideout is quiet — the headline still stands on its own */
+      }
+    }
+    void loadSheet()
+    void loadCurve()
+    return () => {
+      live = false
+    }
+  }, [day, phase, points])
 
   // The shipped krill is not placed with CSS at all: its loop keeps a centre
   // point per station, eases towards it at `1 - exp(-2.6 * dt)`, and writes a
@@ -1257,6 +1592,9 @@ export function ButterDive() {
                         -{depth.toLocaleString('en-US')}m
                       </span>
                     </div>
+                    {curve && curve.dist.length > 0 && (
+                      <ScoreCurve dist={curve.dist} score={points} betterThan={curve.betterThan} />
+                    )}
                   </div>
 
                   <div>
@@ -1314,6 +1652,64 @@ export function ButterDive() {
                     </div>
                     <div className="h-5" />
                   </div>
+
+                  <section>
+                    <p className="fathom mb-1">
+                      <span>the catch</span>
+                      <span className="fathom-depth">tap a round for every answer</span>
+                    </p>
+                    <ul>
+                      {results.map((result, index) => {
+                        const sheetPrompt = sheet?.find((entry) => entry.id === result.promptId)
+                        const open = openRound === result.promptId
+                        return (
+                          <li
+                            key={result.promptId}
+                            className="py-2.5 border-b last:border-b-0"
+                            style={{ borderColor: 'var(--hairline)' }}
+                          >
+                            <button
+                              type="button"
+                              className="flex items-center gap-3 w-full text-left"
+                              onClick={() => setOpenRound(open ? null : result.promptId)}
+                              aria-expanded={open}
+                            >
+                              <span className="font-mono-ui text-[12px] text-drift/60 w-3 shrink-0">{index + 1}</span>
+                              <TierIcon tier={result.tier ?? 'miss'} size={19} />
+                              <div className="min-w-0 flex-1">
+                                <p className="font-mono-ui text-[12px] text-drift/70 truncate uppercase tracking-[0.05em]">
+                                  {sheetPrompt?.text ?? result.promptText}
+                                </p>
+                                <p className="text-[17px] text-foam truncate">
+                                  {result.answer ?? (result.rawAnswer ? `"${result.rawAnswer}"` : '—')}
+                                </p>
+                              </div>
+                              <span
+                                className="font-mono-ui text-sm tabular-nums"
+                                style={{ color: result.tier ? TIERS[result.tier].color : 'var(--tier-miss)' }}
+                              >
+                                {result.score}
+                              </span>
+                              <span className="font-mono-ui text-[11px] text-drift/50 w-3">{open ? '−' : '+'}</span>
+                            </button>
+                            {sheetPrompt?.resultsNote && (
+                              <p className="mt-1.5 pl-[55px] text-[14px] leading-snug text-drift/70">
+                                {sheetPrompt.resultsNote}
+                              </p>
+                            )}
+                            {open &&
+                              (sheetPrompt ? (
+                                <AnswerSheet answers={sheetPrompt.answers} playerAnswer={result.answer} />
+                              ) : (
+                                <p className="mt-2 mb-1 pl-[27px] font-mono-ui text-[12px] text-drift/50">
+                                  {sheet === null ? 'answer sheet lost at sea' : 'surfacing the answer sheets…'}
+                                </p>
+                              ))}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </section>
 
                   <section>
                     <p className="fathom mb-1">

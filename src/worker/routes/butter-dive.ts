@@ -109,3 +109,56 @@ butterDive.post('/answer', async (c) => {
   }
   return c.json(rateDiveAnswer(promptId, answer), 200, { 'cache-control': 'no-store' })
 })
+
+/**
+ * The answer sheet behind a day: every answer on all seven cards, with the tier
+ * that decides its rarity. The result screen's "the catch" opens straight onto
+ * this, so a round can be read back answer by answer.
+ */
+butterDive.get('/sheet', async (c) => {
+  const date = String(c.req.query('date') ?? '')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ error: 'Bad date' }, 400)
+  const res = await upstream(`/api/reveal?date=${encodeURIComponent(date)}`)
+  const body = res?.ok
+    ? ((await res.json().catch(() => null)) as { prompts?: { id: string; text: string; answers?: unknown[] }[] } | null)
+    : null
+  if (!body || !Array.isArray(body.prompts)) {
+    return c.json({ error: 'The answer sheets are lost at sea.' }, 502)
+  }
+  return c.json(body, 200, { 'cache-control': 'no-store' })
+})
+
+/**
+ * Where a finished dive sits among the day: `dist` is the score histogram and
+ * `betterThan` the percentile the result screen's curve is drawn from. Their
+ * endpoint also records a run; Butter asks for the shape only, so it never
+ * claims a score that was played somewhere else.
+ */
+butterDive.post('/catch', async (c) => {
+  if (crossSite(c)) return c.json({ error: 'Cross-site request refused.' }, 403)
+  const body = (await c.req.json().catch(() => ({}))) as {
+    date?: string
+    playerId?: string
+    score?: number
+  }
+  const date = String(body.date ?? '')
+  const score = Number(body.score ?? 0)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(score) || score < 0) {
+    return c.json({ error: 'Bad dive' }, 400)
+  }
+  const res = await upstream('/api/today/complete', {
+    method: 'POST',
+    body: JSON.stringify({ date, playerId: String(body.playerId ?? ''), score, record: false }),
+  })
+  const out = res?.ok
+    ? ((await res.json().catch(() => null)) as { betterThan?: number; dist?: number[] } | null)
+    : null
+  if (!out || typeof out.betterThan !== 'number') {
+    return c.json({ error: 'The surface is quiet right now.' }, 502)
+  }
+  return c.json(
+    { betterThan: out.betterThan, dist: Array.isArray(out.dist) ? out.dist : null },
+    200,
+    { 'cache-control': 'no-store' },
+  )
+})
