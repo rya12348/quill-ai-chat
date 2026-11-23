@@ -36,7 +36,7 @@
     "docx": "^9.15.3",
     "hono": "^4.13.0",
     "katex": "^0.19.1",
-    "lucide-react": "^1.60.0",
+    "lucide-react": "^1.72.0",
     "mammoth": "^1.13.0",
     "motion": "^14.4.0",
     "pdf-lib": "^1.17.1",
