@@ -54,10 +54,16 @@ When the domain shows up in config, keep these in sync with it: `APP_ORIGIN` in
 `scripts/check-pages-config.mjs`, `scripts/check-production.mjs` and
 `scripts/load-test.mjs`.
 
-## Butter fixes ship everywhere
+## Butter fixes ship everywhere, every time
 
-A change to Butter (`/butter`, `/butter/party`) is not finished until it is both
-live and on GitHub: `npx tsc --noEmit` and `npm run build` must pass, then
-`node scripts/deploy-pages.mjs` (and the `ink-harbor-2f9` host), then commit and
-push to `origin main`. Leaving a butter fix only deployed leaves the repo behind
-what the site is running.
+A change to Butter (`/butter`, `/butter/party`) is not finished until it is live,
+on the alias, and on GitHub. All four steps happen in the same turn:
+
+1. `npx tsc --noEmit` and `npm run build` pass.
+2. `PAGES_PROJECT=ink-harbor-2f9 npm run deploy:pages` — the live domain is
+   served by the `ink-harbor-2f9` project, not `ink-jo3` — and `npm run
+   deploy:pages` for `ink-jo3` itself.
+3. `https://www.inkbrowser.dpdns.org` answers with the new build.
+4. Commit and push to `origin main`. A fix that is only deployed leaves the repo
+   behind what the site is running, and the next session reverts it by building
+   from stale code.
