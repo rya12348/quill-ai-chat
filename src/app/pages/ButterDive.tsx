@@ -261,6 +261,7 @@ export function ButterDive() {
   const [viewport, setViewport] = useState(() => (typeof window === 'undefined' ? 800 : window.innerHeight))
   const [resetsIn, setResetsIn] = useState('')
   const [copied, setCopied] = useState(false)
+  const [muted, setMuted] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const runIdRef = useRef('')
   // Only the finished dives feed the logbook, so it is read when the dive ends.
@@ -605,6 +606,22 @@ export function ButterDive() {
               </div>
             ))}
 
+            {phase !== 'intro' &&
+              phase !== 'error' &&
+              phase !== 'loading' &&
+              Object.entries(TIERS).map(([id, tier]) => (
+              <div
+                key={id}
+                className="ds-tierline"
+                style={{ top: tier.score * METRES_PER_POINT * 2, ['--tc' as string]: `var(--tier-${id})` }}
+              >
+                <div className="tag">
+                  <img src={`/tiers/${id}.png`} alt="" />
+                    {tier.name.toUpperCase()} &middot; {tier.score}
+                  </div>
+                </div>
+              ))}
+
             {day && prompt && live && phase !== 'feedback' && (
               <div className="ds-card ds-px" style={{ top: cardTop, animationDelay: '0.45s' }}>
                 <div className="rnd">
@@ -618,16 +635,25 @@ export function ButterDive() {
             {phase === 'feedback' && last && (
               <div
                 className={`ds-landed${last.tier ? '' : ' miss'}`}
-                style={{ top: cardTop, ['--tc' as string]: last.tier ? TIERS[last.tier].color : '#7d93b8' }}
+                style={{
+                  top: cardTop,
+                  ['--tc' as string]: last.tier ? `var(--tier-${last.tier})` : 'var(--tier-miss)',
+                }}
               >
                 {last.tier && <img className="icon" src={`/tiers/${last.tier}.png`} alt="" />}
                 <div className="tname">{last.tier ? TIERS[last.tier].name.toUpperCase() : 'NOTHING LANDED'}</div>
                 <div className="tans">{last.answer ? `“${last.answer}”` : '—'}</div>
                 <div className="tpts">
                   <b>+{last.score} PTS</b>
-                  {last.score > 0 ? ` · sink ${(last.score * METRES_PER_POINT).toLocaleString('en-US')}m` : ''}
                 </div>
-                <div className="tsub">{last.quip ?? (last.tier ? TIERS[last.tier].blurb : 'the puffer floats on')}</div>
+                <div className="tsub">
+                  {last.quip ??
+                    (last.tier
+                      ? TIERS[last.tier].blurb
+                      : last.rawAnswer
+                        ? 'never made it onto the reef.'
+                        : 'the clock beat you to it.')}
+                </div>
               </div>
             )}
           </div>
@@ -665,6 +691,20 @@ export function ButterDive() {
               <div className="ds-score-num">{points}</div>
             </div>
           </div>
+
+          <button
+            className={`ds-mute${muted ? ' off' : ''}`}
+            type="button"
+            aria-label={muted ? 'turn sound on' : 'turn sound off'}
+            aria-pressed={muted}
+            onClick={() => setMuted((on) => !on)}
+          >
+            <svg viewBox="0 0 20 16" shapeRendering="crispEdges" fill="currentColor" aria-hidden="true">
+              <path d="M2 6h3l4-4v12l-4-4H2z" />
+              <rect x="11" y="6" width="2" height="4" />
+              <rect x="15" y="3" width="2" height="10" />
+            </svg>
+          </button>
 
           <div
             className="ds-mascot"
