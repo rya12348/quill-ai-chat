@@ -20,8 +20,8 @@ is deployed — especially from an editor or agent that can only see GitHub.
 smoke test, so the file never claims more than actually ran.
 
 <!-- deploy:begin -->
-- live commit: `513fcc99637baa7f30fbdc9f98def2262224cf71`
-- built: unknown
-- checked: 2026-11-23T20:48:53.143Z
+- live commit: `f347772a1ba37ae276c3ee1d1a1499b2c9824655`
+- built: 2026-11-23T20:49:33.355Z
+- checked: 2026-11-23T20:50:34.042Z
 - site: https://www.inkbrowser.dpdns.org
 <!-- deploy:end -->
