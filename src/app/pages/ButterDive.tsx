@@ -605,7 +605,7 @@ export function ButterDive() {
               </div>
             ))}
 
-            {day && prompt && (phase === 'preview' || phase === 'answering') && (
+            {day && prompt && live && phase !== 'feedback' && (
               <div className="ds-card ds-px" style={{ top: cardTop, animationDelay: '0.45s' }}>
                 <div className="rnd">
                   PROMPT {round + 1} OF {ROUNDS}
