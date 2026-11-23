@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 
 import { Fore } from './dive-fore'
@@ -259,6 +259,11 @@ export function ButterDive() {
   const [now, setNow] = useState(() => Date.now())
   const [busy, setBusy] = useState(false)
   const [viewport, setViewport] = useState(() => (typeof window === 'undefined' ? 800 : window.innerHeight))
+  const [stageWidth, setStageWidth] = useState(() => (typeof window === 'undefined' ? 426 : window.innerWidth))
+  // The height the shipped engine solves for the prompt card, in stage pixels.
+  const [cardTarget, setCardTarget] = useState(0)
+  const cardRef = useRef<HTMLDivElement | null>(null)
+  const dockRef = useRef<HTMLFormElement | null>(null)
   const [resetsIn, setResetsIn] = useState('')
   const [copied, setCopied] = useState(false)
   const [muted, setMuted] = useState(false)
@@ -325,7 +330,10 @@ export function ButterDive() {
   useEffect(() => {
     const stage = stageRef.current
     if (!stage) return
-    const resize = () => setViewport(stage.clientHeight || window.innerHeight)
+    const resize = () => {
+      setViewport(stage.clientHeight || window.innerHeight)
+      setStageWidth(stage.clientWidth || window.innerWidth)
+    }
     resize()
     const observer = new ResizeObserver(resize)
     observer.observe(stage)
@@ -528,34 +536,55 @@ export function ButterDive() {
   const prompt = day?.prompts[round] ?? null
   const last = results[results.length - 1] ?? null
   const live = phase === 'preview' || phase === 'answering' || phase === 'feedback'
-  // The card hangs near the top of the water, the way the real dive parks it
-  // below the HUD while the seamount scrolls past underneath.
-  // The intro parks the waterline low enough to leave the sky and the boat in
-  // shot; once the dive starts the card takes the top of the screen instead.
-  // Read the stage itself, not a remembered number: the panel around the page
-  // can settle after mount, and a stale height parks the waterline in the wrong
-  // place. 0.57 leaves the title and the boat in shot over the sky; 0.26 parks
-  // the prompt card under the HUD the way the shipped dive does.
-  // Measured off krillion.io at 1440x900 (its stage is 802 tall): the camera
-  // parks at 32.2% of the stage -- the boat, the sky and the sun are already
-  // above the top edge, leaving open water -- and the prompt card hangs 6.9%
-  // lower, at 39% of the stage. Both are read from the stage height so the
-  // composition holds on a shorter panel.
-  const playCamera = Math.round(viewport * 0.322)
-  // The sheet lifts every card 55px (transform: scale(.92) translateY(46px)),
-  // which is already counted in the shipped card's 313px resting place.
-  const cardLift = 55
-  // The dive sinks 2px for every metre the score buys, and the card rides with
-  // the camera so it holds its place until the next prompt arrives.
+  // Everything below is the shipped engine's own arithmetic, read out of its
+  // bundle rather than eyeballed:
+  //
+  //   card world top = 2 * depth-in-metres
+  //   world translate = stageHeight / 2 - 2 * camera-metres
+  //   camera-metres   = cardDepth + (stageHeight / 2 - cardTarget) / 2
+  //
+  // which puts the prompt card at exactly `cardTarget` on screen. The engine
+  // solves that target from the space between the answer dock and the card:
+  // `max(8, min(width < 700 ? 175 : 210, (dockTop - cardHeight) / 2))`. Read
+  // live, because the dock only exists once the round starts.
+  useLayoutEffect(() => {
+    const measure = () => {
+      const stage = stageRef.current
+      const width = stage?.clientWidth || stageWidth
+      const height = stage?.clientHeight || viewport
+      const cardHeight = cardRef.current?.offsetHeight ?? 0
+      const dockTop = dockRef.current?.offsetTop ?? height
+      const target = Math.max(8, Math.min(width < 700 ? 175 : 210, (dockTop - cardHeight) / 2))
+      setCardTarget(Math.round(target))
+    }
+    measure()
+    // The card's own font settles a frame or two after it mounts.
+    const late = window.setTimeout(measure, 400)
+    return () => window.clearTimeout(late)
+  }, [phase, round, stageWidth, viewport])
+
+  // The shipped dive's stage stops 50px short of the window (its ad strip);
+  // every "middle of the stage" in its engine is measured against that 601px
+  // frame at a 651px window. Ink has no strip, but the composition is the same
+  // only if the arithmetic uses the same frame.
+  const diveFrame = Math.max(240, viewport - 50)
+  // The depth the current round's card was dropped at; the card stays pinned
+  // there while the camera sinks, exactly as the engine leaves it behind.
+  const roundDepth = results.slice(0, round).reduce((sum, result) => sum + result.score, 0) * METRES_PER_POINT
+  // 2px of water for every metre: the dive's whole vertical scale.
   const camera =
     phase === 'intro' || phase === 'error'
       ? 0
       : phase === 'done'
         ? Math.round(-depth * 2)
-        : Math.round(playCamera - depth * 2)
-  const cardTop = depth * 2
-  // Where the card lands on screen, which is also where the krill waits.
-  const cardScreen = playCamera + cardLift
+        : phase === 'feedback'
+          ? // Once an answer lands the camera sinks to 30m below it, which parks
+            // the banner dead centre instead of under the HUD.
+            Math.round(diveFrame / 2 - depth * 2 - 60)
+          : Math.round(cardTarget - roundDepth * 2)
+  const cardTop = roundDepth * 2
+  // Where the card sits on screen, which is also where the krill waits.
+  const cardScreen = phase === 'feedback' ? Math.round(diveFrame / 2 - 60) : cardTarget
   const promptLabel =
     phase === 'intro'
       ? 'SURFACE'
@@ -619,7 +648,12 @@ export function ButterDive() {
               <div
                 key={id}
                 className="ds-tierline"
-                style={{ top: tier.score * METRES_PER_POINT * 2, ['--tc' as string]: `var(--tier-${id})` }}
+                style={{
+                  // Each rung sits where an answer of that tier would land from
+                  // the depth this round started at, the way the engine draws it.
+                  top: (roundDepth + tier.score * METRES_PER_POINT) * 2,
+                  ['--tc' as string]: `var(--tier-${id})`,
+                }}
               >
                 <div className="tag">
                   <img src={`/tiers/${id}.png`} alt="" />
@@ -629,14 +663,14 @@ export function ButterDive() {
               ))}
 
             {day && prompt && live && phase !== 'feedback' && (
-              <div className="ds-card ds-px" style={{ top: cardTop, animationDelay: '0.45s' }}>
+              <div ref={cardRef} className="ds-card ds-px" style={{ top: cardTop, animationDelay: '0.45s' }}>
                 <div className="rnd">
                   PROMPT {round + 1} OF {ROUNDS}
                 </div>
                 <div className="prompt">{prompt.text}</div>
-                {/* Only before the clock runs: the real card drops the line the
-                    moment answering starts, so the prompt owns the panel. */}
-                {phase === 'preview' && <div className="hint">▼ rarer answers sink deeper ▼</div>}
+                {/* The engine keeps the hint on the card for the whole round;
+                    it only goes with the card, when the answer plunges. */}
+                <div className="hint">▼ rarer answers sink deeper ▼</div>
               </div>
             )}
 
@@ -644,7 +678,9 @@ export function ButterDive() {
               <div
                 className={`ds-landed${last.tier ? '' : ' miss'}`}
                 style={{
-                  top: cardTop,
+                  // The banner is pinned to where the answer landed, and the
+                  // camera is what brings it into view.
+                  top: depth * 2,
                   ['--tc' as string]: last.tier ? `var(--tier-${last.tier})` : 'var(--tier-miss)',
                 }}
               >
@@ -795,6 +831,7 @@ export function ButterDive() {
                 </div>
               )}
               <form
+                ref={dockRef}
                 className={`ds-dock${hot ? ' hot' : ''}`}
                 onSubmit={(event) => {
                   event.preventDefault()
