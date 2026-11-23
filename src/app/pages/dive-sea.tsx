@@ -50,6 +50,27 @@ function shade(color: [number, number, number], factor: number): string {
   return `rgb(${clampChannel(color[0] * factor)}, ${clampChannel(color[1] * factor)}, ${clampChannel(color[2] * factor)})`
 }
 
+/** A fish silhouette — the shipped `ty` shape: an ellipse with a triangular tail. */
+function fishShape(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  dir: number,
+): void {
+  ctx.beginPath()
+  ctx.ellipse(x, y, size, 0.45 * size, 0, 0, 7)
+  ctx.moveTo(x - dir * size, y)
+  ctx.lineTo(x - dir * size * 1.7, y - 0.5 * size)
+  ctx.lineTo(x - dir * size * 1.7, y + 0.5 * size)
+  ctx.closePath()
+  ctx.fill()
+}
+
+function rnd(min: number, max: number): number {
+  return min + Math.random() * (max - min)
+}
+
 export function Sea({ depthRef }: { depthRef: { current: number } }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
@@ -69,6 +90,14 @@ export function Sea({ depthRef }: { depthRef: { current: number } }) {
     const bandTop = asset('/dive/bg-top.webp')
     const bandMid = asset('/dive/bg-mid.webp')
     const bandTrench = asset('/dive/bg-trench.webp')
+    // The four fish that wander within ±180 m of wherever the diver has got to.
+    const drifters = Array.from({ length: 4 }, () => ({
+      x: Math.random() * (canvas.clientWidth || 375),
+      dOff: rnd(-180, 180),
+      sp: rnd(14, 34) * (Math.random() < 0.5 ? -1 : 1),
+      s: rnd(7, 14),
+      ph: 9 * Math.random(),
+    }))
     const dust = Array.from({ length: 64 }, () => ({
       x: Math.random(),
       y: Math.random(),
@@ -123,7 +152,10 @@ export function Sea({ depthRef }: { depthRef: { current: number } }) {
       ctx.restore()
     }
 
-    const paint = () => {
+    let last = performance.now()
+    const paint = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000)
+      last = now
       const w = canvas.clientWidth
       const h = canvas.clientHeight
       if (!w || !h) {
@@ -227,6 +259,104 @@ export function Sea({ depthRef }: { depthRef: { current: number } }) {
         ctx.arc(flake.x * w, flake.y * h, flake.r, 0, Math.PI * 2)
         ctx.fill()
       }
+
+      // The creature layer, above the snow and in the shipped order: the school
+      // at 85 m, the siphonophore bloom at 800 m, the anglerfish at 980 m, the
+      // Titanic at 3800 m, the cusk eels at 4400 m, then the four wanderers.
+      // Every one of them is canvas geometry in the game's own painter — there
+      // are no sprite files for them to copy.
+      const seconds = now / 1000
+      const cameraMetres = cameraDepth
+      /** True while a depth is in shot (the shipped `tM`). */
+      const inShot = (metres: number, margin: number) => {
+        const y = anchor + metres * 2
+        return y > -margin && y < h + margin
+      }
+
+      if (inShot(85, 80)) {
+        ctx.fillStyle = 'rgba(4,9,18,0.85)'
+        for (let i = 0; i < 9; i += 1) {
+          fishShape(
+            ctx,
+            ((26 * seconds + 46 * i + i * i * 7) % (w + 360)) - 180,
+            anchor + 170 + 12 * Math.sin(2 * seconds + i) + (i % 3) * 14,
+            8,
+            1,
+          )
+        }
+      }
+
+      if (inShot(800, 120)) {
+        for (let i = 0; i < 22; i += 1) {
+          const x = 0.12 * w + 0.034 * w * i
+          const y = anchor + 1600 + 22 * Math.sin(0.7 * seconds + 0.55 * i)
+          const alpha = 0.25 + 0.2 * Math.sin(3 * seconds + i)
+          ctx.fillStyle = `rgba(77,227,255,${Math.max(0.06, alpha)})`
+          ctx.beginPath()
+          ctx.arc(x, y, 2.2, 0, 7)
+          ctx.fill()
+        }
+      }
+
+      if (inShot(980, 80)) {
+        for (let i = 0; i < 6; i += 1) {
+          const x = ((14 * seconds + 110 * i) % (w + 200)) - 100
+          const y = anchor + 1960 + 20 * Math.sin(seconds + 2 * i) + 8 * i
+          ctx.fillStyle = 'rgba(4,9,18,0.85)'
+          fishShape(ctx, x, y, 5, -1)
+          ctx.fillStyle = `rgba(232,241,255,${0.25 + 0.25 * Math.sin(5 * seconds + i)})`
+          ctx.fillRect(x - 1, y - 1, 2, 2)
+        }
+      }
+
+      if (inShot(3800, 160)) {
+        ctx.fillStyle = 'rgba(4,9,18,0.9)'
+        ctx.save()
+        ctx.translate(0.5 * w, anchor + 7600)
+        ctx.rotate(0.06)
+        ctx.fillRect(-110, -8, 140, 22)
+        ctx.beginPath()
+        ctx.moveTo(-110, -8)
+        ctx.lineTo(-132, 14)
+        ctx.lineTo(-110, 14)
+        ctx.closePath()
+        ctx.fill()
+        for (let i = 0; i < 3; i += 1) ctx.fillRect(-92 + 34 * i, -22, 8, 14)
+        ctx.fillRect(58, -4, 60, 18)
+        ctx.restore()
+      }
+
+      if (inShot(4400, 80)) {
+        for (let i = 0; i < 8; i += 1) {
+          const x = (0.13 * i + 0.05) * w + 14 * Math.sin(0.8 * seconds + 2 * i)
+          const y = anchor + 8800 + 18 * Math.sin(1.3 * seconds + i) + (i % 3) * 10
+          ctx.fillStyle = `rgba(255,93,143,${0.15 + 0.2 * Math.sin(4 * seconds + 3 * i)})`
+          ctx.fillRect(x, y, 2, 2)
+        }
+      }
+
+      ctx.fillStyle = 'rgba(4,9,18,0.7)'
+      for (const one of drifters) {
+        one.x += one.sp * dt
+        if (one.sp > 0 && one.x > w + 60) {
+          one.x = -60
+          one.dOff = rnd(-200, 200)
+        }
+        if (one.sp < 0 && one.x < -60) {
+          one.x = w + 60
+          one.dOff = rnd(-200, 200)
+        }
+        if (cameraMetres + one.dOff > 20) {
+          fishShape(
+            ctx,
+            one.x,
+            anchor + 2 * (cameraMetres + one.dOff) + 10 * Math.sin(seconds + one.ph),
+            one.s,
+            Math.sign(one.sp),
+          )
+        }
+      }
+
       raf = requestAnimationFrame(paint)
     }
     raf = requestAnimationFrame(paint)

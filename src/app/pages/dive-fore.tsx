@@ -12,10 +12,6 @@ import { useEffect, useRef } from 'react'
  * wander within ±180 m of wherever the diver has got to.
  */
 
-function rnd(min: number, max: number): number {
-  return min + Math.random() * (max - min)
-}
-
 /** Screen position of the world's top edge, read from the element that scrolls. */
 function worldCamera(canvas: HTMLCanvasElement): number {
   const world = canvas.parentElement?.querySelector('.ds-world')
@@ -29,17 +25,6 @@ function worldCamera(canvas: HTMLCanvasElement): number {
   }
 }
 
-/** A fish: ellipse body plus a triangular tail, the shape the game draws. */
-function fish(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, dir: number) {
-  ctx.beginPath()
-  ctx.ellipse(x, y, size, 0.45 * size, 0, 0, 7)
-  ctx.moveTo(x - dir * size, y)
-  ctx.lineTo(x - dir * size * 1.7, y - 0.5 * size)
-  ctx.lineTo(x - dir * size * 1.7, y + 0.5 * size)
-  ctx.closePath()
-  ctx.fill()
-}
-
 export function Fore({ depthRef }: { depthRef: { current: number } }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
@@ -49,15 +34,6 @@ export function Fore({ depthRef }: { depthRef: { current: number } }) {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     let raf = 0
-    let last = performance.now()
-
-    const drifters = Array.from({ length: 4 }, () => ({
-      x: rnd(0, 400),
-      dOff: rnd(-180, 180),
-      sp: rnd(14, 34) * (Math.random() < 0.5 ? -1 : 1),
-      s: rnd(7, 14),
-      ph: rnd(0, 9),
-    }))
 
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2)
@@ -69,43 +45,15 @@ export function Fore({ depthRef }: { depthRef: { current: number } }) {
     const observer = new ResizeObserver(resize)
     observer.observe(canvas)
 
-    const paint = (now: number) => {
+    const paint = () => {
       const w = canvas.clientWidth
       const h = canvas.clientHeight
-      const dt = Math.min(0.05, (now - last) / 1000)
-      last = now
-      const t = now / 1000
       const depth = depthRef.current
       const camera = worldCamera(canvas)
       /** Screen y of a depth in metres. */
       const ey = (metres: number) => camera + metres * 2
 
       ctx.clearRect(0, 0, w, h)
-
-      // The school that lives at 85 m.
-      if (ey(85) > -120 && ey(85) < h + 120) {
-        ctx.fillStyle = 'rgba(4,9,18,0.85)'
-        for (let i = 0; i < 9; i += 1) {
-          fish(ctx, ((26 * t + 46 * i + i * i * 7) % (w + 360)) - 180, ey(85) + 12 * Math.sin(2 * t + i) + (i % 3) * 14, 8, 1)
-        }
-      }
-
-      // The four that follow the diver, a little above or below.
-      ctx.fillStyle = 'rgba(4,9,18,0.85)'
-      for (const one of drifters) {
-        one.x += one.sp * dt
-        if (one.x > w + 60) {
-          one.x = -60
-          one.dOff = rnd(-200, 200)
-        }
-        if (one.x < -60) {
-          one.x = w + 60
-          one.dOff = rnd(-200, 200)
-        }
-        if (depth + one.dOff > 20) {
-          fish(ctx, one.x, ey(depth + one.dOff) + 10 * Math.sin(t + one.ph), one.s, Math.sign(one.sp))
-        }
-      }
 
       // The ruler down the right edge.
       // The ruler hangs off the ad box's right edge, the way the shipped page
@@ -162,7 +110,7 @@ export function Fore({ depthRef }: { depthRef: { current: number } }) {
     }
     // One paint before the loop so the ruler is there even if the first frame
     // is held back (a background tab, a slow first layout).
-    paint(performance.now())
+    paint()
     raf = requestAnimationFrame(paint)
     return () => {
       cancelAnimationFrame(raf)
