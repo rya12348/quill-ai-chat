@@ -596,6 +596,27 @@ html.dark .prose-chat pre {
   border-radius: 50%;
   background: radial-gradient(ellipse at center, rgba(2, 5, 12, 0.5), rgba(2, 5, 12, 0));
 }
+/* On a phone the gate floats its puffer over the copy rather than in the gap
+   below it: measured on krillion.io/party at 426×651, the fish is 76px wide
+   and sits 147px down the door, centred. The gap keeps its own height so the
+   panels stay exactly where the shipped door puts them. */
+@media (max-width: 1099px) {
+  /* The door is already `position: absolute; inset: 0` in the shipped sheet, so
+     it is its own containing block — forcing `relative` here made it grow with
+     its content and clip the lower panels instead of scrolling. */
+  .butter-page .pf-door-buddy {
+    position: absolute;
+    top: 147px;
+    /* 50vw, not 50%: the gate centres the fish on the viewport, and the door's
+       own width stops short of the scrollbar. */
+    left: 50vw;
+    z-index: 2;
+    width: 76px;
+    pointer-events: none;
+    transform: translateX(-50%);
+  }
+}
+
 @media (min-width: 1100px) {
   .butter-page .pf-door-buddy {
     position: absolute;
@@ -794,4 +815,64 @@ html.dark .prose-chat pre {
    the intro column instead of shrinking to its label. */
 .butter-dive .ds-intro-inner .ds-begin-btn {
   width: 100%;
+}
+
+/* The krill lives in the middle of the home screen — the real dive floats it
+   in the open water beside the boat — and moves out of the card's way once the
+   prompts start landing. */
+.butter-dive .ds-mascot {
+  left: 50%;
+  top: 55%;
+  margin: -32px 0 0 -32px;
+}
+/* During the dive it tucks against the card's left edge, the way the real one
+   sits just outside the prompt box; on a phone there is no room beside the
+   card, so it swims underneath it instead. */
+.butter-dive .ds-root[data-phase='preview'] .ds-mascot,
+.butter-dive .ds-root[data-phase='answering'] .ds-mascot,
+.butter-dive .ds-root[data-phase='feedback'] .ds-mascot {
+  left: calc(50% - 336px);
+  top: 47%;
+}
+@media (max-width: 700px) {
+  .butter-dive .ds-root[data-phase='preview'] .ds-mascot,
+  .butter-dive .ds-root[data-phase='answering'] .ds-mascot,
+  .butter-dive .ds-root[data-phase='feedback'] .ds-mascot {
+    left: 50%;
+    top: 74%;
+  }
+}
+
+/* The discovery card in the real intro is as wide as the descent button; the
+   module's own rule shrinks it to its label. */
+.butter-dive .DailyIntro-module__e61tQq__actions .GameDiscovery-module__sRLeRq__link.home {
+  width: 100%;
+}
+
+
+/* A corner chip, in the same pixel frame as the rest of the reef, so the party
+   is never a dead end. It sits above the stage and stays out of the ring. */
+.butter-page .pf-dive-link.pf-dive-corner {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  z-index: 30;
+  margin: 0;
+  padding: 5px 9px 3px;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  opacity: 0.9;
+}
+.butter-page .pf-dive-link.pf-dive-corner:hover {
+  opacity: 1;
+}
+
+.butter-page .pf-dive-link.pf-dive-corner::before {
+  content: '◀ ';
+  opacity: 0.75;
+}
+.butter-page .pf-dive-link.pf-dive-corner:focus-visible {
+  outline: 2px solid #4de3ff;
+  outline-offset: 2px;
 }

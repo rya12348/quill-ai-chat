@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 
+import { Sea } from './dive-sea'
+
 /**
  * The Daily Dive — Butter's seven-prompt dive, laid out on Puffer Party's own
  * stylesheet (`.ds-*` in `src/butter-party.css`).
@@ -99,16 +101,6 @@ const AMBIENT: [number, string, 'L' | 'R', boolean?][] = [
   [7000, 'the trench floor — a perfect dive ends here', 'R', true],
 ]
 
-const STOPS: [number, string][] = [
-  [0, '#1d5580'],
-  [150, '#123a5e'],
-  [350, '#0b1526'],
-  [800, '#081020'],
-  [1400, '#050a14'],
-  [2600, '#03070f'],
-  [5200, '#02050b'],
-]
-
 const HOW_TO_PLAY = [
   '7 prompts a day. same for everyone.',
   '25 seconds to name one thing.',
@@ -191,123 +183,6 @@ function logbookOf(today: string) {
     if (streak > 400) break
   }
   return { played: dates.length, average: dates.length ? Math.round(total / dates.length) : 0, best, streak }
-}
-
-function rgb(hex: string): [number, number, number] {
-  const n = Number.parseInt(hex.slice(1), 16)
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
-}
-
-/** The water's colour at a depth, interpolated between the shipped stops. */
-function seaColor(metres: number): [number, number, number] {
-  const m = Math.max(0, metres)
-  for (let i = STOPS.length - 1; i >= 0; i -= 1) {
-    const [depth, color] = STOPS[i]
-    if (m >= depth) {
-      const next = STOPS[i + 1]
-      if (!next) return rgb(color)
-      const t = Math.min(1, (m - depth) / (next[0] - depth))
-      const a = rgb(color)
-      const b = rgb(next[1])
-      return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
-    }
-  }
-  return rgb(STOPS[0][1])
-}
-
-function clampChannel(value: number): number {
-  return Math.max(0, Math.min(255, Math.round(value)))
-}
-
-function shade(color: [number, number, number], factor: number): string {
-  return `rgb(${clampChannel(color[0] * factor)}, ${clampChannel(color[1] * factor)}, ${clampChannel(color[2] * factor)})`
-}
-
-/** Marine snow and the shafts of light, painted behind the world. */
-function Sea({ depthRef }: { depthRef: { current: number } }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    let raf = 0
-    const dust = Array.from({ length: 64 }, () => ({
-      x: Math.random(),
-      y: Math.random(),
-      r: 0.7 + Math.random() * 1.9,
-      v: 0.00004 + Math.random() * 0.00016,
-      a: 0.06 + Math.random() * 0.24,
-    }))
-    const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2)
-      canvas.width = Math.max(1, Math.round(canvas.clientWidth * dpr))
-      canvas.height = Math.max(1, Math.round(canvas.clientHeight * dpr))
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    }
-    resize()
-    const observer = new ResizeObserver(resize)
-    observer.observe(canvas)
-
-    const paint = () => {
-      const w = canvas.clientWidth
-      const h = canvas.clientHeight
-      if (!w || !h) {
-        raf = requestAnimationFrame(paint)
-        return
-      }
-      const depth = depthRef.current
-      const top = seaColor(depth)
-      const grad = ctx.createLinearGradient(0, 0, 0, h)
-      grad.addColorStop(0, shade(top, 1))
-      grad.addColorStop(1, shade(seaColor(depth + 1200), 0.7))
-      ctx.fillStyle = grad
-      ctx.fillRect(0, 0, w, h)
-
-      // Sunlight only reaches the first few hundred metres.
-      const light = Math.max(0, 1 - depth / 620)
-      if (light > 0) {
-        ctx.save()
-        ctx.globalAlpha = 0.12 * light
-        for (let i = 0; i < 5; i += 1) {
-          const x = (w / 5) * (i + 0.5) + Math.sin(i * 2.1) * 24
-          const shaft = ctx.createLinearGradient(x, 0, x + 90, h * 0.85)
-          shaft.addColorStop(0, 'rgba(190,232,255,0.85)')
-          shaft.addColorStop(1, 'rgba(190,232,255,0)')
-          ctx.fillStyle = shaft
-          ctx.beginPath()
-          ctx.moveTo(x - 40, 0)
-          ctx.lineTo(x + 40, 0)
-          ctx.lineTo(x + 150, h)
-          ctx.lineTo(x + 20, h)
-          ctx.closePath()
-          ctx.fill()
-        }
-        ctx.restore()
-      }
-
-      for (const flake of dust) {
-        flake.y -= flake.v * 16 * (1 + depth / 900)
-        if (flake.y < -0.02) {
-          flake.y = 1.02
-          flake.x = Math.random()
-        }
-        ctx.fillStyle = `rgba(214,238,255,${flake.a})`
-        ctx.beginPath()
-        ctx.arc(flake.x * w, flake.y * h, flake.r, 0, Math.PI * 2)
-        ctx.fill()
-      }
-      raf = requestAnimationFrame(paint)
-    }
-    raf = requestAnimationFrame(paint)
-    return () => {
-      cancelAnimationFrame(raf)
-      observer.disconnect()
-    }
-  }, [depthRef])
-
-  return <canvas className="ds-sea" ref={canvasRef} aria-hidden />
 }
 
 function playerId(): string {
@@ -441,11 +316,18 @@ export function ButterDive() {
     }
   }, [])
 
+  // The dive is drawn against the stage's own height. Reading the window can
+  // hand back a stale number while the panel around the page is still settling,
+  // which parks the waterline in the wrong place, so watch the stage itself.
+  const stageRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
-    const resize = () => setViewport(window.innerHeight)
+    const stage = stageRef.current
+    if (!stage) return
+    const resize = () => setViewport(stage.clientHeight || window.innerHeight)
     resize()
-    window.addEventListener('resize', resize)
-    return () => window.removeEventListener('resize', resize)
+    const observer = new ResizeObserver(resize)
+    observer.observe(stage)
+    return () => observer.disconnect()
   }, [])
 
   /* ----------------------------------------------------------- the clock */
@@ -646,7 +528,19 @@ export function ButterDive() {
   const live = phase === 'preview' || phase === 'answering' || phase === 'feedback'
   // The card hangs near the top of the water, the way the real dive parks it
   // below the HUD while the seamount scrolls past underneath.
-  const anchor = phase === 'intro' || phase === 'done' || phase === 'error' ? 0 : Math.round(viewport * 0.26)
+  // The intro parks the waterline low enough to leave the sky and the boat in
+  // shot; once the dive starts the card takes the top of the screen instead.
+  // Read the stage itself, not a remembered number: the panel around the page
+  // can settle after mount, and a stale height parks the waterline in the wrong
+  // place. 0.57 leaves the title and the boat in shot over the sky; 0.26 parks
+  // the prompt card under the HUD the way the shipped dive does.
+  const stageHeight = typeof window === 'undefined' ? viewport : window.innerHeight
+  const anchor =
+    phase === 'intro' || phase === 'error'
+      ? Math.round(stageHeight * 0.57)
+      : phase === 'done'
+        ? 0
+        : Math.round(stageHeight * 0.26)
   const camera = Math.round(anchor - depth * 2)
   const cardTop = depth * 2
   const promptLabel =
@@ -660,10 +554,16 @@ export function ButterDive() {
     <div className="dive-page butter-dive relative min-h-0 flex-1 overflow-hidden" data-phase={phase}>
       <div className="kr-ad-layout">
       <div className="ds-root" data-phase={phase === 'error' || phase === 'loading' ? 'intro' : phase}>
-        <div className="ds-stage">
+        <div className="ds-stage" ref={stageRef}>
           <Sea depthRef={depthRef} />
-          <div className={`ds-world${phase === 'intro' ? '' : ' ds-reveal'}`} style={{ transform: `translate3d(0, ${camera}px, 0)` }}>
-            <div className="ds-surface" style={{ top: phase === 'intro' ? 0 : -336 }}>
+          <div
+            className={`ds-world${phase === 'intro' ? '' : ' ds-reveal'}`}
+            // The intro's waterline is set in viewport units rather than from a
+            // measured height: the panel around the page can settle after mount,
+            // and a stale number sinks the title under the surface.
+            style={{ transform: phase === 'intro' ? 'translate3d(0, 57vh, 0)' : `translate3d(0, ${camera}px, 0)` }}
+          >
+            <div className="ds-surface" style={{ top: -336 }}>
               <div className="ds-title">
                 {'BUTTER'.split('').map((letter, index) => (
                   <span key={index} style={{ animationDelay: `${0.18 * index}s` }}>
@@ -772,7 +672,19 @@ export function ButterDive() {
                     ))}
                   </ul>
                 </details>
-                <div className="butter-dive-actions">
+                <div className="DailyIntro-module__e61tQq__actions">
+                  <Link
+                    className="GameDiscovery-module__sRLeRq__link GameDiscovery-module__sRLeRq__home"
+                    to="/butter/party"
+                  >
+                    <span className="GameDiscovery-module__sRLeRq__newMode">Beta · limited time</span>
+                    <span className="GameDiscovery-module__sRLeRq__heading">
+                      <span className="GameDiscovery-module__sRLeRq__puffer" aria-hidden="true">
+                        <img width={52} height={52} src="/gen/party/puffer-0.png" alt="" />
+                      </span>
+                      <span className="GameDiscovery-module__sRLeRq__title">Puffer Party</span>
+                    </span>
+                  </Link>
                   <button className="ds-begin-btn" type="button" onClick={begin}>
                     ▼ BEGIN DESCENT ▼
                   </button>
@@ -780,7 +692,7 @@ export function ButterDive() {
                 <div className="ds-intro-meta" style={{ flexWrap: 'wrap' }}>
                   <span>dive #{day.dayNumber}</span>
                   <div className="butter-dive-meta-links">
-                    <Link to="/butter/party">puffer party →</Link>
+                    <span>one dive a day · resets at midnight</span>
                   </div>
                 </div>
               </div>

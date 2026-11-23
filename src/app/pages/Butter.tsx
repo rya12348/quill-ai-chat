@@ -95,17 +95,38 @@ const TIER_COLOR: Record<string, string> = {
 /** The real table's nine mascots, in its unlock order, with the shipped names
  *  and sprite paths taken from the live door. Krillion gates them behind a
  *  daily streak; Ink has no streak, so every one of them is pickable. */
+/** The gate's buddies, with the dive streak each one opens at — the same
+ *  ladder the shipped door draws under its keys. */
 const MASCOTS = [
-  { id: 'krill', name: 'Krill', sprite: '/tiers/krillion.png', color: '#ffd166' },
-  { id: 'schooler', name: 'Schooler', sprite: '/tiers/schooler.png', color: '#4de3ff' },
-  { id: 'squid', name: 'Squid', sprite: '/tiers/rare.png', color: '#ff5252' },
-  { id: 'angler', name: 'Angler', sprite: '/tiers/deepcut.png', color: '#9d7bff' },
-  { id: 'evil', name: 'Evil', sprite: '/tiers/evil-krill-white-v2.png', color: '#c8dcff' },
-  { id: 'hackmanite', name: 'Hackmanite', sprite: '/tiers/hackmanite-v2.png', color: '#7ad7ff' },
-  { id: 'fossil', name: 'Fossil', sprite: '/tiers/fossil-krill.png', color: '#cbb59a' },
-  { id: 'mantis', name: 'Mantis', sprite: '/tiers/tiger-mantis.png', color: '#7dffb0' },
-  { id: 'leviathan', name: 'Leviathan', sprite: '/tiers/leviathan.png', color: '#ff9f43' },
+  { id: 'krill', name: 'Krill', sprite: '/tiers/krillion.png', color: '#ffd166', day: 0 },
+  { id: 'schooler', name: 'Schooler', sprite: '/tiers/schooler.png', color: '#4de3ff', day: 5 },
+  { id: 'squid', name: 'Squid', sprite: '/tiers/rare.png', color: '#ff5252', day: 14 },
+  { id: 'angler', name: 'Angler', sprite: '/tiers/deepcut.png', color: '#9d7bff', day: 30 },
+  { id: 'evil', name: 'Evil', sprite: '/tiers/evil-krill-white-v2.png', color: '#c8dcff', day: 45 },
+  { id: 'hackmanite', name: 'Hackmanite', sprite: '/tiers/hackmanite-v2.png', color: '#7ad7ff', day: 60 },
+  { id: 'fossil', name: 'Fossil', sprite: '/tiers/fossil-krill.png', color: '#cbb59a', day: 75 },
+  { id: 'mantis', name: 'Mantis', sprite: '/tiers/tiger-mantis.png', color: '#7dffb0', day: 100 },
+  { id: 'leviathan', name: 'Leviathan', sprite: '/tiers/leviathan.png', color: '#ff9f43', day: 150 },
 ]
+
+/** How many dives in a row this browser has finished, counted the way the dive
+ *  page counts it. The gate's locked keys are that number, not a decoration. */
+function diveStreak(): number {
+  let streak = 0
+  const cursor = new Date()
+  for (;;) {
+    const date = cursor.toISOString().slice(0, 10)
+    try {
+      if (localStorage.getItem(`butter.dive.done.${date}`) === null) break
+    } catch {
+      break
+    }
+    streak += 1
+    cursor.setUTCDate(cursor.getUTCDate() - 1)
+    if (streak > 400) break
+  }
+  return streak
+}
 
 // The door's own wording for each size, verbatim from the shipped table.
 const TABLE_SIZES = [
@@ -1047,15 +1068,19 @@ async function call(path: string, body?: unknown) {
 
 export function Butter() {
   const [name, setName] = useState(() => localStorage.getItem(NAME_KEY) ?? '')
+  // The gate's buddies are dive-streak rewards, exactly as the shipped one
+  // hands them out: each opens after that many finished dives in a row.
+  const [streak] = useState(() => diveStreak())
   // A buddy saved by an older build may name a mascot that is no longer in the
-  // picker; the door then shows nothing pressed and shades every key. Fall back
-  // to Krill, which is the one the shipped door hands everyone.
+  // picker, or one this browser has not unlocked yet; the door then shows
+  // nothing pressed. Fall back to Krill, which the gate hands everyone.
   const [buddy, setBuddy] = useState(() => {
     const saved = localStorage.getItem(BUDDY_KEY)
-    return MASCOTS.some((mascot) => mascot.id === saved) ? (saved as string) : MASCOTS[0].id
+    const found = MASCOTS.find((mascot) => mascot.id === saved)
+    return found && found.day <= streak ? found.id : MASCOTS[0].id
   })
-  // The door opens on 1V1, the way the shipped one does.
-  const [size, setSize] = useState('duel')
+  // The door opens on 4–6, the way the shipped one does.
+  const [size, setSize] = useState('party')
   const [myRating, setMyRating] = useState(() => {
     const saved = Number(localStorage.getItem(RATING_KEY))
     return Number.isFinite(saved) && saved > 0 ? Math.round(saved) : 1000
@@ -1490,7 +1515,6 @@ export function Butter() {
   const mascotFor = (seat: number) => MASCOTS[seat % MASCOTS.length]
   // The character you picked, floating between the two door columns before a
   // table is dealt — the shipped gate does the same with the idle buddy.
-  const buddyMascot = MASCOTS.find((mascot) => mascot.id === buddy) ?? MASCOTS[0]
 
   // An answer chip lives for 1300ms on the shipped table and then fades, so a
   // seat shows what it just said rather than a wall of every answer so far.
@@ -1606,19 +1630,14 @@ export function Butter() {
               <div className="pf-lobby-sub">pass the puffer · don&apos;t let it pop on you</div>
             </div>
             <p className="pf-door-description">
-              Ink&apos;s multiplayer category game. Name an answer and pass the puffer before it pops. Play with
+              Butter&apos;s multiplayer category game. Name an answer and pass the puffer before it pops. Play with
               friends or join a public room. Last one floating wins.
             </p>
-            <Link to="/butter" className="pf-dive-link">
-              THE DAILY DIVE →
-            </Link>
             <div className="pf-door-gap">
-              <div
-                className="pf-door-buddy"
-                style={{ ['--pf-glow' as string]: `${buddyMascot.color}59` }}
-                aria-hidden
-              >
-                <img draggable={false} alt="" src={buddyMascot.sprite} />
+              {/* The gate floats the puffer itself, not the buddy you picked: the
+                  fish is the thing you are about to be handed. */}
+              <div className="pf-door-buddy" style={{ ['--pf-glow' as string]: '#ffd16659' }} aria-hidden>
+                <img draggable={false} alt="" src="/gen/party/puffer-0.png" />
               </div>
             </div>
 
@@ -1647,23 +1666,28 @@ export function Butter() {
                     />
                   </label>
                   <div className="pf-keys" role="group" aria-label="Your buddy">
-                    {MASCOTS.map((mascot) => (
-                      <button
-                        key={mascot.id}
-                        type="button"
-                        className="pf-key"
-                        aria-pressed={mascot.id === buddy}
-                        aria-label={mascot.name}
-                        title={mascot.name}
-                        onClick={() => {
-                          setBuddy(mascot.id)
-                          localStorage.setItem(BUDDY_KEY, mascot.id)
-                        }}
-                      >
-                        <img draggable={false} alt="" src={mascot.sprite} />
-                        <span>{mascot.name.toUpperCase()}</span>
-                      </button>
-                    ))}
+                    {MASCOTS.map((mascot) => {
+                      const locked = mascot.day > streak
+                      return (
+                        <button
+                          key={mascot.id}
+                          type="button"
+                          className="pf-key"
+                          aria-pressed={mascot.id === buddy}
+                          aria-label={locked ? `${mascot.name}, unlocks at a ${mascot.day}-day streak` : mascot.name}
+                          title={mascot.name}
+                          disabled={locked}
+                          onClick={() => {
+                            setBuddy(mascot.id)
+                            localStorage.setItem(BUDDY_KEY, mascot.id)
+                          }}
+                        >
+                          <img draggable={false} alt="" src={mascot.sprite} />
+                          <span>{mascot.name.toUpperCase()}</span>
+                          {mascot.day > 0 ? <small>{mascot.day}-day</small> : null}
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
 
@@ -1676,7 +1700,6 @@ export function Butter() {
                       drifted from the live gate. */}
                   <div className="pf-panel-heading">
                     <h3>PLAY NOW</h3>
-                    <span className="pf-my-rating">RATING <b>{myRating}</b></span>
                   </div>
                   <div className="pf-sizes" role="radiogroup" aria-label="Table size">
                     {TABLE_SIZES.map((table) => (
@@ -1713,9 +1736,6 @@ export function Butter() {
                       <span className="pf-hint">unrated · just for fun</span>
                     </div>
                   </div>
-                  <span className="pf-hint pf-rating-home">
-                    your rating is saved on this browser · sign in to keep it everywhere
-                  </span>
                 </div>
 
                 <div className="pf-panel pf-host-panel">
@@ -1750,8 +1770,8 @@ export function Butter() {
                       autoCapitalize="characters"
                       spellCheck={false}
                       enterKeyHint="go"
-                      placeholder="BTRL"
-                      aria-label="Table code"
+                      placeholder="Room code"
+                      aria-label="Room code"
                       value={joinCode}
                       onChange={(event) => setJoinCode(event.target.value.toUpperCase().replace(/[^A-Z]/g, ''))}
                       onKeyDown={(event) => {
@@ -2133,6 +2153,12 @@ export function Butter() {
 
         {error && snap && <p className="pf-err">{error}</p>}
       </div>
+
+      {/* The reef's other half. Without this the party is a dead end: the door
+          has no way back to the dive, and a live round has no leave control. */}
+      <Link to="/butter" className="pf-dive-link pf-dive-corner">
+        the daily dive
+      </Link>
     </div>
   )
 }

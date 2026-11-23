@@ -53,3 +53,11 @@ When the domain shows up in config, keep these in sync with it: `APP_ORIGIN` in
 `src/worker/auth.ts`, `MOVED_ORIGIN` in `src/worker/index.ts`, and the defaults in
 `scripts/check-pages-config.mjs`, `scripts/check-production.mjs` and
 `scripts/load-test.mjs`.
+
+## Butter fixes ship everywhere
+
+A change to Butter (`/butter`, `/butter/party`) is not finished until it is both
+live and on GitHub: `npx tsc --noEmit` and `npm run build` must pass, then
+`node scripts/deploy-pages.mjs` (and the `ink-harbor-2f9` host), then commit and
+push to `origin main`. Leaving a butter fix only deployed leaves the repo behind
+what the site is running.
