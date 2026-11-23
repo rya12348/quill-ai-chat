@@ -655,15 +655,10 @@ html.dark .prose-chat pre {
   z-index: 0;
 }
 
+/* The camera is written by the dive's own loop every frame — the engine's
+   2200ms eased descent plus its damped follower and bob — so the stylesheet
+   must not animate the same transform a second time. */
 .butter-dive .ds-world {
-  /* The shipped engine tweens the camera to a new depth over 2200ms, eased in
-     and out, and the card rides it. */
-  transition: transform 2.2s cubic-bezier(0.65, 0, 0.35, 1);
-}
-
-/* While an answer is falling the camera is re-solved every frame to stay 30m
-   under the chip, so the world's own 2200ms tween would drag it behind. */
-.butter-dive .ds-root[data-sink='1'] .ds-world {
   transition: none;
 }
 
@@ -821,7 +816,9 @@ html.dark .prose-chat pre {
   --kr-ad-bottom: 50px;
   --kr-ad-left: 0px;
   --kr-ad-right: 0px;
-  --kr-ad-dock-lift: 0px;
+  /* The dock is fixed to the window, so it needs the strip added back or it
+     hangs below the stage the dive is playing in. */
+  --kr-ad-dock-lift: var(--kr-ad-bottom);
 }
 
 @media (min-width: 1060px) {
@@ -924,34 +921,23 @@ html.dark .prose-chat pre {
   width: 100%;
 }
 
-/* The krill sits dead centre of the title screen, as asked, and tucks beside
-   the card once the prompts start landing. */
+/* The dive's krill is moved by its own follow loop, which writes a translate
+   from the stage's top-left corner — the same geometry the shipped one relies
+   on. So the sheet has to leave it at the origin and keep out of its way; only
+   the title screen, which the loop deliberately does not touch, is placed here:
+   dead centre, as asked. */
 .butter-dive .ds-mascot {
-  left: 50%;
-  top: 55%;
+  left: 0;
+  top: 0;
   right: auto;
   bottom: auto;
+  margin: 0;
+  will-change: transform;
+}
+.butter-dive .ds-root[data-phase='intro'] .ds-mascot {
+  left: 50%;
+  top: 55%;
   margin: -32px 0 0 -32px;
-}
-/* During the dive it tucks against the card's left edge, the way the real one
-   sits just outside the prompt box; on a phone there is no room beside the
-   card, so it swims underneath it instead. */
-.butter-dive .ds-root[data-phase='preview'] .ds-mascot,
-.butter-dive .ds-root[data-phase='answering'] .ds-mascot,
-.butter-dive .ds-root[data-phase='feedback'] .ds-mascot {
-  left: calc(50% - 336px);
-  top: 47%;
-}
-@media (max-width: 700px) {
-  /* There is no room beside the card on a phone, so the krill swims
-     underneath it. `!important` because the component places it beside the
-     card with an inline `left` that would otherwise park it off-screen. */
-  .butter-dive .ds-root[data-phase='preview'] .ds-mascot,
-  .butter-dive .ds-root[data-phase='answering'] .ds-mascot,
-  .butter-dive .ds-root[data-phase='feedback'] .ds-mascot {
-    left: 50% !important;
-    top: 74% !important;
-  }
 }
 
 /* The discovery card in the real intro is as wide as the descent button; the
@@ -1040,8 +1026,8 @@ html.dark .prose-chat pre {
 @media (max-width: 700px) {
   .butter-dive .ds-root[data-phase='intro'] .ds-mascot {
     top: 404px !important;
-    left: 236px !important;
-    margin: 0 !important;
+    left: 50% !important;
+    margin: -32px 0 0 -32px !important;
   }
 }
 
