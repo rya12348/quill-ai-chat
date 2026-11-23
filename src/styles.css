@@ -798,13 +798,99 @@ html.dark .prose-chat pre {
   border-color: #4de3ff;
 }
 
-/* The shipped engine sizes its canvases from script; Butter's sea paints from
-   CSS, so both layers get the whole stage. */
-.butter-dive .ds-stage > .ds-sea,
-.butter-dive .ds-stage > .ds-fore {
+/* The shipped page keeps the game inside the box its ad rails leave behind:
+   180px each side and 90px off the bottom on a wide window, 50px off the bottom
+   on a phone. Everything bottom-anchored (intro, dock, DESCEND) and everything
+   pinned to the right edge (mute, score pod) is measured from that box, which is
+   why Butter's copy was landing a rail's width out. */
+.butter-dive .kr-ad-layout {
+  --kr-ad-top: 0px;
+  --kr-ad-bottom: 50px;
+  --kr-ad-left: 0px;
+  --kr-ad-right: 0px;
+  --kr-ad-dock-lift: 0px;
+}
+
+@media (min-width: 1060px) {
+  .butter-dive .kr-ad-layout {
+    --kr-ad-bottom: 90px;
+    --kr-ad-left: 180px;
+    --kr-ad-right: 180px;
+  }
+}
+
+/* The water and the foreground are drawn against the whole window and simply
+   overflow the ad box, exactly as the shipped canvases do with their negative
+   offsets — otherwise the rails would show as bars of page behind the game. */
+.butter-dive .ds-stage > canvas.ds-sea,
+.butter-dive .ds-stage > canvas.ds-fore {
+  position: fixed;
   inset: 0;
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* The menu button and the two dialogs beside the mute button: the shipped
+   page's own chrome, in its own sizes and offsets. Ink has no settings or
+   wardrobe to open, so they are drawn, not wired. */
+.butter-dive .ds-site-menu {
+  position: fixed;
+  top: 8px;
+  left: calc(var(--kr-ad-left, 0px) + 5px);
+  z-index: 65;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: 0 0;
+  color: #7d93b8;
+  pointer-events: none;
+}
+
+.butter-dive .ds-site-menu::before {
+  content: '';
+  position: absolute;
+  inset: 9px 5px;
+  background: rgba(11, 21, 38, 0.75);
+  box-shadow: 0 0 0 2px rgba(6, 13, 26, 0.9);
+}
+
+.butter-dive .ds-site-menu svg {
+  position: relative;
+  width: 18px;
+  height: 18px;
+}
+
+.butter-dive .ds-side-btn {
+  position: absolute;
+  right: 10px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  color: #7d93b8;
+  background: rgba(11, 21, 38, 0.75);
+  box-shadow: 0 0 0 2px rgba(6, 13, 26, 0.9);
+  pointer-events: none;
+}
+
+.butter-dive .ds-side-btn.settings {
+  top: 116px;
+}
+
+.butter-dive .ds-side-btn.wardrobe {
+  top: 148px;
+}
+
+.butter-dive .ds-side-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 /* The sheet asks for the game's own fonts through custom properties; Ink's
@@ -825,12 +911,13 @@ html.dark .prose-chat pre {
   width: 100%;
 }
 
-/* The krill lives in the middle of the home screen — the real dive floats it
-   in the open water beside the boat — and moves out of the card's way once the
-   prompts start landing. */
+/* The krill sits dead centre of the title screen, as asked, and tucks beside
+   the card once the prompts start landing. */
 .butter-dive .ds-mascot {
   left: 50%;
   top: 55%;
+  right: auto;
+  bottom: auto;
   margin: -32px 0 0 -32px;
 }
 /* During the dive it tucks against the card's left edge, the way the real one
@@ -900,13 +987,13 @@ html.dark .prose-chat pre {
      `.kr-ad-layout>.ds-root .ds-dock { bottom: var(--kr-ad-dock-lift) }`, which
      is a class-for-class tie that the later stylesheet wins. */
   .butter-dive .kr-ad-layout .ds-root .ds-dock {
-    bottom: 90px !important;
+    bottom: 40px !important;
   }
   .butter-dive .kr-ad-layout .ds-root .ds-next-wrap {
-    bottom: 90px !important;
+    bottom: 40px !important;
   }
   .butter-dive .kr-ad-layout .ds-root .ds-done {
-    bottom: 90px !important;
+    bottom: 40px !important;
   }
 }
 
@@ -940,4 +1027,35 @@ html.dark .prose-chat pre {
     left: 236px !important;
     margin: 0 !important;
   }
+}
+
+/* The intro's own furniture, at the sizes the shipped sheet gives it: the meta
+   row is as tall as its buttons, and the privacy line is the standard two-part
+   row the real dive carries under "how to play". */
+.butter-dive .ds-intro-meta {
+  min-height: 30px;
+  align-items: center;
+}
+
+.butter-dive .ds-intro .consumer-privacy {
+  display: flex;
+  align-items: center;
+  padding: 10px 0;
+}
+
+.butter-dive .consumer-privacy-btn {
+  display: inline-block;
+  padding: 12px 24px;
+  font: 500 12px var(--font-mono-ui), monospace;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: #a8bad2;
+  background: transparent;
+  border: 1px solid #1b3050;
+  text-decoration: none;
+}
+
+.butter-dive .consumer-privacy-btn:hover {
+  border-color: #4de3ff;
+  color: #e8f1ff;
 }

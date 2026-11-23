@@ -133,9 +133,14 @@ export function Sea({ depthRef }: { depthRef: { current: number } }) {
       const depth = depthRef.current
       const anchor = worldCamera()
       const top = seaColor(depth)
+      // The shipped painter reads its ramp across a quarter of the frame either
+      // side of the camera — not across the whole column — which is why the
+      // water goes dark within a screen of the surface.
+      const cameraDepth = h / 4 - anchor / 2
       const grad = ctx.createLinearGradient(0, 0, 0, h)
-      grad.addColorStop(0, shade(top, 1))
-      grad.addColorStop(1, shade(seaColor(depth + 1200), 0.7))
+      grad.addColorStop(0, shade(seaColor(Math.max(0, cameraDepth - h / 4)), 1))
+      grad.addColorStop(0.5, shade(seaColor(Math.max(0, cameraDepth)), 1))
+      grad.addColorStop(1, shade(seaColor(Math.max(0, cameraDepth + h / 4)), 1))
       ctx.fillStyle = grad
       ctx.fillRect(0, 0, w, h)
 

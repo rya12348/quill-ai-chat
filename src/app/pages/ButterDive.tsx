@@ -636,11 +636,17 @@ export function ButterDive() {
   useLayoutEffect(() => {
     const measure = () => {
       const stage = stageRef.current
-      const width = stage?.clientWidth || stageWidth
       const height = stage?.clientHeight || viewport
+      // The engine's own solve (`y(u, cardHeight, dockTop)`): the card's top is
+      // a fixed 210 px down a wide frame (175 on a phone), shrunk only when the
+      // gap between the card and the answer dock is tighter than that. Its top
+      // edge is the waterline, which is exactly what the live dive shows.
       const cardHeight = cardRef.current?.offsetHeight ?? 0
       const dockTop = dockRef.current?.offsetTop ?? height
-      const target = Math.max(8, Math.min(width < 700 ? 175 : 210, (dockTop - cardHeight) / 2))
+      const target = Math.max(
+        8,
+        Math.min(stageWidth < 700 ? 175 : 210, (dockTop - cardHeight) / 2),
+      )
       setCardTarget(Math.round(target))
     }
     measure()
@@ -649,11 +655,10 @@ export function ButterDive() {
     return () => window.clearTimeout(late)
   }, [phase, round, stageWidth, viewport])
 
-  // The shipped dive's stage stops 50px short of the window (its ad strip);
-  // every "middle of the stage" in its engine is measured against that 601px
-  // frame at a 651px window. Ink has no strip, but the composition is the same
-  // only if the arithmetic uses the same frame.
-  const diveFrame = Math.max(240, viewport - 50)
+  // The stage is already the shipped game's frame: the ad layout insets the root
+  // by the rails and the bottom strip, so the engine's "middle of the frame" is
+  // this box's height — no strip to subtract a second time.
+  const diveFrame = Math.max(240, viewport)
   // The depth the current round's card was dropped at; the card stays pinned
   // there while the camera sinks, exactly as the engine leaves it behind.
   const roundDepth = results.slice(0, round).reduce((sum, result) => sum + result.score, 0) * METRES_PER_POINT
@@ -684,6 +689,8 @@ export function ButterDive() {
               // banner dead centre instead of under the HUD.
               Math.round(diveFrame / 2 - (landing + 30) * 2)
             : Math.round(cardTarget - roundDepth * 2)
+  // The engine pins the card to its own depth (2px a metre) and lets the camera
+  // bring it to the waterline: at rest its top edge sits exactly on the surface.
   const cardTop = roundDepth * 2
   // Where the card sits on screen, which is also where the krill waits.
   const cardScreen = phase === 'feedback' ? Math.round(diveFrame / 2 - 60) : cardTarget
@@ -713,7 +720,9 @@ export function ButterDive() {
             // takes them away the moment an answer lands (its `ds-reveal` class),
             // so a landed banner sits in clean water.
             className={`ds-world${
-              phase === 'preview' || phase === 'answering' || phase === 'sinking' ? ' ds-reveal' : ''
+              (phase === 'preview' || phase === 'answering' || phase === 'sinking') && results.length === 0
+                ? ' ds-reveal'
+                : ''
             }`}
             // The intro's waterline is set in viewport units rather than from a
             // measured height: the panel around the page can settle after mount,
@@ -721,7 +730,7 @@ export function ButterDive() {
             style={{
               transform:
                 phase === 'intro'
-                  ? 'translate3d(0, calc(57vh + var(--ds-intro-lift, 0px)), 0)'
+                  ? `translate3d(0, calc(${Math.round(diveFrame / 2 + 90)}px + var(--ds-intro-lift, 0px)), 0)`
                   : `translate3d(0, ${camera}px, 0)`,
             }}
           >
@@ -894,12 +903,38 @@ export function ButterDive() {
             </svg>
           </button>
 
+          {/* The shipped chrome: the site menu in the top-left corner and the two
+              dialog triggers stacked under the mute button. Ink has no menu,
+              settings or wardrobe behind them, so they keep the look only. */}
+          <button className="ds-site-menu" type="button" aria-hidden="true" tabIndex={-1}>
+            <svg viewBox="0 0 20 20" fill="currentColor" shapeRendering="crispEdges" aria-hidden="true">
+              <path d="M2 3h16v3H2zm0 6h16v3H2zm0 6h16v3H2z" />
+            </svg>
+          </button>
+          <button className="ds-side-btn settings" type="button" aria-hidden="true" tabIndex={-1}>
+            <svg viewBox="0 0 20 20" shapeRendering="crispEdges" fill="currentColor" aria-hidden="true">
+              <path
+                fillRule="evenodd"
+                d="M6 4H14V6H16V14H14V16H6V14H4V6H6Z M8 1H12V4H8Z M8 16H12V19H8Z M1 8H4V12H1Z M16 8H19V12H16Z M3 3H6V6H3Z M14 3H17V6H14Z M3 14H6V17H3Z M14 14H17V17H14Z M8 8H12V12H8Z"
+              />
+            </svg>
+          </button>
+          <button className="ds-side-btn wardrobe" type="button" aria-hidden="true" tabIndex={-1}>
+            <svg viewBox="0 0 20 20" shapeRendering="crispEdges" fill="currentColor" aria-hidden="true">
+              <path
+                fillRule="evenodd"
+                d="M4 3H8V5H4Z M12 3H16V5H12Z M2 5H18V9H2Z M5 9H15V17H5Z M9 5H11V7H9Z"
+              />
+            </svg>
+          </button>
+
           <div
             className="ds-mascot"
             title="a friend"
             style={
               phase === 'intro' || phase === 'error'
-                ? { top: 0, left: 0, margin: 0 }
+                ? // The title screen places the krill from the stylesheet.
+                  undefined
                 : // Just outside the card's top-left corner: 157px to its left and
                   // a few pixels down, exactly where the shipped krill swims.
                   { top: cardScreen + 5, left: 'calc(50% - 402px)', margin: 0, bottom: 'auto' }
@@ -924,6 +959,16 @@ export function ButterDive() {
                     ))}
                   </ul>
                 </details>
+                <div>
+                  <div className="kr-ad-privacy">
+                    <Link to="/privacy">Privacy</Link>
+                    <div className="consumer-privacy">
+                      <Link className="consumer-privacy-btn" to="/privacy">
+                        DO NOT SELL OR SHARE MY PERSONAL INFORMATION
+                      </Link>
+                    </div>
+                  </div>
+                </div>
                 <div className="DailyIntro-module__e61tQq__actions">
                   <Link
                     className="GameDiscovery-module__sRLeRq__link GameDiscovery-module__sRLeRq__home"
@@ -938,7 +983,7 @@ export function ButterDive() {
                     </span>
                     <span className="GameDiscovery-module__sRLeRq__activity">
                       <span className="GameDiscovery-module__sRLeRq__live" aria-hidden="true" />
-                      {typeof playing === 'number' ? `${playing.toLocaleString()} playing now` : 'in the water now'}
+                      {typeof playing === 'number' ? `${playing.toLocaleString()} playing` : 'in the water now'}
                     </span>
                   </Link>
                   <button className="ds-begin-btn" type="button" onClick={begin}>
@@ -947,8 +992,19 @@ export function ButterDive() {
                 </div>
                 <div className="ds-intro-meta" style={{ flexWrap: 'wrap' }}>
                   <span>dive #{day.dayNumber}</span>
+                  {/* The shipped row's three chips. Ink has no archive, themed
+                      packs or unlimited mode, so they are the look of the row
+                      and nothing more. */}
                   <div className="butter-dive-meta-links">
-                    <span>one dive a day · resets at midnight</span>
+                    <a aria-hidden="true" tabIndex={-1}>
+                      ARCHIVE ⟲
+                    </a>
+                    <a aria-hidden="true" tabIndex={-1}>
+                      THEMED PACKS
+                    </a>
+                    <a aria-hidden="true" tabIndex={-1}>
+                      UNLIMITED ∞
+                    </a>
                   </div>
                 </div>
               </div>

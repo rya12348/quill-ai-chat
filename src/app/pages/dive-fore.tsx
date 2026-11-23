@@ -108,7 +108,12 @@ export function Fore({ depthRef }: { depthRef: { current: number } }) {
       }
 
       // The ruler down the right edge.
-      const r = w - 14
+      // The ruler hangs off the ad box's right edge, the way the shipped page
+      // draws it; the canvas itself overscans the rails, so its own width would
+      // park the ticks out in the margin.
+      const canvasBox = canvas.getBoundingClientRect()
+      const stageBox = canvas.parentElement?.getBoundingClientRect()
+      const r = (stageBox ? stageBox.right : canvasBox.right) - canvasBox.left - 14
       ctx.strokeStyle = 'rgba(125,147,184,.55)'
       ctx.lineWidth = 2
       ctx.font = '13px VT323, ui-monospace, monospace'
