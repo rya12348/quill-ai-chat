@@ -878,7 +878,11 @@ butter.get('/rooms', async (c) => {
     )
     .map((room) => ({ ...room, rated: room.rated === 1, hostSeen: undefined, cap: capFor(room.size) }))
     .slice(0, 50)
-  return c.json({ rooms }, 200, { 'cache-control': 'no-store' })
+  // A live seated count, for the dive's "N playing" line — how many people are
+  // sitting at open tables right now, the same number the real game shows on
+  // its front door next to "Puffer Party".
+  const playing = rooms.reduce((sum, room) => sum + room.players, 0)
+  return c.json({ rooms, playing }, 200, { 'cache-control': 'no-store' })
 })
 
 butter.get('/state', async (c) => {
