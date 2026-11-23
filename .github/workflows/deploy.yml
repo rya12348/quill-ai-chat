@@ -74,10 +74,6 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # The last step commits DEPLOYED.md back to main with `[skip ci]`, which is
-    # how a reader who only has the repository learns which commit is live.
-    permissions:
-      contents: write
     environment: production
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -121,21 +117,21 @@ jobs:
         env:
           PAGES_BRANCH: main
         run: npm run deploy:pages
-      # Deploy and record are separate on purpose: the deploy has already passed
-      # its smoke test by here, so this only copies what the site says about
-      # itself into the repository. `[skip ci]` keeps it from deploying again.
-      - name: Record the live commit
+      # Report what the site says it is running. It is deliberately not committed:
+      # a record commit would itself be deployed, so DEPLOYED.md would name the
+      # previous commit forever. /api/version is the answer; this only surfaces it
+      # in the run, and warns when the site is not on the commit that was pushed.
+      - name: Report the live commit
         if: steps.cloudflare.outputs.configured == 'true'
         env:
           PAGES_URL: https://www.inkbrowser.dpdns.org
         run: |
-          node scripts/record-deploy.mjs
-          if git diff --quiet -- DEPLOYED.md; then
-            echo "DEPLOYED.md already records this commit"
-            exit 0
+          node scripts/record-deploy.mjs || true
+          LIVE=$(curl -fsS "$PAGES_URL/api/version" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).commit")
+          {
+            echo "### Live build"
+            echo "Site reports \`$LIVE\`; this run pushed \`$GITHUB_SHA\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$LIVE" != "$GITHUB_SHA" ]; then
+            echo "::warning::The site is not serving this commit. Production is the ink-harbor-2f9 project, which this workflow does not deploy."
           fi
-          git config user.name "ink deploy"
-          git config user.email "deploy@users.noreply.github.com"
-          git add DEPLOYED.md
-          git commit -m "Record ${GITHUB_SHA:0:7} as live [skip ci]"
-          git push

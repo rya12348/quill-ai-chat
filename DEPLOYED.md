@@ -14,10 +14,12 @@ Compare that `commit` with `git rev-parse origin/main`. Equal means the site is
 the repository. This is the one check to run before believing anything about what
 is deployed — especially from an editor or agent that can only see GitHub.
 
-## Last deploy recorded here
+## Last snapshot
 
-`scripts/deploy-pages.mjs` rewrites this block after a deployment passes its
-smoke test, so the file never claims more than actually ran.
+`node scripts/record-deploy.mjs` copies the site's own answer into the block
+below, and nothing commits it automatically. Treat it as a dated snapshot, not a
+promise: **`/api/version` is the truth**, and a docs-only commit may sit on top of
+what is live.
 
 <!-- deploy:begin -->
 - live commit: `f347772a1ba37ae276c3ee1d1a1499b2c9824655`
