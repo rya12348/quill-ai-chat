@@ -33,6 +33,12 @@ The Apps page requests `/api/app-icon/<host>` on Ink's own origin. Never call a
 third-party favicon service (`google.com/s2/favicons`, gstatic) from the page:
 one request per tile names every app to the filter.
 
+## How to ship
+
+The commands, their order, and the traps live in `SHIPPING.md`. Read it before a
+deploy: `www.inkbrowser.dpdns.org` is the `ink-harbor-2f9` project, not `ink-jo3`,
+and `/api/version` is the only trustworthy answer to "what is live".
+
 ## Verify before shipping
 
 `npx tsc --noEmit` and `npm run build` must pass. Production is the Cloudflare
