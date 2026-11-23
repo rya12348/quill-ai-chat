@@ -18,6 +18,7 @@ import { ensureSchema, requireDb } from './db'
 import { publicLanes } from './public-ai'
 import { RATE_WINDOWS, rateLimit, tooManyRequests } from './rate-limit'
 import { sandboxConfigured } from './sandbox'
+import { BUILD_COMMIT, BUILD_TIME } from '../shared/build-stamp'
 import type { AppContext, Env } from './env'
 import { findPokiGameWrapper, installPokiAutostart, isPokiAssetHost, isPokiGameId, isPokiGameWrapperUrl, isPokiPage, isSafeGameSegment, pokiGameFromPage, pokiGamePublicPath, pokiGameWrapperResponse, proxyPokiCdnAsset, proxyPokiGameAsset, rewritePokiUrls } from './poki-game'
 import { serviceFallbackResponse } from './service-fallback'
@@ -238,6 +239,20 @@ app.route('/api/auth', localAuth)
 app.get('/api/health', (c) => {
   c.header('Cache-Control', 'private, no-store')
   return c.json({ ok: true })
+})
+// Which commit is serving. Public and uncached on purpose: an editor or agent
+// that can only see the repository can compare `git rev-parse origin/main` with
+// this answer and know whether the site is the code it is reading. The stamp is
+// filled in at upload (scripts/stamp-worker.mjs), so a local build says `dev`.
+app.get('/api/version', (c) => {
+  c.header('Cache-Control', 'no-store')
+  const stamped = !BUILD_COMMIT.startsWith('__')
+  return c.json({
+    ok: true,
+    site: 'ink',
+    commit: stamped ? BUILD_COMMIT : 'dev',
+    builtAt: BUILD_TIME.startsWith('__') ? null : BUILD_TIME,
+  })
 })
 // Aggregate 5xx count for the external monitor. It contains route names and
 // counts only; no user, query string, or body is stored.

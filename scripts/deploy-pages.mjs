@@ -3,7 +3,7 @@
 // runs in, so pages/wrangler.jsonc is the persistent project config and this
 // script supplies the one file Pages needs beside the static assets.
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { closeSync, copyFileSync, existsSync, openSync, readFileSync, rmSync, unlinkSync, writeSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, rmSync, unlinkSync, writeFileSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -145,6 +145,28 @@ async function smoke(url) {
     throw new Error(healthError ?? 'health check failed')
   }
 
+  // The stamp is the whole point of /api/version: a reader that only has the
+  // repository compares `git rev-parse origin/main` with what the site says it
+  // is running. Same edge catch-up window as health, so retry before calling a
+  // good build unstamped.
+  let version
+  let stampError = 'build stamp missing from /api/version'
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      version = await requestJson(`${url}/api/version`)
+      const reported = String(version.body?.commit ?? '')
+      if (version.response.status === 200 && reported.startsWith(commitHash)) break
+      stampError = `expected ${commitHash}, got ${version.response.status} ${reported || version.text.slice(0, 200)}`
+    } catch (error) {
+      stampError = error instanceof Error ? error.message : String(error)
+    }
+    if (attempt < 7) await new Promise((resolve) => setTimeout(resolve, 1_500))
+  }
+  if (!version || version.response.status !== 200 || !String(version.body?.commit ?? '').startsWith(commitHash)) {
+    throw new Error(`build stamp check failed (${stampError})`)
+  }
+  console.log(`smoke: /api/version reports ${version.body.commit}`)
+
   // The same reasoning as the health retry above, and the same failure I hit
   // twice: for a few seconds a fresh deployment answers /api/* with the SPA
   // document and a 404. That is the edge catching up, not a broken build.
@@ -240,7 +262,14 @@ async function smoke(url) {
 
 async function main() {
   const releaseLock = await acquireDeployLock()
-  copyFileSync(worker, pagesWorker)
+  // Stamp the uploaded copy, not dist/ai_chat/index.js: the source build stays
+  // reproducible, and the artifact that reaches Pages can say which commit it is.
+  writeFileSync(
+    pagesWorker,
+    readFileSync(worker, 'utf8')
+      .replaceAll('__INK_COMMIT__', commitHash)
+      .replaceAll('__INK_BUILD_TIME__', new Date().toISOString()),
+  )
   try {
     if (branch === 'main') {
       const backup = spawnSync(process.execPath, [join(root, 'scripts', 'db-backup.mjs')], { cwd: root, stdio: 'inherit' })
@@ -264,6 +293,9 @@ async function main() {
     if (!smokeUrl) throw new Error('Could not determine the deployment URL for the smoke test.')
     console.log(`smoke target: ${smokeUrl}`)
     await smoke(smokeUrl)
+    // DEPLOYED.md is written by scripts/record-deploy.mjs — by CI after a
+    // production deploy, and by hand after a local one — so this script leaves
+    // the working tree clean apart from the build output.
   } finally {
     rmSync(pagesWorker, { force: true })
     releaseLock()
