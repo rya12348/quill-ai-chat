@@ -892,13 +892,13 @@ html.dark .prose-chat pre {
      `.kr-ad-layout>.ds-root .ds-dock { bottom: var(--kr-ad-dock-lift) }`, which
      is a class-for-class tie that the later stylesheet wins. */
   .butter-dive .kr-ad-layout .ds-root .ds-dock {
-    bottom: 90px;
+    bottom: 90px !important;
   }
   .butter-dive .kr-ad-layout .ds-root .ds-next-wrap {
-    bottom: 90px;
+    bottom: 90px !important;
   }
   .butter-dive .kr-ad-layout .ds-root .ds-done {
-    bottom: 90px;
+    bottom: 90px !important;
   }
 }
 
