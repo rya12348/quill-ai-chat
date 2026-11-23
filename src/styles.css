@@ -876,3 +876,60 @@ html.dark .prose-chat pre {
   outline: 2px solid #4de3ff;
   outline-offset: 2px;
 }
+
+/* The real dive plays in a 561px-tall area at a 651px window: the bottom 90px
+   is its ad strip, and the dock, the next button and the intro are lifted clear
+   of it. Ink has no strip there, but matching the frame is what keeps the dock
+   at the height the real game draws it — flush with the sea floor, not pinned to
+   the window edge. */
+@media (max-width: 700px) {
+  .butter-dive {
+    /* The intro's surface sits 143px lower than the sheet's 57vh lands it at
+       this size; the title belongs at 39px, not above the screen. */
+    --ds-intro-lift: 143px;
+  }
+  /* Four selectors deep on purpose: the sheet lifts these with
+     `.kr-ad-layout>.ds-root .ds-dock { bottom: var(--kr-ad-dock-lift) }`, which
+     is a class-for-class tie that the later stylesheet wins. */
+  .butter-dive .kr-ad-layout .ds-root .ds-dock {
+    bottom: 90px;
+  }
+  .butter-dive .kr-ad-layout .ds-root .ds-next-wrap {
+    bottom: 90px;
+  }
+  .butter-dive .kr-ad-layout .ds-root .ds-done {
+    bottom: 90px;
+  }
+}
+
+/* The intro is positioned from the sheet's own coordinates at a 651px window:
+   the wordmark at 39, the tagline at 110, the discovery card at 323, the button
+   at 415 and the meta row at 484. The sheet reaches those through a translate
+   the dive shares with the camera, so pin the intro frame directly instead of
+   guessing at its 57vh. */
+@media (max-width: 700px) {
+  .butter-dive .ds-root[data-phase='intro'] .ds-world {
+    transform: none !important;
+  }
+  .butter-dive .ds-root[data-phase='intro'] .ds-surface {
+    top: 39px !important;
+  }
+  .butter-dive .ds-root[data-phase='intro'] .ds-surface .ds-title {
+    top: 0 !important;
+  }
+  .butter-dive .ds-root[data-phase='intro'] .ds-intro {
+    top: 202px !important;
+    bottom: auto !important;
+  }
+}
+
+/* The krill belongs above the descent button, at the same 64px the real intro
+   gives it — the component parks it at 0,0 for the intro, which is the corner
+   of the sea rather than the middle of the home screen. */
+@media (max-width: 700px) {
+  .butter-dive .ds-root[data-phase='intro'] .ds-mascot {
+    top: 404px !important;
+    left: 236px !important;
+    margin: 0 !important;
+  }
+}

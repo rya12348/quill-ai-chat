@@ -574,7 +574,12 @@ export function ButterDive() {
             // The intro's waterline is set in viewport units rather than from a
             // measured height: the panel around the page can settle after mount,
             // and a stale number sinks the title under the surface.
-            style={{ transform: phase === 'intro' ? 'translate3d(0, 57vh, 0)' : `translate3d(0, ${camera}px, 0)` }}
+            style={{
+              transform:
+                phase === 'intro'
+                  ? 'translate3d(0, calc(57vh + var(--ds-intro-lift, 0px)), 0)'
+                  : `translate3d(0, ${camera}px, 0)`,
+            }}
           >
             <div className="ds-surface" style={{ top: -336 }}>
               <div className="ds-title">
@@ -606,9 +611,10 @@ export function ButterDive() {
               </div>
             ))}
 
-            {phase !== 'intro' &&
-              phase !== 'error' &&
-              phase !== 'loading' &&
+            {/* The ladder is the answer's landing strip: the real dive only draws
+                it once an answer has landed, so the tiers appear in the water
+                with the quote beside them instead of labelling an empty sea. */}
+            {phase === 'feedback' &&
               Object.entries(TIERS).map(([id, tier]) => (
               <div
                 key={id}
@@ -628,7 +634,9 @@ export function ButterDive() {
                   PROMPT {round + 1} OF {ROUNDS}
                 </div>
                 <div className="prompt">{prompt.text}</div>
-                <div className="hint">▼ rarer answers sink deeper ▼</div>
+                {/* Only before the clock runs: the real card drops the line the
+                    moment answering starts, so the prompt owns the panel. */}
+                {phase === 'preview' && <div className="hint">▼ rarer answers sink deeper ▼</div>}
               </div>
             )}
 
