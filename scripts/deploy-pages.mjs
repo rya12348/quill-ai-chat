@@ -264,12 +264,8 @@ async function main() {
   const releaseLock = await acquireDeployLock()
   // Stamp the uploaded copy, not dist/ai_chat/index.js: the source build stays
   // reproducible, and the artifact that reaches Pages can say which commit it is.
-  writeFileSync(
-    pagesWorker,
-    readFileSync(worker, 'utf8')
-      .replaceAll('__INK_COMMIT__', commitHash)
-      .replaceAll('__INK_BUILD_TIME__', new Date().toISOString()),
-  )
+  const stamp = JSON.stringify({ commit: commitHash, builtAt: new Date().toISOString() }).replaceAll('"', '\\"')
+  writeFileSync(pagesWorker, readFileSync(worker, 'utf8').replaceAll('__INK_STAMP__', stamp))
   try {
     if (branch === 'main') {
       const backup = spawnSync(process.execPath, [join(root, 'scripts', 'db-backup.mjs')], { cwd: root, stdio: 'inherit' })

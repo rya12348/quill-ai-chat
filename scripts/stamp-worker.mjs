@@ -27,8 +27,8 @@ const commit = `${process.env.PAGES_COMMIT_HASH?.trim() || git(['rev-parse', 'HE
 }`
 const builtAt = new Date().toISOString()
 
-const stamped = readFileSync(source, 'utf8')
-  .replaceAll('__INK_COMMIT__', commit)
-  .replaceAll('__INK_BUILD_TIME__', builtAt)
-writeFileSync(target, stamped)
+// Escaped quotes so this works whether the bundle emitted the placeholder in
+// single or double quotes; a JS string turns `\"` back into `"` either way.
+const stamp = JSON.stringify({ commit, builtAt }).replaceAll('"', '\\"')
+writeFileSync(target, readFileSync(source, 'utf8').replaceAll('__INK_STAMP__', stamp))
 console.log(`stamped ${target} with ${commit} at ${builtAt}`)

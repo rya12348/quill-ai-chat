@@ -18,7 +18,7 @@ import { ensureSchema, requireDb } from './db'
 import { publicLanes } from './public-ai'
 import { RATE_WINDOWS, rateLimit, tooManyRequests } from './rate-limit'
 import { sandboxConfigured } from './sandbox'
-import { BUILD_COMMIT, BUILD_TIME } from '../shared/build-stamp'
+import { BUILD_STAMP } from '../shared/build-stamp'
 import type { AppContext, Env } from './env'
 import { findPokiGameWrapper, installPokiAutostart, isPokiAssetHost, isPokiGameId, isPokiGameWrapperUrl, isPokiPage, isSafeGameSegment, pokiGameFromPage, pokiGamePublicPath, pokiGameWrapperResponse, proxyPokiCdnAsset, proxyPokiGameAsset, rewritePokiUrls } from './poki-game'
 import { serviceFallbackResponse } from './service-fallback'
@@ -246,12 +246,17 @@ app.get('/api/health', (c) => {
 // filled in at upload (scripts/stamp-worker.mjs), so a local build says `dev`.
 app.get('/api/version', (c) => {
   c.header('Cache-Control', 'no-store')
-  const stamped = !BUILD_COMMIT.startsWith('__')
+  let stamp: { commit?: unknown; builtAt?: unknown } = {}
+  try {
+    stamp = JSON.parse(BUILD_STAMP) as { commit?: unknown; builtAt?: unknown }
+  } catch {
+    // Unstamped build (local dev, or an upload that skipped the stamp step).
+  }
   return c.json({
     ok: true,
     site: 'ink',
-    commit: stamped ? BUILD_COMMIT : 'dev',
-    builtAt: BUILD_TIME.startsWith('__') ? null : BUILD_TIME,
+    commit: typeof stamp.commit === 'string' ? stamp.commit : 'dev',
+    builtAt: typeof stamp.builtAt === 'string' ? stamp.builtAt : null,
   })
 })
 // Aggregate 5xx count for the external monitor. It contains route names and
