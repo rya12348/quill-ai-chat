@@ -76,11 +76,11 @@ function clientId(): string {
 }
 
 const TIER_LABEL: Record<string, string> = {
-  plankton: 'PLANKTON',
-  tooclever: 'TOO CLEVER',
-  schooler: 'SCHOOLER',
-  rare: 'RARE',
-  deepcut: 'DEEP CUT',
+  plankton: 'MARGARINE',
+  tooclever: 'WHIPPED',
+  schooler: 'SALTED',
+  rare: 'CULTURED',
+  deepcut: 'BROWN BUTTER',
   krillion: 'ONE IN A BUTTER CHURN',
 }
 const TIER_COLOR: Record<string, string> = {

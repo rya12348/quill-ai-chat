@@ -39,21 +39,21 @@ const PLAYER_KEY = 'butter.dive.player'
 
 /** The shipped tier ladder: name, points, depth and the line under the banner. */
 const TIERS: Record<TierId, { name: string; score: number; color: string; blurb: string }> = {
-  plankton: { name: 'Plankton', score: 10, color: '#8fa3c4', blurb: 'The answer everyone blurts out.' },
+  plankton: { name: 'Margarine', score: 10, color: '#8fa3c4', blurb: 'Not even butter.' },
   tooclever: {
-    name: 'Too Clever',
+    name: 'Whipped',
     score: 15,
     color: '#ff9f43',
-    blurb: 'A famously “obscure” pick. Everyone reaches for it.',
+    blurb: 'Puffed up. Mostly air.',
   },
-  schooler: { name: 'Schooler', score: 30, color: '#4de3ff', blurb: 'Solid — swims with the school.' },
-  rare: { name: 'Rare', score: 60, color: '#ff5252', blurb: 'Genuinely uncommon. Nice pull.' },
-  deepcut: { name: 'Deep Cut', score: 85, color: '#9d7bff', blurb: 'True obscurity. Few go this deep.' },
+  schooler: { name: 'Salted', score: 30, color: '#4de3ff', blurb: 'The standard block. Solid.' },
+  rare: { name: 'Cultured', score: 60, color: '#ff5252', blurb: 'Tangier. Takes work to find.' },
+  deepcut: { name: 'Brown Butter', score: 85, color: '#9d7bff', blurb: 'Nutty, dark, and hard-won.' },
   krillion: {
     name: 'One in a Butter Churn',
     score: 100,
     color: '#ffd166',
-    blurb: 'The designated gem. Trench floor.',
+    blurb: 'The designated gem. Churn floor.',
   },
 }
 
@@ -61,12 +61,12 @@ const TIERS: Record<TierId, { name: string; score: number; color: string; blurb:
  *  the card an answer of this tier should reach, which is what the dive log
  *  plots against. */
 const TIER_EMOJI: Record<TierId, string> = {
-  plankton: '🫧',
-  tooclever: '🤡',
-  schooler: '🐟',
-  rare: '🦑',
-  deepcut: '🏮',
-  krillion: '🌟',
+  plankton: '🧈',
+  tooclever: '🌀',
+  schooler: '🧂',
+  rare: '🥛',
+  deepcut: '🥜',
+  krillion: '✨',
 }
 const TIER_DEPTH: Record<TierId, number> = {
   plankton: 0.08,
@@ -137,7 +137,7 @@ const HOW_TO_PLAY = [
   '7 prompts a day. same for everyone.',
   '25 seconds to name one thing.',
   'rare answers score big. obvious ones float.',
-  'the pick that feels clever? the school thought of it too.',
+  'the pick that feels clever? everyone reached for it too.',
   'every point sinks you 10 metres. 700 is the trench.',
   'one dive per day. no second chances.',
 ]
@@ -145,10 +145,10 @@ const HOW_TO_PLAY = [
 /** The shipped score bands: what your seven answers add up to, and the line the
  *  results page reads out for the band you landed in. */
 const SCORE_BANDS: { min: number; tier: TierId; range: string; verdict: string }[] = [
-  { min: 0, tier: 'plankton', range: '0–150', verdict: 'Plankton. Plenty of ocean left down there.' },
-  { min: 151, tier: 'schooler', range: '151–250', verdict: 'Schooler. Swimming with the school.' },
-  { min: 251, tier: 'rare', range: '251–350', verdict: 'Rare. Below the thermocline. Nice.' },
-  { min: 351, tier: 'deepcut', range: '351–449', verdict: 'Deep cut. Seriously deep dive.' },
+  { min: 0, tier: 'plankton', range: '0–150', verdict: 'Margarine. Not even butter, and plenty of ocean left.' },
+  { min: 151, tier: 'schooler', range: '151–250', verdict: 'Salted. The standard block. Solid.' },
+  { min: 251, tier: 'rare', range: '251–350', verdict: 'Cultured. Below the thermocline. Nice.' },
+  { min: 351, tier: 'deepcut', range: '351–449', verdict: 'Brown butter. Nutty, dark, seriously deep.' },
   { min: 450, tier: 'krillion', range: '450+', verdict: 'One in a butter churn. Trench dweller. Absurd.' },
 ]
 
@@ -289,7 +289,12 @@ export function ButterDive() {
   const [endsAt, setEndsAt] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [busy, setBusy] = useState(false)
-  const [viewport, setViewport] = useState(() => (typeof window === 'undefined' ? 800 : window.innerHeight))
+  // The dive's frame, not the window: the ad layout takes its strip off the
+  // bottom before the stage is measured, and a stage caught mid-layout can
+  // report the world's own height instead.
+  const [viewport, setViewport] = useState(() =>
+    typeof window === 'undefined' ? 800 : window.innerHeight - (window.innerWidth >= 1060 ? 90 : 50),
+  )
   const [stageWidth, setStageWidth] = useState(() => (typeof window === 'undefined' ? 426 : window.innerWidth))
   // The height the shipped engine solves for the prompt card, in stage pixels.
   const [cardTarget, setCardTarget] = useState(0)
@@ -677,7 +682,10 @@ export function ButterDive() {
   // The stage is already the shipped game's frame: the ad layout insets the root
   // by the rails and the bottom strip, so the engine's "middle of the frame" is
   // this box's height — no strip to subtract a second time.
-  const diveFrame = Math.max(240, viewport)
+  const diveFrame = Math.max(
+    240,
+    Math.min(viewport, typeof window === 'undefined' ? viewport : window.innerHeight),
+  )
   // The depth the current round's card was dropped at; the card stays pinned
   // there while the camera sinks, exactly as the engine leaves it behind.
   const roundDepth = results.slice(0, round).reduce((sum, result) => sum + result.score, 0) * METRES_PER_POINT
@@ -779,6 +787,23 @@ export function ButterDive() {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
+  }, [])
+
+  // First paint, before the loop's first frame: the world belongs at the intro
+  // station and the score at today's total, so a throttled tab (no rAF) still
+  // shows the surface where it sits instead of the bare top of the world.
+  useLayoutEffect(() => {
+    const frame =
+      typeof window === 'undefined'
+        ? viewport
+        : Math.max(240, window.innerHeight - (window.innerWidth >= 1060 ? 90 : 50))
+    if (worldRef.current) {
+      worldRef.current.style.transform = `translate3d(0, ${frame / 2 + 90}px, 0)`
+    }
+    if (scoreNumRef.current) scoreNumRef.current.textContent = String(points)
+    if (vignetteRef.current) vignetteRef.current.style.opacity = '0.25'
+    // The seed is deliberately mount-only; the loop owns these nodes after it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // The shipped camera loop, ported: the target eases in on a 2200ms
