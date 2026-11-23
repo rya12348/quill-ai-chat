@@ -16,7 +16,7 @@ import { Sea } from './dive-sea'
  */
 
 type TierId = 'plankton' | 'tooclever' | 'schooler' | 'rare' | 'deepcut' | 'krillion'
-type Phase = 'loading' | 'intro' | 'preview' | 'answering' | 'feedback' | 'done' | 'error'
+type Phase = 'loading' | 'intro' | 'preview' | 'answering' | 'sinking' | 'feedback' | 'done' | 'error'
 
 type Prompt = { id: string; text: string }
 type Day = { date: string; dayNumber: number; resetsAt?: string; prompts: Prompt[]; source?: 'live' | 'local' }
@@ -75,6 +75,37 @@ const TIER_DEPTH: Record<TierId, number> = {
   rare: 0.6,
   deepcut: 0.82,
   krillion: 0.97,
+}
+
+/** How long an answer takes to fall, per tier, read out of the shipped table. */
+const SINK_MS: Record<TierId, number> = {
+  plankton: 3400,
+  tooclever: 3000,
+  schooler: 3000,
+  rare: 3400,
+  deepcut: 4300,
+  krillion: 4600,
+}
+
+/** The sideways wobble the answer chip swims through while it sinks, with the
+ *  tilt the engine pairs with it. Every tier has its own curve. */
+function chipWobble(tier: TierId, t: number): { x: number; rot: number } {
+  switch (tier) {
+    case 'plankton': {
+      const x = 36 * Math.sin(7 * t) * (1 - 0.25 * t)
+      return { x, rot: 0.55 * x }
+    }
+    case 'tooclever':
+      return { x: 7 * Math.sin(42 * t) + (Math.random() - 0.5) * 4, rot: (Math.random() - 0.5) * 6 }
+    case 'krillion': {
+      const x = Math.sin(24 * t) * (1 - t) * 26
+      return { x, rot: 0.5 * x }
+    }
+    default: {
+      const x = Math.sin(16 * t) * (1 - t) * 14
+      return { x, rot: 0.4 * x }
+    }
+  }
 }
 
 /** The water column, in metres, exactly as the real dive labels it. */
@@ -262,6 +293,8 @@ export function ButterDive() {
   const [stageWidth, setStageWidth] = useState(() => (typeof window === 'undefined' ? 426 : window.innerWidth))
   // The height the shipped engine solves for the prompt card, in stage pixels.
   const [cardTarget, setCardTarget] = useState(0)
+  // How far through its fall the answer chip is, 0 → 1.
+  const [sinkT, setSinkT] = useState(0)
   const cardRef = useRef<HTMLDivElement | null>(null)
   const dockRef = useRef<HTMLFormElement | null>(null)
   const [resetsIn, setResetsIn] = useState('')
@@ -375,7 +408,8 @@ export function ButterDive() {
   // Persist mid-dive progress so a refresh resumes the same run, as the real
   // dive does, instead of handing out a second string of prompts.
   useEffect(() => {
-    if (!day || (phase !== 'preview' && phase !== 'answering' && phase !== 'feedback')) return
+    if (!day || (phase !== 'preview' && phase !== 'answering' && phase !== 'sinking' && phase !== 'feedback'))
+      return
     saveGame(day.date, {
       runId: runIdRef.current,
       results,
@@ -390,7 +424,7 @@ export function ButterDive() {
     setCorrection(null)
     setRejected(null)
     setEndsAt(null)
-    setPhase('feedback')
+    setPhase('sinking')
   }, [round])
 
   const miss = useCallback(
@@ -502,6 +536,31 @@ export function ButterDive() {
     if (phase === 'answering') inputRef.current?.focus()
   }, [phase, round])
 
+  // The answer falls for exactly as long as the shipped table allows, then it
+  // lands and the banner takes its place — the chip is never left hanging.
+  useEffect(() => {
+    if (phase !== 'sinking') return
+    const result = results[results.length - 1]
+    const duration = result?.tier ? SINK_MS[result.tier] : 900
+    const started = performance.now()
+    let raf = 0
+    setSinkT(0)
+    const step = (now: number) => {
+      const t = Math.min(1, (now - started) / duration)
+      setSinkT(t)
+      if (t < 1) raf = requestAnimationFrame(step)
+      else setPhase('feedback')
+    }
+    raf = requestAnimationFrame(step)
+    // A tab that is not painting holds rAF back; the dive still has to land, so
+    // the fall is timed on the clock as well.
+    const landing = window.setTimeout(() => setPhase('feedback'), duration + 120)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.clearTimeout(landing)
+    }
+  }, [phase, results])
+
   const begin = useCallback(() => {
     setRound(0)
     setResults([])
@@ -559,7 +618,10 @@ export function ButterDive() {
 
   const prompt = day?.prompts[round] ?? null
   const last = results[results.length - 1] ?? null
-  const live = phase === 'preview' || phase === 'answering' || phase === 'feedback'
+  // The engine advances its round counter when an answer lands, not when the
+  // player presses descend, so the dots and the label are one ahead of the
+  // banner for that moment.
+  const landed = results.length - (phase === 'sinking' ? 1 : 0)
   // Everything below is the shipped engine's own arithmetic, read out of its
   // bundle rather than eyeballed:
   //
@@ -596,34 +658,63 @@ export function ButterDive() {
   // there while the camera sinks, exactly as the engine leaves it behind.
   const roundDepth = results.slice(0, round).reduce((sum, result) => sum + result.score, 0) * METRES_PER_POINT
   // 2px of water for every metre: the dive's whole vertical scale.
+  // Where this round's answer comes to rest, in metres: a landed answer sinks
+  // its own points (10 m each), a miss drifts 40 m below the round's start.
+  const landing = last
+    ? last.tier
+      ? roundDepth + last.score * METRES_PER_POINT
+      : roundDepth + 40
+    : roundDepth
+  // The chip's fall: eased, and per-tier — plankton bobs on a cosine.
+  const sinkE =
+    last?.tier === 'plankton' ? -(Math.cos(Math.PI * sinkT) - 1) / 2 : 1 - Math.pow(1 - sinkT, 3)
+  const chipDepth = roundDepth + 90 + (landing - (roundDepth + 90)) * sinkE
+  const wobble = last?.tier ? chipWobble(last.tier, sinkE) : { x: 0, rot: 0 }
   const camera =
     phase === 'intro' || phase === 'error'
       ? 0
       : phase === 'done'
         ? Math.round(-depth * 2)
-        : phase === 'feedback'
-          ? // Once an answer lands the camera sinks to 30m below it, which parks
-            // the banner dead centre instead of under the HUD.
-            Math.round(diveFrame / 2 - depth * 2 - 60)
-          : Math.round(cardTarget - roundDepth * 2)
+        : phase === 'sinking'
+          ? // The camera rides 30 m under the falling answer, which is what
+            // keeps it in the middle of the frame.
+            Math.round(diveFrame / 2 - (chipDepth + 30) * 2)
+          : phase === 'feedback'
+            ? // Once it lands the camera stops 30 m under it, which parks the
+              // banner dead centre instead of under the HUD.
+              Math.round(diveFrame / 2 - (landing + 30) * 2)
+            : Math.round(cardTarget - roundDepth * 2)
   const cardTop = roundDepth * 2
   // Where the card sits on screen, which is also where the krill waits.
   const cardScreen = phase === 'feedback' ? Math.round(diveFrame / 2 - 60) : cardTarget
+  // The depth readout rides the fall with the chip instead of jumping.
+  const shownDepth = phase === 'sinking' ? Math.round(roundDepth + (depth - roundDepth) * sinkE) : depth
   const promptLabel =
     phase === 'intro'
       ? 'SURFACE'
       : results.length >= ROUNDS
         ? 'DIVE COMPLETE'
-        : `PROMPT ${Math.min(round + 1, ROUNDS)} OF ${ROUNDS}`
+        : `PROMPT ${Math.min(landed + 1, ROUNDS)} OF ${ROUNDS}`
 
   return (
     <div className="dive-page butter-dive relative min-h-0 flex-1 overflow-hidden" data-phase={phase}>
       <div className="kr-ad-layout">
-      <div className="ds-root" data-phase={phase === 'error' || phase === 'loading' ? 'intro' : phase}>
+      <div
+        className="ds-root"
+        data-sink={phase === 'sinking' ? '1' : undefined}
+        data-phase={
+          phase === 'error' || phase === 'loading' ? 'intro' : phase === 'sinking' ? 'answering' : phase
+        }
+      >
         <div className="ds-stage" ref={stageRef}>
           <Sea depthRef={depthRef} />
           <div
-            className={`ds-world${phase === 'intro' ? '' : ' ds-reveal'}`}
+            // The engine turns the water's captions on while the dive is live and
+            // takes them away the moment an answer lands (its `ds-reveal` class),
+            // so a landed banner sits in clean water.
+            className={`ds-world${
+              phase === 'preview' || phase === 'answering' || phase === 'sinking' ? ' ds-reveal' : ''
+            }`}
             // The intro's waterline is set in viewport units rather than from a
             // measured height: the panel around the page can settle after mount,
             // and a stale number sinks the title under the surface.
@@ -667,27 +758,53 @@ export function ButterDive() {
             {/* The ladder is the answer's landing strip: the real dive only draws
                 it once an answer has landed, so the tiers appear in the water
                 with the quote beside them instead of labelling an empty sea. */}
-            {phase === 'feedback' &&
-              Object.entries(TIERS).map(([id, tier]) => (
+            {(phase === 'sinking' || phase === 'feedback') &&
+              Object.entries(TIERS).map(([id, tier]) => {
+                // A landed answer's own rung is the line its banner sits on; the
+                // engine drops it as the banner arrives.
+                if (phase === 'feedback' && last?.tier === id) return null
+                const rung = roundDepth + tier.score * METRES_PER_POINT
+                // The rung lights up as the chip crosses it.
+                const passed = (phase === 'sinking' ? chipDepth : landing) > rung - 4
+                return (
+                  <div
+                    key={id}
+                    className={`ds-tierline${passed ? ' passed' : ''}`}
+                    style={{
+                      // Each rung sits where an answer of that tier would land
+                      // from the depth this round started at.
+                      top: rung * 2,
+                      ['--tc' as string]: `var(--tier-${id})`,
+                    }}
+                  >
+                    <div className="tag">
+                      <img src={`/tiers/${id}.png`} alt="" />
+                      {tier.name.toUpperCase()} &middot; {tier.score}
+                    </div>
+                  </div>
+                )
+              })}
+
+            {/* The answer itself, falling: a chip in the tier's colour that swims
+                down to its own depth and then lands as the banner. */}
+            {phase === 'sinking' && last?.tier && (
               <div
-                key={id}
-                className="ds-tierline"
+                className={`ds-chip ds-px${last.tier === 'krillion' ? ' gold' : ''}`}
                 style={{
-                  // Each rung sits where an answer of that tier would land from
-                  // the depth this round started at, the way the engine draws it.
-                  top: (roundDepth + tier.score * METRES_PER_POINT) * 2,
-                  ['--tc' as string]: `var(--tier-${id})`,
+                  ['--cc' as string]: `var(--tier-${last.tier})`,
+                  transform: `translate3d(calc(-50% + ${wobble.x.toFixed(2)}px), ${(chipDepth * 2).toFixed(2)}px, 0) rotate(${wobble.rot.toFixed(2)}deg)`,
                 }}
               >
-                <div className="tag">
-                  <img src={`/tiers/${id}.png`} alt="" />
-                    {tier.name.toUpperCase()} &middot; {tier.score}
-                  </div>
-                </div>
-              ))}
+                “{(last.answer ?? last.rawAnswer ?? '').toUpperCase()}”
+              </div>
+            )}
 
-            {day && prompt && live && phase !== 'feedback' && (
-              <div ref={cardRef} className="ds-card ds-px" style={{ top: cardTop, animationDelay: '0.45s' }}>
+            {day && prompt && (phase === 'preview' || phase === 'answering' || phase === 'sinking') && (
+              <div
+                ref={cardRef}
+                className={`ds-card ds-px${phase === 'sinking' ? ' gone' : ''}`}
+                style={{ top: cardTop, animationDelay: '0.45s' }}
+              >
                 <div className="rnd">
                   PROMPT {round + 1} OF {ROUNDS}
                 </div>
@@ -704,7 +821,7 @@ export function ButterDive() {
                 style={{
                   // The banner is pinned to where the answer landed, and the
                   // camera is what brings it into view.
-                  top: depth * 2,
+                  top: landing * 2,
                   ['--tc' as string]: last.tier ? `var(--tier-${last.tier})` : 'var(--tier-miss)',
                 }}
               >
@@ -713,6 +830,9 @@ export function ButterDive() {
                 <div className="tans">{last.answer ? `“${last.answer}”` : '—'}</div>
                 <div className="tpts">
                   <b>+{last.score} PTS</b>
+                  {last.score > 0
+                    ? ` · sink ${(last.score * METRES_PER_POINT).toLocaleString('en-US')}m`
+                    : null}
                 </div>
                 <div className="tsub">
                   {last.quip ??
@@ -735,7 +855,7 @@ export function ButterDive() {
           <div className="ds-hud">
             <div className="ds-pod ds-px">
               <div className="label">DEPTH</div>
-              <div className="ds-depth-num">{depth.toLocaleString('en-US')}m</div>
+              <div className="ds-depth-num">{shownDepth.toLocaleString('en-US')}m</div>
             </div>
             <div className="ds-hud-mid">
               <div className="ds-dots">
@@ -743,9 +863,9 @@ export function ButterDive() {
                   <i
                     key={index}
                     className={
-                      index < results.length
+                      index < landed
                         ? 'done'
-                        : index === round && phase !== 'done' && phase !== 'intro'
+                        : index === landed && phase !== 'done' && phase !== 'intro'
                           ? 'cur'
                           : ''
                     }

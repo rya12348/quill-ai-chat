@@ -661,6 +661,12 @@ html.dark .prose-chat pre {
   transition: transform 2.2s cubic-bezier(0.65, 0, 0.35, 1);
 }
 
+/* While an answer is falling the camera is re-solved every frame to stay 30m
+   under the chip, so the world's own 2200ms tween would drag it behind. */
+.butter-dive .ds-root[data-sink='1'] .ds-world {
+  transition: none;
+}
+
 .butter-dive-actions {
   display: flex;
   justify-content: center;
