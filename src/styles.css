@@ -803,6 +803,19 @@ html.dark .prose-chat pre {
    on a phone. Everything bottom-anchored (intro, dock, DESCEND) and everything
    pinned to the right edge (mute, score pod) is measured from that box, which is
    why Butter's copy was landing a rail's width out. */
+/* The foreground canvas is the game's, not the window's: the depth ruler is
+   drawn 14px inside its right edge, and on the real dive that edge is the
+   920px column's (1085px of a 1280 window), not the window's. */
+@media (min-width: 701px) {
+  .butter-dive .ds-stage > .ds-fore {
+    inset: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 100%;
+  }
+}
+
 .butter-dive .kr-ad-layout {
   --kr-ad-top: 0px;
   --kr-ad-bottom: 50px;
@@ -930,11 +943,14 @@ html.dark .prose-chat pre {
   top: 47%;
 }
 @media (max-width: 700px) {
+  /* There is no room beside the card on a phone, so the krill swims
+     underneath it. `!important` because the component places it beside the
+     card with an inline `left` that would otherwise park it off-screen. */
   .butter-dive .ds-root[data-phase='preview'] .ds-mascot,
   .butter-dive .ds-root[data-phase='answering'] .ds-mascot,
   .butter-dive .ds-root[data-phase='feedback'] .ds-mascot {
-    left: 50%;
-    top: 74%;
+    left: 50% !important;
+    top: 74% !important;
   }
 }
 
