@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 
+import { Fore } from './dive-fore'
 import { Sea } from './dive-sea'
 
 /**
@@ -534,15 +535,26 @@ export function ButterDive() {
   // can settle after mount, and a stale height parks the waterline in the wrong
   // place. 0.57 leaves the title and the boat in shot over the sky; 0.26 parks
   // the prompt card under the HUD the way the shipped dive does.
-  const stageHeight = typeof window === 'undefined' ? viewport : window.innerHeight
-  const anchor =
+  // Measured off krillion.io at 1440x900 (its stage is 802 tall): the camera
+  // parks at 32.2% of the stage -- the boat, the sky and the sun are already
+  // above the top edge, leaving open water -- and the prompt card hangs 6.9%
+  // lower, at 39% of the stage. Both are read from the stage height so the
+  // composition holds on a shorter panel.
+  const playCamera = Math.round(viewport * 0.322)
+  // The sheet lifts every card 55px (transform: scale(.92) translateY(46px)),
+  // which is already counted in the shipped card's 313px resting place.
+  const cardLift = 55
+  // The dive sinks 2px for every metre the score buys, and the card rides with
+  // the camera so it holds its place until the next prompt arrives.
+  const camera =
     phase === 'intro' || phase === 'error'
-      ? Math.round(stageHeight * 0.57)
+      ? 0
       : phase === 'done'
-        ? 0
-        : Math.round(stageHeight * 0.26)
-  const camera = Math.round(anchor - depth * 2)
+        ? Math.round(-depth * 2)
+        : Math.round(playCamera - depth * 2)
   const cardTop = depth * 2
+  // Where the card lands on screen, which is also where the krill waits.
+  const cardScreen = playCamera + cardLift
   const promptLabel =
     phase === 'intro'
       ? 'SURFACE'
@@ -593,7 +605,7 @@ export function ButterDive() {
               </div>
             ))}
 
-            {day && prompt && live && (
+            {day && prompt && (phase === 'preview' || phase === 'answering') && (
               <div className="ds-card ds-px" style={{ top: cardTop, animationDelay: '0.45s' }}>
                 <div className="rnd">
                   PROMPT {round + 1} OF {ROUNDS}
@@ -619,6 +631,8 @@ export function ButterDive() {
               </div>
             )}
           </div>
+
+          <Fore depthRef={depthRef} />
 
           <div className="ds-dim" />
           <div className="ds-vignette" />
@@ -652,7 +666,17 @@ export function ButterDive() {
             </div>
           </div>
 
-          <div className="ds-mascot" title="a friend">
+          <div
+            className="ds-mascot"
+            title="a friend"
+            style={
+              phase === 'intro' || phase === 'error'
+                ? { top: 0, left: 0, margin: 0 }
+                : // Just outside the card's top-left corner: 157px to its left and
+                  // a few pixels down, exactly where the shipped krill swims.
+                  { top: cardScreen + 5, left: 'calc(50% - 402px)', margin: 0, bottom: 'auto' }
+            }
+          >
             <span className="ds-mascot-sprite">
               <img src="/tiers/krillion.png" alt="krill" />
             </span>
