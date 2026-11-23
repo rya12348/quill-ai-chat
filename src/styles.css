@@ -903,6 +903,15 @@ html.dark .prose-chat pre {
   height: 18px;
 }
 
+/* The real door owns the whole window. Ink's chat shell would otherwise hold it
+   in a 1004px column beside the sidebar, which shifts every card 96px right of
+   where the shipped page draws it. */
+.butter-page {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+
 /* The sheet asks for the game's own fonts through custom properties; Ink's
    theme does not define them, so without this every word falls back to Inter
    and the dive stops looking like the dive. VT323 is the face the sheet loads. */
@@ -1060,4 +1069,30 @@ html.dark .prose-chat pre {
 .butter-dive .consumer-privacy-btn:hover {
   border-color: #4de3ff;
   color: #e8f1ff;
+}
+
+/* Butter's two pages are the game's own pages: the shipped dive and party fill
+   the window, so the shell's sidebar and its mobile header are not part of them.
+   The game supplies its own menu in the corner instead. */
+.app-shell--game > aside,
+.app-shell--game header {
+  display: none !important;
+}
+
+/* Krillion puts its site menu in the party door's corner, not a text link: the
+   corner control is that menu — the dive menu's own 44×44 plate and three bars. */
+.butter-page .pf-dive-link.pf-dive-corner {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  font-size: 0;
+  color: #e8f1ff;
+  background: rgba(11, 21, 38, 0.75);
+  box-shadow: 0 0 0 2px rgba(6, 13, 26, 0.9);
+}
+.butter-page .pf-dive-link.pf-dive-corner svg {
+  width: 20px;
+  height: 20px;
 }

@@ -44,12 +44,15 @@ export function Shell() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar') === 'closed')
   const location = useLocation()
   const isChatSurface = location.pathname === '/' || location.pathname === '/room' || location.pathname.startsWith('/c/')
+  // Butter's two pages are the game's own pages: the shipped dive and party fill
+  // the window, so Ink's sidebar and mobile header stay out of them.
+  const isGameSurface = location.pathname === '/butter' || location.pathname.startsWith('/butter/')
   useEffect(() => setDrawer(false), [location.pathname, location.search])
   useEffect(() => {
     localStorage.setItem('sidebar', collapsed ? 'closed' : 'open')
   }, [collapsed])
   return (
-    <div className="flex h-dvh overflow-hidden">
+    <div className={cx('flex h-dvh overflow-hidden', isGameSurface && 'app-shell--game')}>
       {collapsed ? (
         <aside className="hidden w-12 shrink-0 flex-col items-center border-r border-line bg-bg py-2 md:flex" aria-label="Collapsed sidebar">
           <Button variant="ghost" size="icon" aria-label="Show sidebar" title="Show sidebar" onClick={() => setCollapsed(false)}>
