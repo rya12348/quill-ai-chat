@@ -912,6 +912,15 @@ html.dark .prose-chat pre {
   z-index: 30;
 }
 
+/* The door is inset by the same 180px ad rail the real page reserves at
+   desktop, which is what puts WHO'S PLAYING at 210 and the description at 472
+   rather than 30 and 382. */
+@media (min-width: 701px) {
+  .butter-page .pf-door {
+    left: 180px;
+  }
+}
+
 /* The sheet asks for the game's own fonts through custom properties; Ink's
    theme does not define them, so without this every word falls back to Inter
    and the dive stops looking like the dive. VT323 is the face the sheet loads. */
@@ -1095,4 +1104,161 @@ html.dark .prose-chat pre {
 .butter-page .pf-dive-link.pf-dive-corner svg {
   width: 20px;
   height: 20px;
+}
+
+/* Krillion's site menu: a centred panel of pixel tiles over whatever is running,
+   opened by the three bars in the game's top-left corner. */
+.butter-menu {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 34px 16px;
+  overflow-y: auto;
+  background: rgba(2, 4, 10, 0.62);
+  font-family: VT323, ui-monospace, monospace;
+}
+.butter-menu-panel {
+  width: min(430px, 100%);
+  padding: 22px;
+  background: #101d33;
+  color: #7d93b8;
+  box-shadow:
+    0 0 0 2px #050a14,
+    0 0 0 4px #1b3050,
+    0 6px 0 4px #0b1424,
+    0 24px 60px rgba(0, 0, 0, 0.55);
+}
+.butter-menu-panel > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.butter-menu-eyebrow {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 1.82px;
+  text-transform: uppercase;
+  color: #6fe6ff;
+}
+.butter-menu-title {
+  margin: 0;
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #e8f1ff;
+  text-shadow: 2px 0 #ff5d8f, -2px 0 #6fe6ff;
+}
+.butter-menu-close {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  line-height: 1;
+  color: #e8f1ff;
+  background: #0d1830;
+  box-shadow: 0 0 0 2px #050a14, 0 0 0 4px #1b3050;
+  cursor: pointer;
+}
+.butter-menu-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  letter-spacing: 1.82px;
+  text-transform: uppercase;
+  color: #7d93b8;
+}
+.butter-menu-rule::after {
+  content: '';
+  flex: 1;
+  border-top: 1px dashed rgba(125, 147, 184, 0.28);
+}
+.butter-menu-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 4px;
+  margin: 0 0 20px;
+}
+.butter-menu-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 78px;
+  padding: 12px 6px 10px;
+  font-size: 15px;
+  letter-spacing: 1.35px;
+  text-transform: uppercase;
+  text-align: center;
+  text-decoration: none;
+  color: #7d93b8;
+  background: #0d1830;
+  box-shadow: 0 0 0 2px #050a14, 0 0 0 4px #1b3050, 0 4px 0 4px #0b1424;
+}
+.butter-menu-tile[aria-current='page'] {
+  color: #ff5d8f;
+  box-shadow:
+    0 0 0 2px #050a14,
+    0 0 0 4px #ff5d8f,
+    0 4px 0 4px #2a1024,
+    0 0 14px rgba(255, 93, 143, 0.18);
+}
+.butter-menu-tile svg {
+  width: 20px;
+  height: 20px;
+}
+.butter-menu-puffer img {
+  display: block;
+  width: 34px;
+  height: auto;
+  image-rendering: pixelated;
+}
+.butter-menu-links {
+  display: grid;
+  gap: 16px;
+}
+.butter-menu-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 67px;
+  padding: 12px 14px;
+  text-decoration: none;
+  color: #ff5d8f;
+  background: rgba(13, 24, 48, 0.65);
+  box-shadow: inset 0 0 0 1px rgba(125, 147, 184, 0.22);
+}
+.butter-menu-link > svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.butter-menu-link > span {
+  display: grid;
+  gap: 2px;
+}
+.butter-menu-link strong {
+  font-size: 15px;
+  font-weight: normal;
+  letter-spacing: 1.35px;
+  text-transform: uppercase;
+}
+.butter-menu-link em {
+  font-size: 14px;
+  font-style: normal;
+  color: #9fb0c9;
+}
+.butter-menu-go {
+  margin-left: auto;
+  font-size: 20px;
 }

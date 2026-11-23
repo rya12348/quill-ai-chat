@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 
+import { ButterMenu } from '../components/ButterMenu'
 import { Fore } from './dive-fore'
 import { Sea } from './dive-sea'
 
@@ -1400,13 +1401,9 @@ export function ButterDive() {
           </button>
 
           {/* The shipped chrome: the site menu in the top-left corner and the two
-              dialog triggers stacked under the mute button. Ink has no menu,
-              settings or wardrobe behind them, so they keep the look only. */}
-          <button className="ds-site-menu" type="button" aria-hidden="true" tabIndex={-1}>
-            <svg viewBox="0 0 20 20" fill="currentColor" shapeRendering="crispEdges" aria-hidden="true">
-              <path d="M2 3h16v3H2zm0 6h16v3H2zm0 6h16v3H2z" />
-            </svg>
-          </button>
+              dialog triggers stacked under the mute button. The menu opens the
+              real one; settings and wardrobe keep the look only. */}
+          <ButterMenu className="ds-site-menu" />
           <button className="ds-side-btn settings" type="button" aria-hidden="true" tabIndex={-1}>
             <svg viewBox="0 0 20 20" shapeRendering="crispEdges" fill="currentColor" aria-hidden="true">
               <path

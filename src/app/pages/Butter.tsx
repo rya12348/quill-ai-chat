@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router'
+import { ButterMenu } from '../components/ButterMenu'
 
 /**
  * Butter Party — Ink's table, dressed as the real Puffer Party.
@@ -2186,11 +2186,7 @@ export function Butter() {
 
       {/* The reef's other half. Without this the party is a dead end: the door
           has no way back to the dive, and a live round has no leave control. */}
-      <Link to="/butter" className="pf-dive-link pf-dive-corner" aria-label="The daily dive" title="The daily dive">
-        <svg viewBox="0 0 20 20" fill="currentColor" shapeRendering="crispEdges" aria-hidden>
-          <path d="M2 3h16v3H2zm0 6h16v3H2zm0 6h16v3H2z" />
-        </svg>
-      </Link>
+      <ButterMenu className="pf-dive-link pf-dive-corner" />
     </div>
   )
 }
