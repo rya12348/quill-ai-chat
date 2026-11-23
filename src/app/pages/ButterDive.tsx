@@ -297,6 +297,25 @@ export function ButterDive() {
   const [sinkT, setSinkT] = useState(0)
   const cardRef = useRef<HTMLDivElement | null>(null)
   const dockRef = useRef<HTMLFormElement | null>(null)
+  const mascotRef = useRef<HTMLDivElement | null>(null)
+  // Where the krill is swimming right now, in stage pixels. Kept across renders
+  // so a phase change eases from where it already is instead of snapping.
+  const mascotPos = useRef({ x: 0, y: 0, rot: 0, live: false })
+  // The shipped loop owns the camera: a target in metres, a damped follower
+  // easing towards it, and a bob on top. These are the nodes it writes to.
+  const worldRef = useRef<HTMLDivElement | null>(null)
+  const vignetteRef = useRef<HTMLDivElement | null>(null)
+  const scoreNumRef = useRef<HTMLDivElement | null>(null)
+  const engineRef = useRef({
+    phase: 'loading' as Phase,
+    round: 0,
+    ep: -45,
+    frame: 810,
+    depth: 0,
+    points: 0,
+  })
+  const phaseRef = useRef<Phase>('loading')
+  phaseRef.current = phase
   const [resetsIn, setResetsIn] = useState('')
   const [copied, setCopied] = useState(false)
   const [muted, setMuted] = useState(false)
@@ -675,25 +694,22 @@ export function ButterDive() {
     last?.tier === 'plankton' ? -(Math.cos(Math.PI * sinkT) - 1) / 2 : 1 - Math.pow(1 - sinkT, 3)
   const chipDepth = roundDepth + 90 + (landing - (roundDepth + 90)) * sinkE
   const wobble = last?.tier ? chipWobble(last.tier, sinkE) : { x: 0, rot: 0 }
-  const camera =
-    phase === 'intro' || phase === 'error'
-      ? 0
-      : phase === 'done'
-        ? Math.round(-depth * 2)
-        : phase === 'sinking'
-          ? // The camera rides 30 m under the falling answer, which is what
-            // keeps it in the middle of the frame.
-            Math.round(diveFrame / 2 - (chipDepth + 30) * 2)
-          : phase === 'feedback'
-            ? // Once it lands the camera stops 30 m under it, which parks the
-              // banner dead centre instead of under the HUD.
-              Math.round(diveFrame / 2 - (landing + 30) * 2)
-            : Math.round(cardTarget - roundDepth * 2)
+  // The engine's target camera, in metres: the intro and the finale hang at -45,
+  // a round sits at its own depth plus `(frame/2 - cardTarget)/2`, and a falling
+  // or landed answer keeps the camera 30 m under it.
+  const cardOffset = Math.max(0, (diveFrame / 2 - cardTarget) / 2)
+  const camTarget =
+    phase === 'intro' || phase === 'error' || phase === 'loading' || phase === 'done'
+      ? -45
+      : phase === 'sinking'
+        ? chipDepth + 30
+        : phase === 'feedback'
+          ? landing + 30
+          : roundDepth + cardOffset
+  engineRef.current = { phase, round, ep: camTarget, frame: diveFrame, depth, points }
   // The engine pins the card to its own depth (2px a metre) and lets the camera
   // bring it to the waterline: at rest its top edge sits exactly on the surface.
   const cardTop = roundDepth * 2
-  // Where the card sits on screen, which is also where the krill waits.
-  const cardScreen = phase === 'feedback' ? Math.round(diveFrame / 2 - 60) : cardTarget
   // The depth readout rides the fall with the chip instead of jumping.
   const shownDepth = phase === 'sinking' ? Math.round(roundDepth + (depth - roundDepth) * sinkE) : depth
   const promptLabel =
@@ -702,6 +718,136 @@ export function ButterDive() {
       : results.length >= ROUNDS
         ? 'DIVE COMPLETE'
         : `PROMPT ${Math.min(landed + 1, ROUNDS)} OF ${ROUNDS}`
+
+  // The shipped krill is not placed with CSS at all: its loop keeps a centre
+  // point per station, eases towards it at `1 - exp(-2.6 * dt)`, and writes a
+  // translate with a bob and a sway on top. Its stations, straight out of the
+  // bundle: a round waits at `48, h - 168` (beside the answer dock), the plunge
+  // holds 95px to the right of the falling chip and 14px above it at 24°, a
+  // landed banner leaves it at `.16w, .28h` and -8°, and the finale takes it to
+  // `.82w, .16h` at -6°. Reading the chip's own box keeps it on the answer as
+  // the camera rides down, the way the engine's `ey()` does.
+  useEffect(() => {
+    let raf = 0
+    let last = performance.now()
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick)
+      const dt = Math.min(0.05, (now - last) / 1_000)
+      last = now
+      const mascot = mascotRef.current
+      const stage = stageRef.current
+      const current = phaseRef.current
+      if (!mascot || !stage) return
+      if (current === 'intro' || current === 'error' || current === 'loading') {
+        // The title screen places the krill from the stylesheet.
+        if (mascotPos.current.live) {
+          mascot.style.transform = ''
+          mascotPos.current.live = false
+        }
+        return
+      }
+      const u = stage.clientWidth
+      const h = stage.clientHeight
+      let station = { x: 48, y: h - 168, rot: 0 }
+      if (current === 'sinking') {
+        const stageBox = stage.getBoundingClientRect()
+        const chip = stage.querySelector('.ds-chip')?.getBoundingClientRect()
+        const cx = chip ? chip.left - stageBox.left + chip.width / 2 : u / 2
+        const cy = chip ? chip.top - stageBox.top + chip.height / 2 : h / 2
+        station = { x: Math.min(cx + 95, u - 44), y: cy - 14, rot: 24 }
+      } else if (current === 'feedback') {
+        station = { x: 0.16 * u, y: 0.28 * h, rot: -8 }
+      } else if (current === 'done') {
+        station = { x: 0.82 * u, y: 0.16 * h, rot: -6 }
+      }
+      const pos = mascotPos.current
+      if (!pos.live) {
+        pos.x = station.x
+        pos.y = station.y
+        pos.rot = station.rot
+        pos.live = true
+      }
+      const ease = 1 - Math.exp(-2.6 * dt)
+      pos.x += (station.x - pos.x) * ease
+      pos.y += (station.y - pos.y) * ease
+      pos.rot += (station.rot - pos.rot) * ease
+      const seconds = now / 1_000
+      const bob = Math.sin(1.7 * seconds) * 6
+      const sway = Math.sin(1.1 * seconds) * 4
+      const half = mascot.offsetWidth / 2
+      mascot.style.transform = `translate3d(${pos.x - half}px, ${pos.y - half + bob}px, 0) rotate(${pos.rot + sway}deg)`
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
+  // The shipped camera loop, ported: the target eases in on a 2200ms
+  // easeInOutCubic descent, a damped follower closes the gap at
+  // `1 - exp(-6 * dt)`, a 2.2px bob rides on top, the world sits at
+  // `frame/2 - 2 * camera`, and the vignette darkens with depth. The score
+  // counts up over 700ms on the engine's easeOutQuart.
+  useEffect(() => {
+    let raf = 0
+    let last = performance.now()
+    let ep = -45
+    let em = -45
+    let tween: { from: number; to: number; start: number; dur: number } | null = null
+    let key = ''
+    let shownPoints = -1
+    let scoreTween: { from: number; to: number; start: number } | null = null
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick)
+      const dt = Math.min(0.05, (now - last) / 1_000)
+      last = now
+      const state = engineRef.current
+      const frame = state.frame || 810
+      const roundKey = `${state.phase}:${state.round}`
+      if (roundKey !== key) {
+        key = roundKey
+        if (state.phase === 'preview') tween = { from: ep, to: state.ep, start: now, dur: 2_200 }
+        else if (state.phase === 'done') tween = { from: ep, to: -45, start: now, dur: 2_500 }
+        else tween = null
+      }
+      if (state.phase === 'sinking' || state.phase === 'feedback') {
+        ep = state.ep
+        tween = null
+      } else if (tween) {
+        const progress = Math.min(1, (now - tween.start) / tween.dur)
+        const eased =
+          progress < 0.5
+            ? 4 * progress * progress * progress
+            : 1 - Math.pow(-2 * progress + 2, 3) / 2
+        ep = tween.from + (tween.to - tween.from) * eased
+        if (progress >= 1) tween = null
+      } else {
+        ep = state.ep
+      }
+      em += (ep - em) * (1 - Math.exp(-6 * dt))
+      const eg = em + (reduce ? 0 : 2.2 * Math.sin(0.45 * (now / 1_000)))
+      if (worldRef.current) worldRef.current.style.transform = `translate3d(0, ${frame / 2 - 2 * eg}px, 0)`
+      if (vignetteRef.current) {
+        vignetteRef.current.style.opacity = Math.min(0.72, 0.25 + Math.max(0, eg) / 2_400).toFixed(3)
+      }
+      if (shownPoints < 0) shownPoints = state.points
+      if (scoreTween === null && state.points !== shownPoints) {
+        scoreTween = { from: shownPoints, to: state.points, start: now }
+      }
+      if (scoreTween) {
+        const progress = Math.min(1, (now - scoreTween.start) / 700)
+        const eased = 1 - Math.pow(1 - progress, 4)
+        const value = Math.round(scoreTween.from + (scoreTween.to - scoreTween.from) * eased)
+        shownPoints = value
+        if (progress >= 1) {
+          shownPoints = scoreTween.to
+          scoreTween = null
+        }
+      }
+      if (scoreNumRef.current) scoreNumRef.current.textContent = String(shownPoints)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [])
 
   return (
     <div className="dive-page butter-dive relative min-h-0 flex-1 overflow-hidden" data-phase={phase}>
@@ -719,20 +865,10 @@ export function ButterDive() {
             // The engine turns the water's captions on while the dive is live and
             // takes them away the moment an answer lands (its `ds-reveal` class),
             // so a landed banner sits in clean water.
-            className={`ds-world${
-              (phase === 'preview' || phase === 'answering' || phase === 'sinking') && results.length === 0
-                ? ' ds-reveal'
-                : ''
-            }`}
-            // The intro's waterline is set in viewport units rather than from a
-            // measured height: the panel around the page can settle after mount,
-            // and a stale number sinks the title under the surface.
-            style={{
-              transform:
-                phase === 'intro'
-                  ? `translate3d(0, calc(${Math.round(diveFrame / 2 + 90)}px + var(--ds-intro-lift, 0px)), 0)`
-                  : `translate3d(0, ${camera}px, 0)`,
-            }}
+            // The engine adds `ds-reveal` when an answer plunges and drops it on
+            // the next descent, so the captions belong to the fall, not the card.
+            className={`ds-world${phase === 'sinking' || phase === 'feedback' ? ' ds-reveal' : ''}`}
+            ref={worldRef}
           >
             <div className="ds-surface" style={{ top: -336 }}>
               <div className="ds-title">
@@ -858,7 +994,7 @@ export function ButterDive() {
           <Fore depthRef={depthRef} />
 
           <div className="ds-dim" />
-          <div className="ds-vignette" />
+          <div className="ds-vignette" ref={vignetteRef} />
           <div className="ds-edge" />
 
           <div className="ds-hud">
@@ -885,7 +1021,7 @@ export function ButterDive() {
             </div>
             <div className="ds-pod ds-px ds-score-pod">
               <div className="label">SCORE</div>
-              <div className="ds-score-num">{points}</div>
+              <div className="ds-score-num" ref={scoreNumRef} />
             </div>
           </div>
 
@@ -928,18 +1064,7 @@ export function ButterDive() {
             </svg>
           </button>
 
-          <div
-            className="ds-mascot"
-            title="a friend"
-            style={
-              phase === 'intro' || phase === 'error'
-                ? // The title screen places the krill from the stylesheet.
-                  undefined
-                : // Just outside the card's top-left corner: 157px to its left and
-                  // a few pixels down, exactly where the shipped krill swims.
-                  { top: cardScreen + 5, left: 'calc(50% - 402px)', margin: 0, bottom: 'auto' }
-            }
-          >
+          <div className="ds-mascot" title="a friend" ref={mascotRef}>
             <span className="ds-mascot-sprite">
               <img src="/tiers/krillion.png" alt="krill" />
             </span>
