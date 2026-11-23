@@ -1861,6 +1861,36 @@ export function Butter() {
                         ROOM <b>{snap.code}</b>
                       </span>
                     </div>
+                    {/* The table's seats, the way the real lobby draws them: one
+                        puck per seat up to the room's cap, with the seated
+                        players' names and hearts. */}
+                    <div className="pf-lobby-pucks">
+                      {Array.from({ length: snap.cap ?? 6 }, (_, index) => {
+                        const player = snap.players[index]
+                        return (
+                          <div
+                            key={player ? player.pid : `open-${index}`}
+                            className={`pf-lobby-puck${player ? ' pf-lobby-puck-seated' : ''}`}
+                          >
+                            {player ? (
+                              <>
+                                <span className="pf-lobby-puck-name">{player.name}</span>
+                                <span className="pf-lobby-puck-hearts">
+                                  {Array.from({ length: Math.min(player.hearts, 3) }, (_, heartIndex) => (
+                                    <span key={heartIndex} aria-hidden="true">
+                                      ♥
+                                    </span>
+                                  ))}
+                                </span>
+                                {snap.host === player.pid && <span className="pf-lobby-puck-host">HOST</span>}
+                              </>
+                            ) : (
+                              <span className="pf-lobby-puck-open">open</span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
                     <button
                       type="button"
                       className="ds-begin-btn"

@@ -539,6 +539,14 @@ body:has(.pf-root[data-mode=lobby],.pf-root[data-mode=round]) button[aria-contro
 .pf-lobby>.pf-lobby-foot{pointer-events:none}
 .pf-lobby-foot>.pf-lobby-inner{pointer-events:auto}
 .pf-lobby-inner{flex-direction:column;gap:10px;max-width:600px;margin:0 auto;display:flex}
+.pf-lobby-pucks{flex-wrap:wrap;justify-content:center;align-items:stretch;gap:8px;display:flex}
+.pf-lobby-puck{box-shadow:0 0 0 2px #060d1a, 0 0 0 4px var(--pf-line);flex-direction:column;justify-content:center;align-items:center;gap:2px;min-width:84px;height:64px;background:#0b1526d9;padding:6px 8px;display:flex}
+.pf-lobby-puck-seated{box-shadow:0 0 0 2px #060d1a, 0 0 0 4px #1b3050}
+.pf-lobby-puck-name{letter-spacing:.08em;text-transform:uppercase;overflow:hidden;color:#e8f1ff;max-width:100%;font-size:13px;line-height:1.15;text-overflow:ellipsis;white-space:nowrap}
+.pf-lobby-puck-hearts{color:#ff5d8f;letter-spacing:.1em;gap:1px;display:flex;font-size:12px}
+.pf-lobby-puck-hearts span{text-shadow:0 0 6px #ff5d8f80}
+.pf-lobby-puck-host{letter-spacing:.14em;color:#4de3ff;font-size:10px;line-height:1}
+.pf-lobby-puck-open{letter-spacing:.14em;color:var(--pf-drift);text-transform:uppercase;font-size:10px}
 .pf-settings{grid-template-columns:repeat(4,1fr);gap:8px;display:grid}
 .pf-lobby-inner{position:relative}
 .pf-desktop-rules{display:none}

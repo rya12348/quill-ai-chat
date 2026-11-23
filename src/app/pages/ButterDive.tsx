@@ -262,6 +262,9 @@ export function ButterDive() {
   const [resetsIn, setResetsIn] = useState('')
   const [copied, setCopied] = useState(false)
   const [muted, setMuted] = useState(false)
+  // How many people are at open party tables right now, shown the way the real
+  // game shows its own live count next to "Puffer Party" on the front door.
+  const [playing, setPlaying] = useState<number | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const runIdRef = useRef('')
   // Only the finished dives feed the logbook, so it is read when the dive ends.
@@ -315,6 +318,27 @@ export function ButterDive() {
       })
     return () => {
       live = false
+    }
+  }, [])
+
+  // Keep the door's "N playing" line live, the way the real game's own
+  // counter sits on its landing page.
+  useEffect(() => {
+    let stop = false
+    const refresh = async () => {
+      try {
+        const res = await fetch('/api/butter/rooms')
+        const body = (await res.json().catch(() => null)) as { playing?: number } | null
+        if (!stop && res.ok && body && typeof body.playing === 'number') setPlaying(body.playing)
+      } catch {
+        // The count is decorative; a failed poll leaves the last good number.
+      }
+    }
+    refresh()
+    const timer = setInterval(refresh, 30_000)
+    return () => {
+      stop = true
+      clearInterval(timer)
     }
   }, [])
 
@@ -755,6 +779,10 @@ export function ButterDive() {
                         <img width={52} height={52} src="/gen/party/puffer-0.png" alt="" />
                       </span>
                       <span className="GameDiscovery-module__sRLeRq__title">Puffer Party</span>
+                    </span>
+                    <span className="GameDiscovery-module__sRLeRq__activity">
+                      <span className="GameDiscovery-module__sRLeRq__live" aria-hidden="true" />
+                      {typeof playing === 'number' ? `${playing.toLocaleString()} playing now` : 'in the water now'}
                     </span>
                   </Link>
                   <button className="ds-begin-btn" type="button" onClick={begin}>
