@@ -58,7 +58,9 @@ for (const file of listFiles(client).sort()) {
   if (file.startsWith('puffer/')) continue
   // Neither has the Krillion source mirror: 3.4MB of code that only the source
   // page opens, one file at a time.
-  if (file.startsWith('krillion-source/')) continue
+  // The Krillion copy and its source browser are a whole game's assets: they
+  // are fetched when opened, never precached into the shell.
+  if (file.startsWith('krillion-source/') || file.startsWith('krillion/')) continue
   digest.update(file)
   digest.update(readFileSync(join(client, file)))
 }
@@ -72,7 +74,7 @@ const precache = listFiles(client)
   .filter((file) => !file.startsWith('puffer/'))
   // The source mirror is read on demand too; precaching it would keep 3.4MB of
   // Krillion's build in every visitor's cache.
-  .filter((file) => !file.startsWith('krillion-source/'))
+  .filter((file) => !file.startsWith('krillion-source/') && !file.startsWith('krillion/'))
   .map((file) => (file === 'index.html' ? '/' : `/${file.replaceAll('\\', '/')}`))
 
 const swPath = join(client, 'sw.js')
