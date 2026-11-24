@@ -16,6 +16,7 @@
     "load:test": "node scripts/load-test.mjs",
     "preview": "vite preview",
     "retro": "node scripts/retro-host.mjs",
+    "dive:sync": "node scripts/sync-dive-day.mjs",
     "coding-lab": "node scripts/coding-lab.test.mjs",
     "sandbox:smoke": "tsx scripts/sandbox-smoke.ts",
     "bench:repo": "tsx scripts/buffy-repo-benchmark.ts",

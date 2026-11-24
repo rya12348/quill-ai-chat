@@ -20,7 +20,7 @@ type TierId = 'plankton' | 'tooclever' | 'schooler' | 'rare' | 'deepcut' | 'kril
 type Phase = 'loading' | 'intro' | 'preview' | 'answering' | 'sinking' | 'feedback' | 'done' | 'error'
 
 type Prompt = { id: string; text: string }
-type Day = { date: string; dayNumber: number; resetsAt?: string; prompts: Prompt[]; source?: 'live' | 'local' }
+type Day = { date: string; dayNumber: number; resetsAt?: string; prompts: Prompt[]; source?: 'live' | 'local' | 'locked' }
 type Result = {
   promptId: string
   promptText: string

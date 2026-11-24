@@ -1,0 +1,40 @@
+name: Daily dive parity
+
+# The dive is Krillion's card, so it has to be Krillion's card every day. Their
+# day rolls at 05:00 UTC; this job runs just after, takes their own /api/today
+# and /api/reveal, writes src/worker/dive-day.ts from them and compares the two
+# sheets prompt by prompt. A drift fails the job (and shows up as a red run).
+on:
+  schedule:
+    - cron: '20 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dive-day
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Take the day and check it
+        run: node scripts/sync-dive-day.mjs
+      - name: Commit the day's lock
+        run: |
+          if git diff --quiet -- src/worker/dive-day.ts; then
+            echo "the lock already matches the day"
+            exit 0
+          fi
+          git config user.name "ink-dive-bot"
+          git config user.email "noreply@inkbrowser.dpdns.org"
+          git add src/worker/dive-day.ts
+          git commit -m "Lock the daily dive to $(date -u +%F)'s card"
+          git push

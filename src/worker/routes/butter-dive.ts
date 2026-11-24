@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono'
 
 import type { AppContext } from '../env'
 import { diveDay, isSimsburySlot, rateDiveAnswer, simsburyTextAt } from '../butter-dive-bank'
+import { DIVE_DAY_LOCK } from '../dive-day'
 import { simsburyForDay } from '../butter-simsbury'
 import { TIERS, type ButterTier } from '../butter-topics'
 
@@ -21,6 +22,7 @@ import { TIERS, type ButterTier } from '../butter-topics'
  */
 
 const SOURCE = 'https://krillion.io'
+const now = () => Date.now()
 
 export const butterDive = new Hono<AppContext>()
 
@@ -83,6 +85,25 @@ butterDive.get('/today', async (c) => {
         { 'cache-control': 'no-store' },
       )
     }
+  }
+  // Their edge did not answer. The lock is their own card, taken that morning
+  // by `scripts/sync-dive-day.mjs`, so the day's seven prompts are still the
+  // day's — the local deck is a different game's questions under the same
+  // heading, and is only worth dealing once the lock has run out too.
+  const resets = Date.parse(DIVE_DAY_LOCK.resetsAt)
+  const lockFresh = Number.isFinite(resets) ? now() < resets : DIVE_DAY_LOCK.date === diveDay().date
+  if (lockFresh) {
+    return c.json(
+      {
+        date: DIVE_DAY_LOCK.date,
+        dayNumber: DIVE_DAY_LOCK.dayNumber,
+        resetsAt: DIVE_DAY_LOCK.resetsAt,
+        prompts: withSimsbury(DIVE_DAY_LOCK.prompts, DIVE_DAY_LOCK.dayNumber),
+        source: 'locked',
+      },
+      200,
+      { 'cache-control': 'no-store' },
+    )
   }
   const local = diveDay()
   return c.json({ ...local, source: 'local' }, 200, { 'cache-control': 'no-store' })
