@@ -575,6 +575,12 @@ async function advance(
   // keeps the length it started with instead of being redrawn at random.
   const fuseMs = popped ? strike : Number(room.fuse_ms) || strike
 
+  // A new card takes every chip with it: an answer said on the old prompt would
+  // read as an answer to the new one.
+  if (popped || swapped) {
+    await database.prepare(`UPDATE butter_players SET last_answer = NULL WHERE room = ?`).bind(room.id).run()
+  }
+
   await database
     .prepare(
       `UPDATE butter_rooms SET turn = ?, turn_at = ?, round = ?, fuse_ms = ?, fuse_end = ?, topic = ?, used = ?, seen = ?, swap_at = 0, updated_at = ? WHERE id = ?`,
@@ -1110,7 +1116,7 @@ butter.post('/start', async (c) => {
   await database.prepare(`UPDATE butter_rooms SET lives = ? WHERE id = ?`).bind(lives, code).run()
   await database
     .prepare(
-      `UPDATE butter_players SET hearts = ?, meter = 0, segs = '[]', score = 0, answers = 0, pops = 0, place = NULL WHERE room = ?`,
+      `UPDATE butter_players SET hearts = ?, meter = 0, segs = '[]', score = 0, answers = 0, pops = 0, place = NULL, last_answer = NULL WHERE room = ?`,
     )
     .bind(lives, code)
     .run()
