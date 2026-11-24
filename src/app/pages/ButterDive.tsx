@@ -893,7 +893,9 @@ export function ButterDive() {
     raf = requestAnimationFrame(step)
     // A tab that is not painting holds rAF back; the dive still has to land, so
     // the fall is timed on the clock as well.
-    const landingTimer = window.setTimeout(() => setPhase('feedback'), duration + 120)
+    // The stamp lands on the frame the tween ends, the way the shipped client
+    // does it (`l >= 1 ? (upd(ease(1)), done())`), not a beat after it.
+    const landingTimer = window.setTimeout(() => setPhase('feedback'), duration)
     return () => {
       cancelAnimationFrame(raf)
       window.clearTimeout(landingTimer)
