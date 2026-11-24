@@ -113,6 +113,16 @@ function swappedPair(left: string, right: string): boolean {
 function withinTypos(needle: string, target: string): boolean {
   if (!needle) return false
   if (needle === target) return true
+  // A town writes its answers long — "Talcott Mountain", "Newgate Prison",
+  // "Hopmeadow Street" — and the word everyone actually says has to count, or a
+  // local types the right thing and the card refuses it. One word of a short
+  // multi-word answer, five letters or more, is that answer. This is checked
+  // before the packed forms below, which would otherwise flatten
+  // "Talcott Mountain" into one word and lose it.
+  if (needle.length >= 5 && !needle.includes(' ')) {
+    const words = target.split(' ')
+    if (words.length > 1 && words.length <= 4 && words.includes(needle)) return true
+  }
   // "sweetcorn" for "sweet corn", "icecream" for "ice cream", "spiderman" for
   // "spider man": people run words together and split them apart, and neither is
   // a different answer. Compare the packed forms before giving up on the word.

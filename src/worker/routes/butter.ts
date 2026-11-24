@@ -545,9 +545,22 @@ async function settleFuse(database: D1Database, room: RoomRow): Promise<RoomRow>
 /** Pick an accepted answer the card has not spent yet. */
 function freshAnswer(topic: ButterTopic, used: string[]): string | undefined {
   const spent = new Set(used.map(flatAnswer))
-  const left = topic.answers.filter((answer) => !spent.has(flatAnswer(answer)))
+  // A bot is supposed to read like a person at the table, and people say what
+  // everyone knows. Picking uniformly from a 12,000 answer card had bots naming
+  // the deepest thing on it ("some copper" on town history) while the answer
+  // every local would actually say sat unguessed. So they mostly draw from the
+  // famous end, and only occasionally dive.
+  const famous: string[] = []
+  const left: string[] = []
+  topic.answers.forEach((answer, index) => {
+    if (spent.has(flatAnswer(answer))) return
+    left.push(answer)
+    const tier = topic.tiers?.[index]
+    if (tier === 'plankton' || tier === 'tooclever' || tier === 'schooler') famous.push(answer)
+  })
   if (!left.length) return undefined
-  return left[Math.floor(Math.random() * left.length)]
+  const pool = famous.length && Math.random() < 0.85 ? famous : left
+  return pool[Math.floor(Math.random() * pool.length)]
 }
 
 /**

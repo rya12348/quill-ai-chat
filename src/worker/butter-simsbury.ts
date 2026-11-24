@@ -455,7 +455,111 @@ function teacherForms(surname: string): string[] {
 /* ----------------------------------------------------------------- history */
 
 const HISTORY = [
+  // What a Simsbury table actually says first. Plain words, no "the", no
+  // full names: "tobacco" has to score, and it has to score as the obvious
+  // answer rather than being refused because the card only carried "shade
+  // tobacco". Everything below this block is what you get to later.
+  'tobacco',
+  'tobacco farming',
+  'shade tobacco',
+  'tobacco fields',
+  'tobacco sheds',
+  'the tobacco fields',
   'Newgate Prison',
+  'Newgate',
+  'the prison',
+  'copper mine',
+  'the copper mine',
+  'copper',
+  'the mine',
+  'King Philip’s War',
+  "King Philip's War",
+  'King Philip',
+  'the burning of Simsbury',
+  'the burning',
+  'the 1676 burning',
+  'the Farmington Canal',
+  'the canal',
+  'the railroad',
+  'the train',
+  'the train station',
+  'the trolley',
+  'Ensign-Bickford',
+  'Ensign Bickford',
+  'the powder mill',
+  'the fuse factory',
+  'fuse',
+  'the fuse',
+  'safety fuse',
+  'Phelps Tavern',
+  'the Phelps Tavern',
+  'the tavern',
+  'the Pettibone Tavern',
+  'Pettibone Tavern',
+  'the First Church',
+  'the church',
+  'the old cemetery',
+  'the cemetery',
+  'Massacoe',
+  'the Massacoe Plantation',
+  'the charter',
+  'Gifford Pinchot',
+  'Pinchot',
+  'the Pinchot Sycamore',
+  'the sycamore',
+  'Heublein Tower',
+  'the tower',
+  'Talcott Mountain',
+  'the mountain',
+  'Martin Luther King Jr.',
+  'MLK',
+  'Eno',
+  'Amos Eno',
+  'Samuel Higley',
+  'the Higley coppers',
+  'the mill',
+  'the woolen mill',
+  'Tariffville',
+  'the flood',
+  'the hurricane',
+  'the fire',
+  'the blizzard',
+  'town hall',
+  'the library',
+  'the farms',
+  'farming',
+  'dairy farming',
+  'the general store',
+  'the blacksmith',
+  'the stagecoach',
+  'the turnpike',
+  'the bridge',
+  'the flower bridge',
+  'Drake Hill',
+  'the grist mill',
+  'the saw mill',
+  'the census',
+  'the settlers',
+  'the founding families',
+  'the Native Americans',
+  'the Tunxis',
+  'Weatogue',
+  'Hoskins',
+  'Terry’s Plain',
+  "Terry's Plain",
+  'East Weatogue',
+  'West Simsbury',
+  'Simsbury Center',
+  'the copper',
+  'copper mining',
+  'the copper miners',
+  'a copper mine',
+  'the old mine',
+  'the prison mine',
+  'the state prison',
+  'the first state prison',
+  'America’s first copper mine',
+  'the first copper mine',
   'Old Newgate Prison',
   'New-Gate Prison',
   'the copper mine',
@@ -980,6 +1084,10 @@ const PEOPLE = [
 /* -------------------------------------------------------------- SHS itself */
 
 const SHS_THINGS = [
+  'the parking lot',
+  'the field house',
+  'turf',
+  'the turf',
   'the Trojans',
   'Trojans',
   'the Trojan',
@@ -1138,15 +1246,30 @@ function cards(): BankCard[] {
   const streets = [...STREETS_HEAD, ...STREETS_TAIL]
   const streetAnswers = streets.flatMap(streetForms)
 
-  const teacherAnswers = TEACHERS.flatMap(teacherForms)
+  const teacherAnswers = ['the principal', 'the assistant principal', ...TEACHERS.flatMap(teacherForms)]
 
   const historyAnswers = HISTORY.flatMap((entry) => [entry, `${entry} (Simsbury)`])
 
-  const shopAnswers = SHOPS.flatMap((entry) => [entry, `${entry} in Simsbury`])
+  // The spellings people type instead of the sign: the ampersand form of Stop & Shop,
+  // and the shop by the name on the cup.
+  const shopAnswers = ['Stop and Shop', 'Dunkin', 'Dunkin Donuts', ...SHOPS.flatMap((entry) => [entry, `${entry} in Simsbury`])]
 
-  const sportAnswers = [...new Set(SPORTS_BASE.flatMap(sportForms))]
+  const sportAnswers = [
+    'hockey',
+    'track',
+    'turf',
+    'the turf',
+    'the field house',
+    'field house',
+    ...new Set(SPORTS_BASE.flatMap(sportForms)),
+  ]
 
-  const placeAnswers = PLACES.flatMap((entry) => [entry, `${entry} in Simsbury`])
+  const placeAnswers = [
+    'the ice rink',
+    'the pool',
+    'the Barn',
+    ...PLACES.flatMap((entry) => [entry, `${entry} in Simsbury`]),
+  ]
 
   const peopleAnswers = PEOPLE.flatMap((entry) => [entry, `${entry} of Simsbury`])
 
