@@ -28,12 +28,13 @@ export const butter = new Hono<AppContext>()
 // open to any Ink visitor), so it has to set up the database handle itself.
 butter.use('*', requireDb)
 
-/** The shipped room takes eight seats: the host plus seven friends. */
-const MAX_PLAYERS = 8
+/** The shipped `MAX_PLAYERS` is 16: the biggest table the room code can hold. */
+const MAX_PLAYERS = 16
 const MIN_PLAYERS = 2
-/** A public table's size is a seat cap, not just a label on the door. */
-const TABLE_CAP: Record<string, number> = { duel: 2, trio: 3, party: 6, crowd: 8 }
-/** The host's lives setting: one to three, two by default. */
+/** A public table's size is a seat cap, not just a label on the door. The
+ *  shipped `QUICK_PLAY_TABLES` labels them 1V1, 3S, 4–6 and 8–10. */
+const TABLE_CAP: Record<string, number> = { duel: 2, trio: 3, party: 6, crowd: 10 }
+/** The host's lives setting: one to ten, two by default. */
 function livesFor(value: unknown): number {
   const lives = Math.floor(Number(value))
   if (!Number.isFinite(lives)) return LIVES
@@ -42,15 +43,19 @@ function livesFor(value: unknown): number {
 function capFor(size: string | undefined): number {
   return TABLE_CAP[size ?? ''] ?? MAX_PLAYERS
 }
-/** The scoring bar's length. It is a scoreboard, not a life: the shipped room
- *  grants lives nowhere but the host's setting. */
+/** The scoring bar's length, and the shipped constants around it: a full bar is
+ *  a spare life, and the next bar is `METER_TARGET_STEP` longer, to a ceiling. */
 const METER_FULL = 600
+const METER_STEP = 50
+const MAX_METER_TARGET = 5_000
 /** The shipped table's own settings: `{lives: 2, maxLives: 5, meterTarget: 600,
  *  minTurnMs: 8_000, fuseMinMs: 10_000, fuseMaxMs: 30_000, maxPlayers: 6}`. */
 const LIVES = 2
-const MAX_LIVES = 3
+const MAX_LIVES = 10
 const FUSE_MS = 30_000
 const MIN_FUSE_MS = 10_000
+/** `minTurnMs`: a pass never leaves the next seat less than eight seconds. */
+const MIN_TURN_MS = 8_000
 /** The shipped settings: every turn's fuse is random in this window, not a
  *  shrinking clock. Krillion's client carries `fuseMinMs: 10_000` and
  *  `fuseMaxMs: 30_000`, and its own bot script describes the result as "the
@@ -544,11 +549,15 @@ async function advance(
     history = card.seen
   }
 
-  // A fresh fuse is struck on every pass: each seat that takes the puffer gets
-  // its own random 10-30s, so a pass is a clean breath rather than an inherited
-  // clock that runs out while the new holder is still reading the card.
-  const fuseEnd = popped ? now() + POP_FREEZE_MS + strike : now() + strike
-  const fuseMs = strike
+  // The fuse is shared and inherited. Krillion's FAQ: "If there are 20 seconds
+  // left when you pass it, the next person inherits those 20 seconds. If there
+  // are fewer than 8 seconds left, it goes back to 8. After a pop, a new random
+  // fuse starts." That 8 is the shipped `minTurnMs`.
+  const carried = Number(room.fuse_end) || 0
+  const fuseEnd = popped ? now() + POP_FREEZE_MS + strike : Math.max(now() + MIN_TURN_MS, carried)
+  // The bar is drawn against the fuse it was struck at, so an inherited fuse
+  // keeps the length it started with instead of being redrawn at random.
+  const fuseMs = popped ? strike : Number(room.fuse_ms) || strike
 
   await database
     .prepare(
@@ -1174,19 +1183,18 @@ butter.post('/say', async (c) => {
       why: repeat ? 'repeat' : 'miss',
       at: now(),
     })
-    // A miss is also a hand-over: the puffer goes to the next seat, so a wrong
-    // answer costs the table its turn but not a life. The card only turns over
-    // once the table has burned both of its chances on it.
+    // A miss stays with the person who missed: the refusal says they can try
+    // again, so the puffer must not move, and nothing is scored. The card only
+    // turns over once the table has burned both of its two chances on it.
     const misses = (Number(room.misses) || 0) + 1
     if (misses >= 2) {
       await database.prepare(`UPDATE butter_rooms SET misses = 0 WHERE id = ?`).bind(code).run()
       const advanced = await advance(database, { ...room, misses: 0 }, players, true)
       return c.json(await snapshot(database, advanced.id, pid), 200, { 'cache-control': 'no-store' })
     }
-    const nextSeat = nextAlive(players, pid)
     await database
-      .prepare(`UPDATE butter_rooms SET turn = ?, turn_at = ?, misses = ?, updated_at = ? WHERE id = ?`)
-      .bind(nextSeat?.pid ?? null, now(), misses, now(), code)
+      .prepare(`UPDATE butter_rooms SET misses = ?, updated_at = ? WHERE id = ?`)
+      .bind(misses, now(), code)
       .run()
     return c.json(await snapshot(database, code, pid), 200, { 'cache-control': 'no-store' })
   }
