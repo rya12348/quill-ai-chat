@@ -88,12 +88,6 @@ const SINK_MS: Record<TierId, number> = {
   krillion: 4600,
 }
 
-/** The fall above is the shipped one, stretched a little: at the shipped speed
- *  the chip was gone before the word could be read. */
-const SINK_SCALE = 1.35
-/** The beat between the answer coming to rest and the banner taking its place. */
-const FEEDBACK_HOLD_MS = 900
-
 /** The sideways wobble the answer chip swims through while it sinks, with the
  *  tilt the engine pairs with it. Every tier has its own curve. */
 function chipWobble(tier: TierId, t: number): { x: number; rot: number } {
@@ -597,6 +591,9 @@ export function ButterDive() {
   const worldRef = useRef<HTMLDivElement | null>(null)
   const vignetteRef = useRef<HTMLDivElement | null>(null)
   const scoreNumRef = useRef<HTMLDivElement | null>(null)
+  // The answer's fall is written onto these two nodes by the animation frame.
+  const chipRef = useRef<HTMLDivElement | null>(null)
+  const depthNumRef = useRef<HTMLDivElement | null>(null)
   const engineRef = useRef({
     phase: 'loading' as Phase,
     round: 0,
@@ -857,27 +854,40 @@ export function ButterDive() {
   useEffect(() => {
     if (phase !== 'sinking') return
     const result = results[results.length - 1]
-    const duration = (result?.tier ? SINK_MS[result.tier] : 900) * SINK_SCALE
+    // The shipped table's own fall times, per tier and nothing else.
+    const duration = result?.tier ? SINK_MS[result.tier] : 900
     const started = performance.now()
+    const from = roundDepth + 90
+    const to = landing
     let raf = 0
-    let settle = 0
     setSinkT(0)
+    // The fall is written straight onto the chip and into the camera's target,
+    // frame by frame, exactly like the engine's tween list: React never renders
+    // a frame of it. Rendering the fall through state made the camera chase a
+    // staircase — and the last few pixels of an ease-out are a long way apart,
+    // which is what looked like the answer stopping short and sitting there.
     const step = (now: number) => {
       const t = Math.min(1, (now - started) / duration)
-      setSinkT(t)
+      const eased = result?.tier === 'plankton' ? -(Math.cos(Math.PI * t) - 1) / 2 : 1 - Math.pow(1 - t, 3)
+      const depthNow = from + (to - from) * eased
+      const wob = result?.tier ? chipWobble(result.tier, eased) : { x: 0, rot: 0 }
+      if (chipRef.current) {
+        chipRef.current.style.transform = `translate3d(calc(-50% + ${wob.x.toFixed(2)}px), ${(depthNow * 2).toFixed(2)}px, 0) rotate(${wob.rot.toFixed(2)}deg)`
+      }
+      if (depthNumRef.current) depthNumRef.current.textContent = `${Math.round(depthNow).toLocaleString('en-US')}m`
+      // The camera is handed a target every frame, so its own damped follower
+      // sees a moving chip rather than a fresh value twice a second.
+      engineRef.current.ep = depthNow + 30
       if (t < 1) raf = requestAnimationFrame(step)
-      // The answer stays where it landed for a beat before the banner covers it,
-      // so the word and the tier it earned can be read together.
-      else settle = window.setTimeout(() => setPhase('feedback'), FEEDBACK_HOLD_MS)
+      else setPhase('feedback')
     }
     raf = requestAnimationFrame(step)
     // A tab that is not painting holds rAF back; the dive still has to land, so
     // the fall is timed on the clock as well.
-    const landing = window.setTimeout(() => setPhase('feedback'), duration + FEEDBACK_HOLD_MS + 120)
+    const landingTimer = window.setTimeout(() => setPhase('feedback'), duration + 120)
     return () => {
       cancelAnimationFrame(raf)
-      window.clearTimeout(landing)
-      window.clearTimeout(settle)
+      window.clearTimeout(landingTimer)
     }
   }, [phase, results])
 
@@ -997,7 +1007,6 @@ export function ButterDive() {
   const sinkE =
     last?.tier === 'plankton' ? -(Math.cos(Math.PI * sinkT) - 1) / 2 : 1 - Math.pow(1 - sinkT, 3)
   const chipDepth = roundDepth + 90 + (landing - (roundDepth + 90)) * sinkE
-  const wobble = last?.tier ? chipWobble(last.tier, sinkE) : { x: 0, rot: 0 }
   // The engine's target camera, in metres: the intro and the finale hang at -45,
   // a round sits at its own depth plus `(frame/2 - cardTarget)/2`, and a falling
   // or landed answer keeps the camera 30 m under it.
@@ -1010,7 +1019,16 @@ export function ButterDive() {
         : phase === 'feedback'
           ? landing + 30
           : roundDepth + cardOffset
-  engineRef.current = { phase, round, ep: camTarget, frame: diveFrame, depth, points }
+  // While an answer falls, its own animation frame owns the camera target; a
+  // re-render must not snap the target back to where the fall started.
+  engineRef.current = {
+    phase,
+    round,
+    ep: phase === 'sinking' ? engineRef.current.ep : camTarget,
+    frame: diveFrame,
+    depth,
+    points,
+  }
   // The engine pins the card to its own depth (2px a metre) and lets the camera
   // bring it to the waterline: at rest its top edge sits exactly on the surface.
   const cardTop = roundDepth * 2
@@ -1305,10 +1323,13 @@ export function ButterDive() {
                 down to its own depth and then lands as the banner. */}
             {phase === 'sinking' && last?.tier && (
               <div
+                ref={chipRef}
                 className={`ds-chip ds-px${last.tier === 'krillion' ? ' gold' : ''}`}
                 style={{
                   ['--cc' as string]: `var(--tier-${last.tier})`,
-                  transform: `translate3d(calc(-50% + ${wobble.x.toFixed(2)}px), ${(chipDepth * 2).toFixed(2)}px, 0) rotate(${wobble.rot.toFixed(2)}deg)`,
+                  // The transform belongs to the fall's own animation frame; a
+                  // re-render must not put the chip back at the top of it.
+                  transform: `translate3d(calc(-50% + 0px), ${((roundDepth + 90) * 2).toFixed(2)}px, 0)`,
                 }}
               >
                 “{(last.answer ?? last.rawAnswer ?? '').toUpperCase()}”
@@ -1371,7 +1392,9 @@ export function ButterDive() {
           <div className="ds-hud">
             <div className="ds-pod ds-px">
               <div className="label">DEPTH</div>
-              <div className="ds-depth-num">{shownDepth.toLocaleString('en-US')}m</div>
+              <div className="ds-depth-num" ref={depthNumRef}>
+                {shownDepth.toLocaleString('en-US')}m
+              </div>
             </div>
             <div className="ds-hud-mid">
               <div className="ds-dots">
