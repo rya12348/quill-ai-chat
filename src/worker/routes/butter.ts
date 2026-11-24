@@ -391,11 +391,15 @@ function nextAlive(players: PlayerRow[], after: string | null): PlayerRow | unde
  * order. The real table always has something left to name, so a spent card is
  * replaced and the puffer keeps moving.
  */
-/** How many times the town turns up at one table: two games, or three. */
+/**
+ * How many times the town turns up at one table: two, and now and then three.
+ * A third card is meant to be a surprise, so only about one table in seven
+ * gets one rather than every other table as before.
+ */
 function simsburyTarget(room: RoomRow): number {
   let hash = 0
   for (const character of room.id) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
-  return 2 + (hash % 2)
+  return hash % 7 === 0 ? 3 : 2
 }
 
 /**

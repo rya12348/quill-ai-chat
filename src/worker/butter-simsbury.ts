@@ -1321,20 +1321,38 @@ function seeded(seed: number): () => number {
 }
 
 /**
- * The Simsbury cards a given dive day carries: one on odd days, two on even
- * ones, drawn from the pack without repeating inside the same day.
+ * The pack in its dealing order: shuffled once, then walked straight through.
+ * A day reads from this list by how many cards the days before it spent, so a
+ * question cannot come round again until every other one has been asked — the
+ * old per-day shuffle could (and did) deal yesterday's card again today.
  */
-export function simsburyForDay(dayNumber: number): { index: number; card: BankCard }[] {
-  const random = seeded(dayNumber * 977 + 12_345)
+const ROTATION = (() => {
+  const random = seeded(0x5eed_1234)
   const order = SIMSBURY_CARDS.map((_, index) => index)
   for (let index = order.length - 1; index > 0; index -= 1) {
     const swap = Math.floor(random() * (index + 1))
     ;[order[index], order[swap]] = [order[swap], order[index]]
   }
+  return order
+})()
+
+/** How many cards the dives before this one spent: one on odd days, two on even. */
+function picksBefore(dayNumber: number): number {
+  const before = Math.max(0, dayNumber - 1)
+  return before + Math.floor(before / 2)
+}
+
+/**
+ * The Simsbury cards a given dive day carries: one on odd days, two on even
+ * ones, taken in rotation so the town never asks the same thing on two dives
+ * running and comes back to a question only after the whole pack has been used.
+ */
+export function simsburyForDay(dayNumber: number): { index: number; card: BankCard }[] {
   const count = dayNumber % 2 === 0 ? 2 : 1
-  return order.slice(0, count).map((cardIndex, position) => ({
+  const start = picksBefore(dayNumber)
+  return Array.from({ length: count }, (_, position) => ({
     index: SLOTS[position],
-    card: SIMSBURY_CARDS[cardIndex],
+    card: SIMSBURY_CARDS[ROTATION[(start + position) % ROTATION.length]],
   }))
 }
 
