@@ -49,6 +49,10 @@ const MIN_FUSE_MS = 10_000
  *  turn made the late game a formality; a random one keeps every pass tense. */
 const POP_FREEZE_MS = 1_500
 const FUSE_FLOOR_MS = 8_000
+// How many answers a single card takes before the room swaps it. The shipped
+// table counts this on the card itself (`threshold: 26` on the one a live room
+// was serving) and swaps on the count, not on the sheet running dry.
+const CARD_ACCEPTED_LIMIT = 26
 /** A phone in a pocket throttles its timers to about one tick a minute, so a
  *  seated player who switches tabs is not absent — the fuse is what punishes
  *  them. Only a lobby seat, which nobody is playing from, is ever reclaimed. */
@@ -98,7 +102,21 @@ type RoomRow = {
   updated_at: number
 }
 
-type PlayerRow = { pid: string; name: string; hearts: number; seat: number; meter: number; segs: string; score: number; bot: number; seen_at: number; client: string | null }
+type PlayerRow = {
+  pid: string
+  name: string
+  hearts: number
+  seat: number
+  meter: number
+  segs: string
+  score: number
+  answers: number
+  pops: number
+  place: number | null
+  bot: number
+  seen_at: number
+  client: string | null
+}
 
 /** The host is the one seat a lobby cannot run without: they are the only one
  *  who can deal the round. */
@@ -184,6 +202,9 @@ function ensureSchema(db: D1Database): Promise<void> {
         "ALTER TABLE butter_rooms ADD COLUMN size TEXT NOT NULL DEFAULT 'party'",
         "ALTER TABLE butter_rooms ADD COLUMN seen TEXT NOT NULL DEFAULT '[]'",
         'ALTER TABLE butter_rooms ADD COLUMN swap_at INTEGER NOT NULL DEFAULT 0',
+        'ALTER TABLE butter_players ADD COLUMN answers INTEGER NOT NULL DEFAULT 0',
+        'ALTER TABLE butter_players ADD COLUMN pops INTEGER NOT NULL DEFAULT 0',
+        'ALTER TABLE butter_players ADD COLUMN place INTEGER',
       ]) {
         try {
           await db.prepare(sql).run()
@@ -253,6 +274,9 @@ async function playersOf(database: D1Database, code: string): Promise<PlayerRow[
     hearts: Number(player.hearts) || 0,
     meter: Number(player.meter) || 0,
     score: Number(player.score) || 0,
+    answers: Number(player.answers) || 0,
+    pops: Number(player.pops) || 0,
+    place: player.place === null || player.place === undefined ? null : Number(player.place),
     segs: typeof player.segs === 'string' ? player.segs : '[]',
   }))
 }
@@ -293,6 +317,7 @@ type LastEvent = {
   kind?: 'tier' | 'pop' | 'win' | 'spare' | 'reject'
   name?: string
   answer?: string
+  why?: 'miss' | 'repeat'
   tier?: ButterTier
   points?: number
   at?: number
@@ -380,7 +405,7 @@ function dealCard(
 ): { topic: ButterTopic; used: string[]; swapped: boolean; seen: string[] } {
   const topic = topicOf(room)
   const used = usedOf(room)
-  if (used.length < topic.answers.length) return { topic, used, swapped: false, seen }
+  if (used.length < Math.min(CARD_ACCEPTED_LIMIT, topic.answers.length)) return { topic, used, swapped: false, seen }
   const fresh = nextPartyTopic(room, [...seen, topic.prompt])
   return { topic: fresh, used: [], swapped: true, seen: [...seen, fresh.prompt].slice(-SEEN_KEEP) }
 }
@@ -459,6 +484,10 @@ async function advance(
       .bind(winner, now(), room.id)
       .run()
     if (alive[0]) {
+      await database
+        .prepare(`UPDATE butter_players SET place = 1 WHERE room = ? AND pid = ?`)
+        .bind(room.id, alive[0].pid)
+        .run()
       await say(database, room.id, `${alive[0].name} is the last one still floating.`, 'good')
       await setLast(database, room.id, { kind: 'win', name: alive[0].name, at: now() })
       if (room.rated === 1) await settleRatings(database, room, players, alive[0].pid)
@@ -477,7 +506,7 @@ async function advance(
   // Every answer on the card is spent. The shipped table holds the next card
   // for `CATEGORY_SWAP_MS` instead of dealing it inside the same pass, so the
   // puffer stays where it is and the new category arrives a beat later.
-  if (!popped && used.length >= topic.answers.length) {
+  if (!popped && used.length >= Math.min(CARD_ACCEPTED_LIMIT, topic.answers.length)) {
     const swapAt = Number(room.swap_at) || 0
     if (!swapAt) {
       await database
@@ -501,15 +530,12 @@ async function advance(
     history = card.seen
   }
 
-  const fuseEnd = popped
-    ? now() + POP_FREEZE_MS + strike
-    : Math.max(room.fuse_end, now() + FUSE_FLOOR_MS)
-  // The total the client draws its bar against is the fuse itself, not whatever
-  // is left of it. Measuring `fuseEnd - now` here folded the door's 3s countdown
-  // into the total, so the bar jumped backwards on the first pass.
-  const fuseMs = popped
-    ? strike
-    : Math.max(FUSE_FLOOR_MS, Math.min(Number(room.fuse_ms) || FUSE_MS, fuseEnd - now()))
+  const fuseEnd = popped ? now() + POP_FREEZE_MS + strike : now() + strike
+  // Every turn gets a fresh fuse of its own, struck the moment the puffer
+  // changes hands. A live room showed a holder popping 11.5s after the pass
+  // that gave them the puffer, inside the 10-30s window and nowhere near where
+  // a fuse carried over from the round's first turn would have expired.
+  const fuseMs = Math.max(FUSE_FLOOR_MS, strike)
 
   await database
     .prepare(
@@ -556,9 +582,12 @@ async function settleFuse(database: D1Database, room: RoomRow): Promise<RoomRow>
     const victim = players.find((player) => player.pid === current.turn)
     if (!victim) break
     const hearts = Math.max(0, victim.hearts - 1)
+    // One pop, one life, counted on the seat — and the seat that runs out of
+    // lives is placed behind everyone still floating.
+    const survivors = players.filter((player) => player.pid !== victim.pid && player.hearts > 0).length
     await database
-      .prepare(`UPDATE butter_players SET hearts = ? WHERE room = ? AND pid = ?`)
-      .bind(hearts, current.id, victim.pid)
+      .prepare(`UPDATE butter_players SET hearts = ?, pops = pops + 1, place = COALESCE(?, place) WHERE room = ? AND pid = ?`)
+      .bind(hearts, hearts === 0 ? survivors + 1 : null, current.id, victim.pid)
       .run()
     await say(database, current.id, `the fuse ran out. The puffer popped on ${victim.name}.`, 'bad')
     await setLast(database, current.id, { kind: 'pop', name: victim.name, tier: undefined, points: 0, at: now() })
@@ -790,6 +819,11 @@ async function snapshot(database: D1Database, code: string, pid: string) {
       meter: player.meter,
       segs: parseSegs(player.segs),
       score: player.score,
+      // The shipped seat carries these three: how many answers landed, how many
+      // times the puffer popped on them, and where they finished.
+      answers: player.answers,
+      pops: player.pops,
+      place: player.place,
       bot: player.bot === 1,
       you: player.pid === pid,
       rating: seatRatings && player.client ? (seatRatings.get(String(player.client)) ?? 1000) : null,
@@ -1005,7 +1039,7 @@ butter.post('/start', async (c) => {
   const firstFuse = randomFuse()
   await database
     .prepare(
-      `UPDATE butter_players SET hearts = ?, meter = 0, segs = '[]', score = 0 WHERE room = ?`,
+      `UPDATE butter_players SET hearts = ?, meter = 0, segs = '[]', score = 0, answers = 0, pops = 0, place = NULL WHERE room = ?`,
     )
     .bind(LIVES, code)
     .run()
@@ -1098,7 +1132,16 @@ butter.post('/say', async (c) => {
   // word here made the fuse pointless and ended rounds in two guesses.
   if (!tier || repeat) {
     await say(database, code, refusalMessage(playerName, answer, repeat), 'note')
-    await setLast(database, code, { kind: 'reject', name: playerName, answer, points: 0, at: now() })
+    await setLast(database, code, {
+      kind: 'reject',
+      name: playerName,
+      answer,
+      points: 0,
+      // The shipped event says which miss it was: a repeat or a word that is
+      // not on the card.
+      why: repeat ? 'repeat' : 'miss',
+      at: now(),
+    })
     return c.json(await snapshot(database, code, pid), 200, { 'cache-control': 'no-store' })
   }
 
@@ -1120,7 +1163,7 @@ butter.post('/say', async (c) => {
     target = Math.min(MAX_METER_TARGET, target + METER_STEP)
   }
   await database
-    .prepare(`UPDATE butter_players SET hearts = ?, meter = ?, segs = ?, score = ? WHERE room = ? AND pid = ?`)
+    .prepare(`UPDATE butter_players SET hearts = ?, meter = ?, segs = ?, score = ?, answers = answers + 1 WHERE room = ? AND pid = ?`)
     .bind(hearts, meter, JSON.stringify(segs), me.score + tier.score, code, pid)
     .run()
   await database
