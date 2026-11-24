@@ -1068,6 +1068,15 @@ app.get('/butter', (c) => mirrorPage(c, '/krillion/index.html'))
 app.get('/butter/*', async (c) => {
   const rest = new URL(c.req.url).pathname.slice('/butter'.length)
   if (rest === '' || rest === '/') return mirrorPage(c, '/krillion/index.html')
+  // The party is Butter's own table, not the mirrored one: same reef and same
+  // puffer art, but the rooms, turns and judging are ours, so there is no
+  // third-party verification between a player and a seat. The mirror's party
+  // page cannot open a room from this domain at all — its seat is issued by
+  // their server against a Turnstile token bound to their hostname, which
+  // fails here with "invalid domain".
+  if (rest === '/party' || rest.startsWith('/party/')) {
+    return c.env.ASSETS.fetch(new URL('/', c.req.url).toString())
+  }
   // A route is a file on disk: `/butter/packs` is `packs.html`, and the host
   // only resolves that for `/krillion/packs` when the Worker is not in front of
   // it. Ask for the file by name first, then the captured path as it stands.
