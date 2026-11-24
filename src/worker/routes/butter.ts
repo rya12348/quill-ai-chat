@@ -268,7 +268,7 @@ async function roomOf(database: D1Database, code: string): Promise<RoomRow | und
   return (
     (await database
       .prepare(
-        `SELECT id, host, status, round, turn, turn_at, topic, used, seen, fuse_end, fuse_ms, meter_target, last, winner, size, rated, settled, updated_at FROM butter_rooms WHERE id = ?`,
+        `SELECT id, host, status, round, turn, turn_at, topic, used, seen, fuse_end, fuse_ms, meter_target, lives, last, winner, size, rated, settled, updated_at FROM butter_rooms WHERE id = ?`,
       )
       .bind(code)
       .first<RoomRow>()) ?? undefined
@@ -277,7 +277,7 @@ async function roomOf(database: D1Database, code: string): Promise<RoomRow | und
 
 async function playersOf(database: D1Database, code: string): Promise<PlayerRow[]> {
   const rows = await database
-    .prepare(`SELECT pid, name, hearts, seat, meter, segs, score, bot, seen_at, client FROM butter_players WHERE room = ? ORDER BY seat`)
+    .prepare(`SELECT pid, name, hearts, seat, meter, segs, score, answers, pops, place, bot, seen_at, client FROM butter_players WHERE room = ? ORDER BY seat`)
     .bind(code)
     .all<PlayerRow>()
   return (rows.results ?? []).map((player) => ({
@@ -542,8 +542,9 @@ async function advance(
     history = card.seen
   }
 
-  // A pop lights a new fuse. A pass does not: the bomb is the same bomb, so the
-  // clock a player inherits is the time the last holder left on it.
+  // A pop lights a new fuse; a pass does not. The shipped room's own rule is
+  // that the fuse is hidden and random (10-30s) and never gets longer, so the
+  // seat a pass hands the puffer to inherits the clock already burning on it.
   const fuseEnd = popped ? now() + POP_FREEZE_MS + strike : Number(room.fuse_end) || now() + strike
   const fuseMs = popped ? strike : Number(room.fuse_ms) || strike
 
@@ -679,7 +680,7 @@ async function playBots(database: D1Database, room: RoomRow): Promise<RoomRow> {
     const reply = tier.value
     used.push(reply)
     await database
-      .prepare(`UPDATE butter_players SET meter = ?, segs = ?, score = ? WHERE room = ? AND pid = ?`)
+      .prepare(`UPDATE butter_players SET meter = ?, segs = ?, score = ?, answers = answers + 1 WHERE room = ? AND pid = ?`)
       .bind(meter, JSON.stringify(segs), me.score + tier.score, current.id, me.pid)
       .run()
     await database
