@@ -1548,19 +1548,31 @@ export function ButterDive() {
 
           {phase === 'answering' && (
             <>
-              {correction && (
-                <div className="ds-correction" id="answer-correction" aria-live="polite">
+              {/* Krillion's own pill, element for element: the quoted spelling
+                  you sent, an arrow hidden from screen readers, the quoted
+                  spelling it becomes, and the line that asks you to send it
+                  again to keep it. Sent again, the card accepts it. */}
+              <div
+                className="ds-correction"
+                id="answer-correction"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                {correction && (
                   <div className="ds-preview-pill ds-px ds-correction-panel">
-                    {/* The card's own pill: the words you sent, then the words
-                        it spells them as, quoted and in the accent, with the
-                        line that tells you to send it again to keep it. */}
-                    <span className="ds-correction-arrow">
-                      “{correction.from}” → <b>“{correction.to}”</b>
+                    <span className="ds-correction-change">
+                      <span>“{correction.from}”</span>
+                      <span className="ds-correction-arrow" aria-hidden="true">
+                        {' → '}
+                      </span>
+                      <span className="sr-only"> corrects to </span>
+                      <b>“{correction.to}”</b>
                     </span>
                     <span className="ds-correction-hint">submit again to confirm · or edit</span>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
               {rejected && (
                 <div className="ds-reject ds-reject-shake" key={rejectAt} aria-live="polite">
                   {rejected}
