@@ -875,6 +875,15 @@ export function ButterDive() {
         chipRef.current.style.transform = `translate3d(calc(-50% + ${wob.x.toFixed(2)}px), ${(depthNow * 2).toFixed(2)}px, 0) rotate(${wob.rot.toFixed(2)}deg)`
       }
       if (depthNumRef.current) depthNumRef.current.textContent = `${Math.round(depthNow).toLocaleString('en-US')}m`
+      // The rungs light in step with the descent: the same frame that moves the
+      // chip decides which ones it has crossed.
+      const rungs = (stageRef.current ?? document).querySelectorAll<HTMLElement>('.ds-tierline')
+      if (rungs) {
+        for (const rung of rungs) {
+          const at = Number(rung.dataset.rung)
+          if (Number.isFinite(at)) rung.classList.toggle('passed', depthNow > at - 4)
+        }
+      }
       // The camera is handed a target every frame, so its own damped follower
       // sees a moving chip rather than a fresh value twice a second.
       engineRef.current.ep = depthNow + 30
@@ -1304,6 +1313,9 @@ export function ButterDive() {
                   <div
                     key={id}
                     className={`ds-tierline${passed ? ' passed' : ''}`}
+                    // The fall's own frame lights these as the chip crosses
+                    // them; the depth it compares against is on the node.
+                    data-rung={rung}
                     style={{
                       // Each rung sits where an answer of that tier would land
                       // from the depth this round started at.
