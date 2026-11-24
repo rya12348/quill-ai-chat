@@ -1101,6 +1101,13 @@ export function Butter() {
   // `chedder → cheddar` above the input before an answer is ever sent.
   const [correction, setCorrection] = useState<{ typed: string; value: string; repeat: boolean } | null>(null)
   const [chatText, setChatText] = useState('')
+  // My answer, echoed locally until the snapshot comes back with it.
+  const [mySaid, setMySaid] = useState<{ text: string; round: number } | null>(null)
+  const chatList = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const list = chatList.current
+    if (list) list.scrollTop = list.scrollHeight
+  }, [snap?.chat?.length])
   // The shipped table keeps its chat open down the right-hand side for the
   // whole game; there is no button that reveals it.
   const [chatOpen] = useState(true)
@@ -1380,15 +1387,23 @@ export function Butter() {
     if (!code || !pid || !typed.trim()) return
     const answer = typed.trim()
     setTyped('')
+    // Show it over my head on the same frame I press enter: the round trip is a
+    // third of a second on a good connection and a few on a bad one, and the
+    // table should not see the card answered while my chip is still empty.
+    setMySaid({ text: answer.toLowerCase(), round: snap?.round ?? 0 })
     try {
       const payload = (await call('/say', { code, pid, answer })) as unknown as Snapshot
       skew.current = payload.serverNow - Date.now()
       setSnap(payload)
+      // The snapshot now carries the seat's own last answer (or nothing, when it
+      // was a miss), so the local echo has nothing left to stand in for.
+      setMySaid(null)
     } catch (failure) {
+      setMySaid(null)
       setTyped(answer)
       setError(failure instanceof Error ? failure.message : 'That did not go through.')
     }
-  }, [code, pid, typed])
+  }, [code, pid, typed, snap?.round])
 
   const sendChat = useCallback(async () => {
     const text = chatText.trim()
@@ -1556,6 +1571,9 @@ export function Butter() {
       if (!match || /^(the|every)/i.test(match[1])) continue
       map.set(match[1].trim(), { text: match[2].toLowerCase() })
     }
+    // The echo outranks everything until the card turns over.
+    const mine = (snap?.players ?? []).find((player) => player.you)
+    if (mine && mySaid && mySaid.round === (snap?.round ?? 0)) map.set(mine.name, { text: mySaid.text })
     return map
   })()
 
@@ -2056,11 +2074,11 @@ export function Butter() {
                     className="font-pixel"
                     style={{
                       position: 'fixed',
-                      right: 10,
-                      top: 68,
-                      bottom: 12,
+                      right: 4,
+                      top: 64,
+                      bottom: 10,
                       zIndex: 46,
-                      width: 268,
+                      width: 300,
                       maxHeight: 'none',
                       display: 'flex',
                       flexDirection: 'column',
@@ -2084,7 +2102,13 @@ export function Butter() {
                     >
                       <span>TABLE CHAT</span>
                     </div>
-                    <div style={{ padding: '7px 9px', overflowY: 'auto', flex: 1, fontSize: 14, lineHeight: 1.35 }}>
+                    <div
+                      ref={chatList}
+                      // A new line lands at the bottom of a scroller that only
+                      // scrolls itself when someone drags it otherwise, so the
+                      // reply the table just sent read as cut off.
+                      style={{ padding: '7px 9px', overflowY: 'auto', flex: 1, fontSize: 14, lineHeight: 1.35, wordBreak: 'break-word' }}
+                    >
                       {(snap.chat ?? []).length === 0 ? (
                         <p style={{ margin: 0, color: '#5d7396' }}>no chatter yet — say hi</p>
                       ) : (
@@ -2275,6 +2299,20 @@ function Seat({
           <div className="pf-spr-wrap">
             <img className="pf-spr" src={mascot.sprite} alt="" />
           </div>
+          {(said || reject) && (
+            <div
+              className={`pf-say ds-chip ds-px on${holding ? ' ok' : ''}${reject ? ' bad ds-reject-shake' : ''}${player.you ? ' rest' : ''}`}
+              // Hung off the sprite's own geometry: the head is one sprite height
+              // above where its feet sit, so the chip clears the ears instead of
+              // landing on the plate or halfway up the body.
+              style={{
+                ['--cc' as string]: reject ? '#ff9f43' : (TIER_COLOR[tier ?? 'schooler'] ?? '#4de3ff'),
+                bottom: 'calc(var(--pf-foot, .2) * var(--pf-spr) + var(--pf-spr) + 6px)',
+              }}
+            >
+              {reject ?? said}
+            </div>
+          )}
         </div>
         <span
           className={`pf-meter pf-seat-meter${(player.meter ?? 0) >= target ? ' full' : ''}`}
@@ -2300,18 +2338,7 @@ function Seat({
             ))
           )}
         </span>
-        {(said || reject) && (
-          <div
-            className={`pf-say ds-chip ds-px on${holding ? ' ok' : ''}${reject ? ' bad ds-reject-shake' : ''}`}
-            style={{
-              ['--cc' as string]: reject
-                ? '#ff9f43'
-                : TIER_COLOR[tier ?? 'schooler'] ?? '#4de3ff',
-            }}
-          >
-            {reject ?? said}
-          </div>
-        )}
+
         <div className="pf-plate" style={{ top: plateTop }}>
           <b className="pf-name">{player.you ? `${player.name} · YOU` : player.name}</b>
           <div className="pf-row">
