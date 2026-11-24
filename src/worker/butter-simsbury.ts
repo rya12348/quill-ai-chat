@@ -38,8 +38,11 @@ function key(value: string): string {
     .trim()
 }
 
-/** At most the shipped card's own ceiling, in the order the list was written. */
-const CAP = 1_203
+/** A card's ceiling, in the order the list was written. The shipped day's cards
+ *  run from a thousand answers to the mid twenty-thousands, but a town only has
+ *  so many nameable things in it: the widest card here carries every one of
+ *  them, and the rest stop where the town stops. */
+const CAP = 4_000
 
 function build(prompt: string, answers: string[]): BankCard {
   const seen = new Set<string>()
@@ -1152,6 +1155,7 @@ function cards(): BankCard[] {
     ...streets.flatMap(streetForms),
     ...shopAnswers,
     ...SHS_THINGS,
+    ...teacherAnswers,
     ...historyAnswers,
     ...sportAnswers,
     ...peopleAnswers,

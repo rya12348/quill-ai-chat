@@ -38,17 +38,29 @@ export function flatAnswer(value: string): string {
     .replace(/s$/, '')
 }
 
+/**
+ * The floor a party card has to clear to be dealt. A table of ten burns through
+ * answers far faster than one, and the shipped categories all carry hundreds
+ * (the deep end runs to five figures), so a card with a handful of answers is a
+ * card that strands the table twenty seconds in: every later guess is refused
+ * as a repeat. Those thin cards stay in the bank — the dive only ever asks one
+ * question, so it can use them — but the party refuses to deal them.
+ */
+export const PARTY_MIN_ANSWERS = 100
+
+const PARTY_TOPICS: ButterTopic[] = BUTTER_TOPICS.filter((topic) => topic.answers.length >= PARTY_MIN_ANSWERS)
+
 /** The arcade never deals a category the table has already seen; once every
  *  card has been played it starts over rather than running dry. */
 export function nextTopic(seen: string[] = []): ButterTopic {
-  const fresh = BUTTER_TOPICS.filter((topic) => !seen.includes(topic.prompt))
-  const pool = fresh.length ? fresh : BUTTER_TOPICS
+  const fresh = PARTY_TOPICS.filter((topic) => !seen.includes(topic.prompt))
+  const pool = fresh.length ? fresh : PARTY_TOPICS
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
 export function pickTopic(avoid?: string): ButterTopic {
-  const pool = avoid ? BUTTER_TOPICS.filter((topic) => topic.prompt !== avoid) : BUTTER_TOPICS
-  return (pool.length ? pool : BUTTER_TOPICS)[Math.floor(Math.random() * (pool.length || BUTTER_TOPICS.length))]
+  const pool = avoid ? PARTY_TOPICS.filter((topic) => topic.prompt !== avoid) : PARTY_TOPICS
+  return (pool.length ? pool : PARTY_TOPICS)[Math.floor(Math.random() * (pool.length || PARTY_TOPICS.length))]
 }
 
 /** Two edits apart, three for a long word: a typo, never a different answer. */

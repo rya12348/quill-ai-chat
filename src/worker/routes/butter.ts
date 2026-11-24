@@ -338,7 +338,7 @@ function simsburyTarget(room: RoomRow): number {
 function dueSimsbury(room: RoomRow, seen: string[]): ButterTopic | undefined {
   const played = seen.filter((prompt) => SIMSBURY_CARDS.some((card) => card.prompt === prompt)).length
   if (played >= simsburyTarget(room)) return undefined
-  const dueAt = [2, 5, 8][played] ?? Number.POSITIVE_INFINITY
+  const dueAt = [1, 4, 7][played] ?? Number.POSITIVE_INFINITY
   if (room.round < dueAt) return undefined
   const fresh = SIMSBURY_CARDS.filter((card) => !seen.includes(card.prompt))
   if (!fresh.length) return undefined
@@ -946,8 +946,9 @@ butter.post('/start', async (c) => {
   // A rematch keeps the table's history, so the card it just finished is not
   // dealt straight back to it.
   const seen = seenOf(room)
-  // A rematch starts at round one, whatever the last game ended on.
-  const topic = nextPartyTopic({ ...room, round: 1 }, seen)
+  // A rematch starts a fresh count, whatever the last game ended on, and the
+  // opening card is always the bank's: the town arrives on the second deal.
+  const topic = nextPartyTopic({ ...room, round: 0 }, seen)
   const history = [...seen, topic.prompt].slice(-SEEN_KEEP)
   // The shipped table's fuse is `fuseMinMs: 10_000` to `fuseMaxMs: 30_000` on
   // every deal, the first one included.
