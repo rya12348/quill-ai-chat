@@ -1,11 +1,12 @@
 /**
  * The Simsbury pack.
  *
- * Butter's home town, written down: the streets, the high school's staff and
- * teams, the town's own history, the shops, the landmarks and the people. Two
- * of these cards turn up in every Daily Dive (the dive overlays them on
- * whichever deck it dealt, live or local) and two or three in every Butter
- * Party game, spaced so a short game still reads as a normal table.
+ * Butter's home town, written down: the streets, the places to eat, the town's
+ * own history, the shops, the high school's teams, the landmarks and the towns
+ * around it. One of these cards turns up in most Daily Dives (the dive overlays
+ * it on whichever deck it dealt, live or local) and one in every Butter Party
+ * game, with a second now and then, so the town stays a flavour of the game
+ * rather than its subject.
  *
  * Every answer here is a real thing in or about Simsbury, taken from the town's
  * own street index, the school's staff and club pages, the historical society
@@ -1145,7 +1146,7 @@ function cards(): BankCard[] {
 
 export const SIMSBURY_CARDS: BankCard[] = cards()
 
-/** The rounds of the Daily Dive the town gets: the third and the sixth. */
+/** The round of the Daily Dive the town gets: the third. */
 const SLOTS = [2, 5]
 
 /** Mulberry32, the same sequence the dive uses for its own shuffle. */
@@ -1176,24 +1177,32 @@ const ROTATION = (() => {
   return order
 })()
 
-/** How many cards the dives before this one spent: one on odd days, two on even. */
+/** Whether a dive day asks the town at all: two days in three, never twice. */
+function takesTown(dayNumber: number): boolean {
+  return dayNumber % 3 !== 0
+}
+
+/** How many cards the dives before this one spent. */
 function picksBefore(dayNumber: number): number {
   const before = Math.max(0, dayNumber - 1)
-  return before + Math.floor(before / 2)
+  return before - Math.floor(before / 3)
 }
 
 /**
- * The Simsbury cards a given dive day carries: one on odd days, two on even
- * ones, taken in rotation so the town never asks the same thing on two dives
- * running and comes back to a question only after the whole pack has been used.
+ * The Simsbury cards a given dive day carries: none on every third day, one on
+ * the rest, taken in rotation so the town never asks the same thing on two
+ * dives running and comes back to a question only after the whole pack has been
+ * used.
  */
 export function simsburyForDay(dayNumber: number): { index: number; card: BankCard }[] {
-  const count = dayNumber % 2 === 0 ? 2 : 1
+  if (!takesTown(dayNumber)) return []
   const start = picksBefore(dayNumber)
-  return Array.from({ length: count }, (_, position) => ({
-    index: SLOTS[position],
-    card: SIMSBURY_CARDS[ROTATION[(start + position) % ROTATION.length]],
-  }))
+  return [
+    {
+      index: SLOTS[0],
+      card: SIMSBURY_CARDS[ROTATION[start % ROTATION.length]],
+    },
+  ]
 }
 
 /** The card sitting at a prompt id on a date, if that id is a Simsbury slot. */

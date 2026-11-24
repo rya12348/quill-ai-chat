@@ -392,20 +392,20 @@ function nextAlive(players: PlayerRow[], after: string | null): PlayerRow | unde
  * replaced and the puffer keeps moving.
  */
 /**
- * How many times the town turns up at one table: two, and now and then three.
- * A third card is meant to be a surprise, so only about one table in seven
- * gets one rather than every other table as before.
+ * How many times the town turns up at one table: once, and now and then twice.
+ * The town is a flavour, not a theme, so most games meet it on the second card
+ * and only about one game in five meets it again later.
  */
 function simsburyTarget(room: RoomRow): number {
   let hash = 0
   for (const character of room.id) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
-  return hash % 7 === 0 ? 3 : 2
+  return hash % 5 === 0 ? 2 : 1
 }
 
 /**
  * The Simsbury card this table is due, if it is due one. The town takes the
- * second, fifth and eighth card of a game — so a short game still meets it once,
- * a long one two or three times, and never twice in a row.
+ * second card of a game, and a table that is due a second one gets it on the
+ * fifth — so a game meets it once, rarely twice, and never twice in a row.
  */
 function dueSimsbury(room: RoomRow, seen: string[]): ButterTopic | undefined {
   const played = seen.filter((prompt) => SIMSBURY_CARDS.some((card) => card.prompt === prompt)).length
