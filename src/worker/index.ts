@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 
 import { aiConfigured } from './ai'
@@ -1042,6 +1042,43 @@ app.route('/api/traffic', traffic)
 // and `/api/butter` would otherwise claim the whole path.
 app.route('/api/butter-dive', butterDive)
 app.route('/api/butter', butter)
+/**
+ * Butter is the copy. `/butter` serves the mirrored site's own pages — the same
+ * files that answer at `/krillion` — so the game under Butter's name is the
+ * game, not a lookalike. Assets stay at their captured paths; only the page a
+ * visitor lands on moves.
+ */
+/**
+ * The mirrored page for a path, with its canonicalising redirect followed here
+ * rather than handed to the browser: the host answers `/krillion/index.html`
+ * with a 308 to the pretty URL, and a browser that saw it would leave Butter
+ * for the copy's own address.
+ */
+async function mirrorPage(c: Context<AppContext>, path: string): Promise<Response> {
+  let res = await c.env.ASSETS.fetch(new Request(new URL(path, c.req.url), c.req.raw))
+  for (let hop = 0; hop < 3 && res.status >= 300 && res.status < 400; hop += 1) {
+    const location = res.headers.get('location')
+    if (!location) break
+    res = await c.env.ASSETS.fetch(new Request(new URL(location, c.req.url), { headers: c.req.raw.headers }))
+  }
+  return res
+}
+
+app.get('/butter', (c) => mirrorPage(c, '/krillion/index.html'))
+app.get('/butter/*', async (c) => {
+  const rest = new URL(c.req.url).pathname.slice('/butter'.length)
+  if (rest === '' || rest === '/') return mirrorPage(c, '/krillion/index.html')
+  // A route is a file on disk: `/butter/packs` is `packs.html`, and the host
+  // only resolves that for `/krillion/packs` when the Worker is not in front of
+  // it. Ask for the file by name first, then the captured path as it stands.
+  const page = rest.endsWith('/') || rest.includes('.') ? null : `/krillion${rest}.html`
+  if (page) {
+    const res = await mirrorPage(c, page)
+    if (res.status !== 404) return res
+  }
+  return mirrorPage(c, `/krillion${rest}`)
+})
+
 app.route('/api', api)
 
 /**

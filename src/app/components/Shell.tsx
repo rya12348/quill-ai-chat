@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { Menu as MenuIcon, Bot, ChevronDown, Code2, Eye, Fish, Gamepad2, Globe2, Library as LibraryIcon, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PenLine, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, Users, X } from 'lucide-react'
+import { Menu as MenuIcon, Bot, ChevronDown, Code2, Eye, Fish, Globe2, Library as LibraryIcon, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PenLine, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, Users, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 
@@ -276,15 +276,8 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
           <Fish className="size-4" />
           Butter Party
         </NavLink>
-        {/* The game itself: their own build, served as it shipped. The link
-            below it is the source browser, which is a different thing. */}
-        <a
-          href="/krillion/"
-          className="relative mt-0.5 flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] text-muted transition-colors hover:bg-surface hover:text-fg"
-        >
-          <Gamepad2 className="size-4" />
-          Krillion
-        </a>
+        {/* The game is Butter: `/butter` serves their own build, so there is no
+            second game in the rail. The link below is the source browser. */}
         <NavLink
           to="/krillion-source"
           className={({ isActive }) =>
