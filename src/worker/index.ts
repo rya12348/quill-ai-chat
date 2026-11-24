@@ -33,6 +33,7 @@ import { browserGateway } from './routes/browser-gateway'
 import { buffy } from './routes/buffy'
 import { butter } from './routes/butter'
 import { butterDive } from './routes/butter-dive'
+import { butterModes } from './routes/butter-modes'
 import { chat } from './routes/chat'
 import { humanizer } from './routes/humanizer'
 import { localAuth } from './routes/local-auth'
@@ -992,6 +993,7 @@ app.route('/api/traffic', traffic)
 // Mounted before the party router: the dive is public and needs no database,
 // and `/api/butter` would otherwise claim the whole path.
 app.route('/api/butter-dive', butterDive)
+app.route('/api/butter-modes', butterModes)
 app.route('/api/butter', butter)
 app.route('/api', api)
 

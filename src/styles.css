@@ -1119,11 +1119,15 @@ html.dark .prose-chat pre {
   color: #e8f1ff;
 }
 
-/* Butter's two pages are the game's own pages: the shipped dive and party fill
-   the window, so the shell's sidebar and its mobile header are not part of them.
-   The game supplies its own menu in the corner instead. */
+/* Butter's pages are the game's own pages: the shipped dive and party fill the
+   window, so the shell's sidebar and its mobile header are not part of them.
+   The game supplies its own menu in the corner instead.
+
+   The bar is named rather than selected as `header`: a game page may wrap its
+   own copy in a <header> (the pack runner does), and a rule this wide hid the
+   page's title along with the app's bar. */
 .app-shell--game > aside,
-.app-shell--game header {
+.app-shell--game .shell-mobile-bar {
   display: none !important;
 }
 
