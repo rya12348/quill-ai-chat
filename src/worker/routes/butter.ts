@@ -14,12 +14,14 @@ import type { AppContext } from '../env'
  * wall-clock deadline stored on the room, and every request settles it first, so
  * two players polling at once always agree on who the puffer popped on.
  *
- * Rules mirrored from the shipped room, which its own how-to-play states: two to
- * eight players, the host picks one to three lives, everyone gets the same
- * category, a right answer passes the puffer on, a wrong answer or a repeat
- * keeps it with you, the fuse is hidden and random (10–30 seconds) and never
- * gets longer, and the last player with lives left wins the room. The rarity
- * meter is Ink's own scoring bar; it no longer hands out extra lives.
+ * Rules mirrored from the shipped room's own constants and FAQ: two to sixteen
+ * players (1V1, 3S, 4–6, 8–10), the host picks one to ten lives (two by
+ * default), everyone shares one category, a right answer passes the puffer on,
+ * a wrong answer or a repeat keeps it with you and costs nothing, and the last
+ * player with lives left wins the room. The fuse is hidden and random (10–30
+ * seconds), shared across the table: a pass hands over the time that is left,
+ * refilled to eight seconds if less than that remains, and only a pop strikes a
+ * new one. A full rarity meter is the one way to earn a spare heart.
  */
 
 export const butter = new Hono<AppContext>()
@@ -128,6 +130,7 @@ type PlayerRow = {
   answers: number
   pops: number
   place: number | null
+  last_answer: string | null
   bot: number
   seen_at: number
   client: string | null
@@ -223,6 +226,7 @@ function ensureSchema(db: D1Database): Promise<void> {
         'ALTER TABLE butter_players ADD COLUMN answers INTEGER NOT NULL DEFAULT 0',
         'ALTER TABLE butter_players ADD COLUMN pops INTEGER NOT NULL DEFAULT 0',
         'ALTER TABLE butter_players ADD COLUMN place INTEGER',
+        'ALTER TABLE butter_players ADD COLUMN last_answer TEXT',
       ]) {
         try {
           await db.prepare(sql).run()
@@ -271,6 +275,18 @@ function roomCode(): string {
   return out
 }
 
+/** A seat's last answer rides as JSON in D1; anything malformed reads as none. */
+function parseLastAnswer(value: unknown): { text: string; tier: string } | null {
+  if (typeof value !== 'string' || !value) return null
+  try {
+    const parsed = JSON.parse(value) as { text?: unknown; tier?: unknown }
+    if (!parsed || typeof parsed.text !== 'string') return null
+    return { text: parsed.text, tier: typeof parsed.tier === 'string' ? parsed.tier : 'schooler' }
+  } catch {
+    return null
+  }
+}
+
 async function roomOf(database: D1Database, code: string): Promise<RoomRow | undefined> {
   return (
     (await database
@@ -284,7 +300,7 @@ async function roomOf(database: D1Database, code: string): Promise<RoomRow | und
 
 async function playersOf(database: D1Database, code: string): Promise<PlayerRow[]> {
   const rows = await database
-    .prepare(`SELECT pid, name, hearts, seat, meter, segs, score, answers, pops, place, bot, seen_at, client FROM butter_players WHERE room = ? ORDER BY seat`)
+    .prepare(`SELECT pid, name, hearts, seat, meter, segs, score, answers, pops, place, last_answer, bot, seen_at, client FROM butter_players WHERE room = ? ORDER BY seat`)
     .bind(code)
     .all<PlayerRow>()
   return (rows.results ?? []).map((player) => ({
@@ -684,26 +700,37 @@ async function playBots(database: D1Database, room: RoomRow): Promise<RoomRow> {
     if (!tier) return current
     const segs = [...parseSegs(me.segs), { tier: tier.id, amt: tier.score }]
     let meter = me.meter + tier.score
-    const target = Number(current.meter_target) || METER_FULL
-    // The bar is a scoreboard: filling it wraps it, and the shipped room has no
-    // way to earn a life back.
-    if (meter >= target) meter -= target
+    let target = Number(current.meter_target) || METER_FULL
+    // A bot earns its spare life on the same rule as a person: a full bar.
+    let hearts = me.hearts
+    let spares = 0
+    if (meter >= target) {
+      meter -= target
+      target = Math.min(MAX_METER_TARGET, target + METER_STEP)
+      if (hearts < MAX_LIVES) {
+        hearts += 1
+        spares = 1
+      }
+    }
     const reply = tier.value
     used.push(reply)
     await database
-      .prepare(`UPDATE butter_players SET meter = ?, segs = ?, score = ?, answers = answers + 1 WHERE room = ? AND pid = ?`)
-      .bind(meter, JSON.stringify(segs), me.score + tier.score, current.id, me.pid)
+      .prepare(
+        `UPDATE butter_players SET meter = ?, segs = ?, score = ?, hearts = ?, answers = answers + 1, last_answer = ? WHERE room = ? AND pid = ?`,
+      )
+      .bind(meter, JSON.stringify(segs), me.score + tier.score, hearts, JSON.stringify({ text: tier.value, tier: tier.id }), current.id, me.pid)
       .run()
     await database
       .prepare(`UPDATE butter_rooms SET used = ?, meter_target = ?, updated_at = ? WHERE id = ?`)
       .bind(JSON.stringify(used), target, now(), current.id)
       .run()
     await say(database, current.id, `${me.name}: ${answer}`, 'good')
+    if (spares) await say(database, current.id, `${me.name} filled the meter: +1 ♥ spare life.`, 'good')
     current = await advance(
       database,
       { ...current, used: JSON.stringify(used), meter_target: target },
       players.map((player) =>
-        player.pid === me.pid ? { ...player, meter, score: player.score + tier.score } : player,
+        player.pid === me.pid ? { ...player, meter, hearts, score: player.score + tier.score } : player,
       ),
       false,
     )
@@ -826,8 +853,8 @@ async function snapshot(database: D1Database, code: string, pid: string) {
     fuseEnd: room.fuse_end,
     fuseMs: room.fuse_ms,
     meterTarget: Number(room.meter_target) || METER_FULL,
-    // The host's setting, one to three: every seat opens on the same count and
-    // nothing in the game hands out a spare.
+    // The host's setting, one to ten: every seat opens on the same count, and a
+    // full meter is the one way to add another heart to it.
     maxLives: livesFor(room.lives),
     size: room.size || 'party',
     cap: capFor(room.size),
@@ -845,6 +872,9 @@ async function snapshot(database: D1Database, code: string, pid: string) {
       answers: player.answers,
       pops: player.pops,
       place: player.place,
+      // What this seat said last, worn over their head until they say the next
+      // one: the shipped table carries it per player as `lastAnswer`.
+      lastAnswer: parseLastAnswer(player.last_answer),
       bot: player.bot === 1,
       you: player.pid === pid,
       rating: seatRatings && player.client ? (seatRatings.get(String(player.client)) ?? 1000) : null,
@@ -1075,7 +1105,7 @@ butter.post('/start', async (c) => {
   // The shipped table's fuse is `fuseMinMs: 10_000` to `fuseMaxMs: 30_000` on
   // every deal, the first one included.
   const firstFuse = randomFuse()
-  // The host's one-to-three lives, set in the lobby or handed in with the start.
+  // The host's one-to-ten lives, set in the lobby or handed in with the start.
   const lives = livesFor(body.lives ?? room.lives)
   await database.prepare(`UPDATE butter_rooms SET lives = ? WHERE id = ?`).bind(lives, code).run()
   await database
@@ -1184,17 +1214,12 @@ butter.post('/say', async (c) => {
       at: now(),
     })
     // A miss stays with the person who missed: the refusal says they can try
-    // again, so the puffer must not move, and nothing is scored. The card only
-    // turns over once the table has burned both of its two chances on it.
-    const misses = (Number(room.misses) || 0) + 1
-    if (misses >= 2) {
-      await database.prepare(`UPDATE butter_rooms SET misses = 0 WHERE id = ?`).bind(code).run()
-      const advanced = await advance(database, { ...room, misses: 0 }, players, true)
-      return c.json(await snapshot(database, advanced.id, pid), 200, { 'cache-control': 'no-store' })
-    }
+    // again, so the puffer must not move, the card must not turn over and
+    // nothing is scored. The fuse is the only clock in the game — the shipped
+    // `reject()` is a shake and a chip, no heart and no pass.
     await database
       .prepare(`UPDATE butter_rooms SET misses = ?, updated_at = ? WHERE id = ?`)
-      .bind(misses, now(), code)
+      .bind((Number(room.misses) || 0) + 1, now(), code)
       .run()
     return c.json(await snapshot(database, code, pid), 200, { 'cache-control': 'no-store' })
   }
@@ -1205,13 +1230,25 @@ butter.post('/say', async (c) => {
   used.push(reply)
   const segs: MeterSeg[] = [...parseSegs(me.segs), { tier: tier.id, amt: tier.score }]
   let meter = me.meter + tier.score
-  const target = Number(room.meter_target) || METER_FULL
-  // The bar is a scoreboard: filling it wraps it, and the shipped room has no
-  // way to earn a life back.
-  if (meter >= target) meter -= target
+  let target = Number(room.meter_target) || METER_FULL
+  // Filling the bar is the game's one way to earn a life back: the shipped
+  // engine answers a full meter with `spare()` and a "+1 ♥ SPARE LIFE" chip,
+  // then empties the bar and lengthens the next one by 50.
+  let hearts = me.hearts
+  let spares = 0
+  if (meter >= target) {
+    meter -= target
+    target = Math.min(MAX_METER_TARGET, target + METER_STEP)
+    if (hearts < MAX_LIVES) {
+      hearts += 1
+      spares = 1
+    }
+  }
   await database
-    .prepare(`UPDATE butter_players SET meter = ?, segs = ?, score = ?, answers = answers + 1 WHERE room = ? AND pid = ?`)
-    .bind(meter, JSON.stringify(segs), me.score + tier.score, code, pid)
+    .prepare(
+      `UPDATE butter_players SET meter = ?, segs = ?, score = ?, hearts = ?, answers = answers + 1, last_answer = ? WHERE room = ? AND pid = ?`,
+    )
+    .bind(meter, JSON.stringify(segs), me.score + tier.score, hearts, JSON.stringify({ text: reply, tier: tier.id }), code, pid)
     .run()
   await database
     .prepare(`UPDATE butter_rooms SET used = ?, meter_target = ?, updated_at = ? WHERE id = ?`)
@@ -1227,12 +1264,22 @@ butter.post('/say', async (c) => {
     at: now(),
   })
   if (meter === 0) await say(database, code, `${playerName} filled the meter.`, 'good')
+  if (spares) {
+    await say(database, code, `${playerName} filled the meter: +1 ♥ spare life.`, 'good')
+    await setLast(database, code, {
+      kind: 'spare',
+      name: playerName,
+      answer: reply,
+      points: 0,
+      at: now(),
+    })
+  }
 
   const advanced = await advance(
     database,
     { ...room, used: JSON.stringify(used), meter_target: target },
     players.map((player) =>
-      player.pid === pid ? { ...player, meter, score: player.score + tier.score } : player,
+      player.pid === pid ? { ...player, meter, hearts, score: player.score + tier.score } : player,
     ),
     false,
   )

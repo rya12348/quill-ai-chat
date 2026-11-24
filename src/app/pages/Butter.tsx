@@ -28,6 +28,8 @@ type Player = {
   bot?: boolean
   /** Set on a rated table, where every plate carries its owner's number. */
   rating?: number | null
+  /** What this seat said last, worn over its head until it says another. */
+  lastAnswer?: { text: string; tier?: string } | null
 }
 type FeedLine = { id: number; text: string; tone: string; at?: number }
 type Last = { kind?: string; name?: string; answer?: string; tier?: TierId; points?: number; at?: number } | null
@@ -1521,23 +1523,27 @@ export function Butter() {
   // The character you picked, floating between the two door columns before a
   // table is dealt — the shipped gate does the same with the idle buddy.
 
-  // An answer chip lives for 1300ms on the shipped table and then fades, so a
-  // seat shows what it just said rather than a wall of every answer so far.
-  // The clock starts when the line reaches this tab: the table is polled once a
-  // second, and timing it from the server's stamp made chips blink out before
-  // they were ever drawn.
+  // A seat wears its last answer over its head until it says another one: the
+  // chip is the seat's standing answer, not a 1.3s toast, so the table can see
+  // what everyone has already said without waiting for the next poll.
   const saidSeen = useRef(new Map<number, number>())
   const said = (() => {
     const map = new Map<string, { text: string; tier?: TierId }>()
     const at = Date.now()
     const feed = snap?.feed ?? []
+    // The seat's own record is the durable one: it survives the feed scrolling,
+    // so a chip stays up from the answer until the next answer replaces it.
+    for (const player of snap?.players ?? []) {
+      const worn = player.lastAnswer
+      if (worn && typeof worn.text === 'string')
+        map.set(player.name, { text: worn.text.toLowerCase(), tier: worn.tier as TierId | undefined })
+    }
     const live = new Set(feed.map((line) => line.id))
     for (const line of feed) if (!saidSeen.current.has(line.id)) saidSeen.current.set(line.id, at)
     for (const id of [...saidSeen.current.keys()]) if (!live.has(id)) saidSeen.current.delete(id)
     for (const line of feed) {
       const match = /^(.+?): (.+)$/.exec(line.text)
       if (!match || /^(the|every)/i.test(match[1])) continue
-      if (at - (saidSeen.current.get(line.id) ?? at) > 1300) continue
       map.set(match[1].trim(), { text: match[2].toLowerCase() })
     }
     return map
