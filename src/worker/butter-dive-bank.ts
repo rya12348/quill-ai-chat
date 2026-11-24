@@ -112,8 +112,15 @@ export type DiveRating = {
 }
 
 /** Rate one answer against the card the prompt id names. */
-export function rateDiveAnswer(promptId: string, answer: string, date = today()): DiveRating {
-  const card = diveCard(promptId, date)
+export function rateDiveAnswer(
+  promptId: string,
+  answer: string,
+  date = today(),
+  /** The card's full answer list, when the caller could read it: the bundled
+   *  copy is trimmed, and a trimmed copy is what refused real answers. */
+  override?: ButterTopic,
+): DiveRating {
+  const card = override ?? diveCard(promptId, date)
   if (!card) return { accepted: false, rejectionReason: 'That prompt is not in today’s dive.' }
   const tier = answerTier(card, answer)
   if (tier) return { accepted: true, answer: tier.value, tier: tier.id, score: tier.score }

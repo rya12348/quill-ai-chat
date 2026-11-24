@@ -162,9 +162,25 @@ function withinTypos(needle: string, target: string): boolean {
   return false
 }
 
+/**
+ * The names a table uses for an answer the card carries under another one. A
+ * card holding "United States" and refusing "America" is the card refusing a
+ * right answer, which is the one thing this matcher exists to prevent.
+ */
+const ALIASES: Record<string, string[]> = {
+  usa: ['united states'],
+  us: ['united states'],
+  america: ['united states'],
+  'united states of america': ['united states'],
+  uk: ['united kingdom'],
+  britain: ['united kingdom'],
+  'great britain': ['united kingdom'],
+  holland: ['netherlands'],
+  uae: ['united arab emirates'],
+}
+
 /** The accepted answer a typed one is close enough to, with its real spelling. */
-export function closestAnswer(topic: ButterTopic, answer: string): { index: number; value: string } | null {
-  const needle = flatAnswer(answer)
+function closestFor(needle: string, topic: ButterTopic): { index: number; value: string; distance: number } | null {
   if (!needle) return null
   let best: { index: number; value: string; distance: number } | null = null
   for (let index = 0; index < topic.answers.length; index += 1) {
@@ -174,7 +190,19 @@ export function closestAnswer(topic: ButterTopic, answer: string): { index: numb
     const distance = target === needle ? 0 : Math.max(1, Math.min(editDistance(needle, target), Math.abs(target.length - needle.length)))
     if (!best || distance < best.distance) best = { index, value, distance }
   }
-  return best ? { index: best.index, value: best.value } : null
+  return best
+}
+
+export function closestAnswer(topic: ButterTopic, answer: string): { index: number; value: string } | null {
+  const needle = flatAnswer(answer)
+  if (!needle) return null
+  const direct = closestFor(needle, topic)
+  if (direct) return { index: direct.index, value: direct.value }
+  for (const alias of ALIASES[needle] ?? []) {
+    const named = closestFor(flatAnswer(alias), topic)
+    if (named) return { index: named.index, value: named.value }
+  }
+  return null
 }
 
 /** Whether a typed answer is the same answer as one already spent this round. */

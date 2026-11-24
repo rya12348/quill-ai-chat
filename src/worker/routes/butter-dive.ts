@@ -1,7 +1,8 @@
 import { Hono, type Context } from 'hono'
 
 import type { AppContext } from '../env'
-import { diveDay, isSimsburySlot, rateDiveAnswer, simsburyTextAt } from '../butter-dive-bank'
+import { diveCard, diveDay, isSimsburySlot, rateDiveAnswer, simsburyTextAt } from '../butter-dive-bank'
+import { fullCard } from '../butter-cards-full'
 import { DIVE_DAY_LOCK } from '../dive-day'
 import { simsburyForDay } from '../butter-simsbury'
 import { TIERS, type ButterTier } from '../butter-topics'
@@ -156,6 +157,14 @@ butterDive.post('/answer', async (c) => {
       // on a different prompt. Better to say the signal was lost.
       return c.json({ error: 'The dive is not taking answers right now.' }, 502)
     }
+  }
+  // The local deck rates here. Read the card's whole answer list first: the
+  // bundle only carries a capped copy, and capping is exactly what refused
+  // answers the card really has.
+  const local = diveCard(promptId, date || undefined)
+  if (local) {
+    const full = await fullCard(local.prompt, c.env.ASSETS, new URL(c.req.url).origin)
+    if (full) return c.json(rateDiveAnswer(promptId, answer, date || undefined, full), 200, { 'cache-control': 'no-store' })
   }
   return c.json(rateDiveAnswer(promptId, answer), 200, { 'cache-control': 'no-store' })
 })
