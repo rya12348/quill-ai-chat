@@ -61,6 +61,8 @@ function build(prompt: string, answers: string[]): BankCard {
 
 /** The roads people actually name, obvious first. */
 const STREETS_HEAD = [
+  'Westledge Road',
+  'Westledge',
   'Hopmeadow Street',
   'Hopmeadow',
   'Main Street',
@@ -716,6 +718,7 @@ const HISTORY = [
 /* ------------------------------------------------------------------- shops */
 
 const SHOPS = [
+  'the mall',
   'Stop & Shop',
   'Fitzgerald’s Foods',
   "Fitzgerald's Foods",
@@ -880,6 +883,7 @@ function sportForms(sport: string): string[] {
 /* ------------------------------------------------------------------ places */
 
 const PLACES = [
+  'the mall',
   'Simsbury Center',
   'Tariffville',
   'Weatogue',
@@ -998,6 +1002,7 @@ const PLACES = [
 /* ------------------------------------------------------------------ people */
 
 const PEOPLE = [
+  'Eno',
   'Gifford Pinchot',
   'Pinchot',
   'Amos Eno',
@@ -1084,6 +1089,7 @@ const PEOPLE = [
 /* -------------------------------------------------------------- SHS itself */
 
 const SHS_THINGS = [
+  'the cafe',
   'the parking lot',
   'the field house',
   'turf',

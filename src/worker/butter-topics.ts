@@ -179,6 +179,17 @@ const ALIASES: Record<string, string[]> = {
   uae: ['united arab emirates'],
 }
 
+/**
+ * Spellings Krillion's own answer sheet carries as aliases of an answer our card
+ * only holds in full. Taken from its public reveal, so the word a table types is
+ * the word its sheet scores: "pump" is "Suction pump" (rare, 60) there, and it
+ * has to be here. An empty card list means the sheet has no such alias, and the
+ * word is meant to be refused.
+ */
+const CARD_ALIASES: Record<string, Record<string, string>> = {
+  'Name something that uses suction': { pump: 'Suction pump' },
+}
+
 /** The accepted answer a typed one is close enough to, with its real spelling. */
 function closestFor(needle: string, topic: ButterTopic): { index: number; value: string; distance: number } | null {
   if (!needle) return null
@@ -198,7 +209,8 @@ export function closestAnswer(topic: ButterTopic, answer: string): { index: numb
   if (!needle) return null
   const direct = closestFor(needle, topic)
   if (direct) return { index: direct.index, value: direct.value }
-  for (const alias of ALIASES[needle] ?? []) {
+  const sheetAlias = CARD_ALIASES[topic.prompt]?.[needle]
+  for (const alias of [...(ALIASES[needle] ?? []), ...(sheetAlias ? [sheetAlias] : [])]) {
     const named = closestFor(flatAnswer(alias), topic)
     if (named) return { index: named.index, value: named.value }
   }
