@@ -988,6 +988,48 @@ app.get('/api/app-icon/:host', async (c) => {
 })
 // The page-view beacon is public and aggregate-only; it must stay outside the
 // authenticated API subapp so the sign-in screen can be counted too.
+app.all('/api/krillion/*', async (c) => {
+  const url = new URL(c.req.url)
+  const target = `https://krillion.io/api${url.pathname.slice('/api/krillion'.length)}${url.search}`
+  const headers = new Headers()
+  const type = c.req.header('content-type')
+  if (type) headers.set('content-type', type)
+  headers.set('accept', 'application/json')
+  // Their POST routes check where a submission came from, so the call is made
+  // as the site's own client makes it. The copy is the site's build; this is
+  // its address, not a disguise.
+  headers.set('origin', 'https://krillion.io')
+  headers.set('referer', 'https://krillion.io/')
+  // Naming ourselves keeps the call legible in their logs.
+  headers.set('user-agent', 'Ink-Krillion/1.0 (+https://www.inkbrowser.dpdns.org/krillion)')
+  // The party room is a WebSocket: hand the upgrade straight through.
+  if (c.req.header('upgrade')) {
+    try {
+      return await fetch(target, { headers: c.req.raw.headers })
+    } catch {
+      return new Response('Upstream unavailable.', { status: 502 })
+    }
+  }
+  try {
+    const res = await fetch(target, {
+      method: c.req.method,
+      headers,
+      body: c.req.method === 'GET' || c.req.method === 'HEAD' ? undefined : await c.req.text(),
+      cache: 'no-store',
+    })
+    const body = await res.text()
+    return new Response(body, {
+      status: res.status,
+      headers: {
+        'content-type': res.headers.get('content-type') ?? 'application/json',
+        'cache-control': 'no-store',
+      },
+    })
+  } catch {
+    return c.json({ error: 'The dive is unreachable right now.' }, 502)
+  }
+})
+
 app.route('/api/traffic', traffic)
 // Mounted before the party router: the dive is public and needs no database,
 // and `/api/butter` would otherwise claim the whole path.
