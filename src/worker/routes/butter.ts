@@ -392,14 +392,23 @@ function nextAlive(players: PlayerRow[], after: string | null): PlayerRow | unde
  * replaced and the puffer keeps moving.
  */
 /**
+ * A stable number for a room code. The town's pick used to be seeded with the
+ * code's length, which is four on every room ever made, so every table in the
+ * world was dealt the same pair of cards.
+ */
+function roomHash(code: string): number {
+  let hash = 0
+  for (const character of code) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
+  return hash
+}
+
+/**
  * How many times the town turns up at one table: once, and now and then twice.
  * The town is a flavour, not a theme, so most games meet it on the second card
  * and only about one game in five meets it again later.
  */
 function simsburyTarget(room: RoomRow): number {
-  let hash = 0
-  for (const character of room.id) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
-  return hash % 5 === 0 ? 2 : 1
+  return roomHash(room.id) % 5 === 0 ? 2 : 1
 }
 
 /**
@@ -414,7 +423,7 @@ function dueSimsbury(room: RoomRow, seen: string[]): ButterTopic | undefined {
   if (room.round < dueAt) return undefined
   const fresh = SIMSBURY_CARDS.filter((card) => !seen.includes(card.prompt))
   if (!fresh.length) return undefined
-  const pick = fresh[(room.round * 7 + room.id.length + played) % fresh.length]
+  const pick = fresh[(roomHash(room.id) + room.round * 7 + played) % fresh.length]
   return pick as unknown as ButterTopic
 }
 

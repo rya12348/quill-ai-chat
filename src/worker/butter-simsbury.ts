@@ -1093,6 +1093,109 @@ const EATS = [
   'Blue Fox Rock & Bowl',
 ]
 
+/** Pubs and bars: the tables a town actually names. */
+const PUBS = [
+  'Farley’s Pub',
+  "Farley's Pub",
+  'Old Well Tavern',
+  'Cracker Barrel Pub',
+  'Hoops ’n Hops',
+  "Hoops 'n Hops",
+  'Plan b',
+  'Plan B',
+  'Millwright’s',
+  "Millwright's",
+  'Métro Bis',
+  'Metro Bis',
+  'Blue Fox Rock & Bowl',
+]
+
+const PIZZA = [
+  'pizza',
+  'Apollo’s Pizza',
+  "Apollo's Pizza",
+  'Luna Pizza',
+  'Joe Pizza',
+  'Pepperoni’s',
+  "Pepperoni's",
+  'Iron Horse Pizzeria',
+  'Marco’s',
+  "Marco's",
+]
+
+const COFFEE = [
+  'Dunkin’',
+  "Dunkin'",
+  'Starbucks',
+  'Maple Tree Café',
+  'Maple Tree Cafe',
+  'Harvest Café',
+  'Harvest Cafe',
+  'Brookside Bagels',
+]
+
+const FARMS = [
+  'Tulmeadow Farm',
+  'Flamig Farm',
+  'Folly Farm',
+  'Rosedale Farms',
+  'George Hall Farm',
+  'the farm stand',
+  'the farmers market',
+]
+
+/** The town's schools, from the high school down to the primaries. */
+const SCHOOLS = [
+  'Simsbury High School',
+  'the high school',
+  'Henry James Memorial School',
+  'Henry James',
+  'the middle school',
+  'Central School',
+  'Tootin’ Hills School',
+  "Tootin' Hills School",
+  'Tootin’ Hills',
+  'Latimer Lane School',
+  'Latimer Lane',
+  'Squadron Line School',
+  'Squadron Line',
+  'Tariffville School',
+  'the elementary school',
+]
+
+/** Who the Trojans line up against. */
+const RIVALS = [
+  'Glastonbury',
+  'Farmington',
+  'Avon',
+  'Conard',
+  'Hall',
+  'Southington',
+  'Northwest Catholic',
+  'the CCC',
+  'the CIAC',
+  'the state tournament',
+  'the Thanksgiving game',
+  'the rivalry game',
+]
+
+/** The woods and water a neighbour would point you at. */
+const PARKS = [
+  'Penwood',
+  'Penwood State Park',
+  'Talcott Mountain',
+  'Talcott Mountain State Park',
+  'Stratton Brook',
+  'Stratton Brook State Park',
+  'the rail trail',
+  'the bike path',
+  'the flower bridge',
+  'Simsbury Farms',
+  'the Farmington River',
+  'the park',
+  'the playground',
+]
+
 function cards(): BankCard[] {
   const streets = [...STREETS_HEAD, ...STREETS_TAIL]
   const streetAnswers = streets.flatMap(streetForms)
@@ -1134,6 +1237,13 @@ function cards(): BankCard[] {
   return [
     build('Name a street or road in Simsbury', streetAnswers),
     build('Name a place to eat in Simsbury', eatAnswers),
+    build('Name a pizza place in Simsbury', PIZZA.flatMap((entry) => [entry, `${entry} in Simsbury`])),
+    build('Name a bar or pub in Simsbury', PUBS.flatMap((entry) => [entry, `${entry} in Simsbury`])),
+    build('Name a coffee shop or café in Simsbury', COFFEE.flatMap((entry) => [entry, `${entry} in Simsbury`])),
+    build('Name a farm in Simsbury', FARMS.flatMap((entry) => [entry, `${entry} in Simsbury`])),
+    build('Name a school in Simsbury', SCHOOLS),
+    build('Name a team the Trojans play', RIVALS),
+    build('Name a park or trail in Simsbury', PARKS),
     build('Name something from Simsbury’s history', historyAnswers),
     build('Name a shop, restaurant or business in Simsbury', shopAnswers),
     build('Name a sport or team at Simsbury High School', sportAnswers),
