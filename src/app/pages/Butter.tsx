@@ -195,11 +195,12 @@ function geometry(w: number, h: number, mode: 'door' | 'round', seats: number, r
   const mobile = w < 1100
   if (mode === 'door') {
     const d = mobile ? clamp(h / 844, 0.75, 1) : clamp(h / 800, 0.8, 1.1)
-    // The door frames the reef off-centre: the art's anchor sits at 9/16 of
-    // both axes and the pane is a twelfth larger than the cover fit, which is
-    // what leaves open water behind the cards instead of the bright reef edge.
-    const cx = Math.round(w * 0.5625)
-    const cy = mobile ? Math.round(214 * d + 14) : Math.round(h * 0.5625)
+    // The door centres the pane on the stage and lets the art's own cover fit
+    // do the rest, exactly as the shipped renderer does: `cx = w / 2`,
+    // `cy = h / 2`, `s = max(w / iw, h / ih) * zoom`. Nothing here is a share of
+    // the window — the reef is framed the same way at every size.
+    const cx = w / 2
+    const cy = mobile ? Math.round(214 * d + 14) : Math.round(h / 2)
     return {
       cx,
       cy,
@@ -209,7 +210,7 @@ function geometry(w: number, h: number, mode: 'door' | 'round', seats: number, r
       perch: Math.round(72 * d),
       fs: Math.round((mobile ? 104 : 150) * d),
       scale: 1,
-      pane: paneFor(w, h, cx, cy, mobile ? 1 : 1.125),
+      pane: paneFor(w, h, cx, cy),
     }
   }
   const crowded = seats > 8
@@ -229,7 +230,7 @@ function geometry(w: number, h: number, mode: 'door' | 'round', seats: number, r
   const spr = Math.round((mobile ? clamp(0.15 * w, 70, 104) : 92) * scale * fit)
   const perch = Math.round(perchBase * scale * fit)
   const gutter = w < 700 ? 48 : 64
-  const cx = Math.round(w * 0.5625)
+  const cx = w / 2
   const cy = Math.round((top + floor) / 2)
   const wantX = crowded ? (mobile ? 400 : 560) : 320
   const wantY = crowded ? 380 : 230
