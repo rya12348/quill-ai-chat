@@ -1105,8 +1105,19 @@ export function Butter() {
   const [mySaid, setMySaid] = useState<{ text: string; round: number } | null>(null)
   const chatList = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
-    const list = chatList.current
-    if (list) list.scrollTop = list.scrollHeight
+    // Twice: the text lays out after the commit, and a shorter window can make a
+    // panel that used to fit start overflowing without a new line arriving.
+    const stick = () => {
+      const list = chatList.current
+      if (list) list.scrollTop = list.scrollHeight
+    }
+    stick()
+    const timer = window.setTimeout(stick, 150)
+    window.addEventListener('resize', stick)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('resize', stick)
+    }
   }, [snap?.chat?.length])
   // The shipped table keeps its chat open down the right-hand side for the
   // whole game; there is no button that reveals it.
@@ -1576,6 +1587,13 @@ export function Butter() {
     if (mine && mySaid && mySaid.round === (snap?.round ?? 0)) map.set(mine.name, { text: mySaid.text })
     return map
   })()
+
+  // The chat docks against the right edge, and the seat that sits furthest right
+  // wears its chip centred on itself: 230 wide at desktop sizes, so half of that
+  // sticks out past the ring. Start the panel clear of it rather than on top.
+  // 122, not 115: half the chip's 230 plus the 7 px the reject shake throws it
+  // sideways, so even a wrong answer's chip stays out from under the panel.
+  const chatWidth = Math.max(190, Math.min(300, Math.round(viewport.w - 8 - (geo.cx + geo.rx + 122))))
 
   /* ------------------------------------------------------------------ table */
 
@@ -2078,7 +2096,10 @@ export function Butter() {
                       top: 64,
                       bottom: 10,
                       zIndex: 46,
-                      width: 300,
+                      // Narrow enough to leave the far-right seat's answer chip
+                      // in the clear: the chip is centred on that seat and is at
+                      // most 230 wide, so the panel starts past its right edge.
+                      width: chatWidth,
                       maxHeight: 'none',
                       display: 'flex',
                       flexDirection: 'column',
