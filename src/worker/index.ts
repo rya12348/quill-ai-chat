@@ -990,7 +990,14 @@ app.get('/api/app-icon/:host', async (c) => {
 // authenticated API subapp so the sign-in screen can be counted too.
 app.all('/api/krillion/*', async (c) => {
   const url = new URL(c.req.url)
-  const target = `https://krillion.io/api${url.pathname.slice('/api/krillion'.length)}${url.search}`
+  const path = url.pathname.slice('/api/krillion'.length)
+  // The room list and the activity counter live on their party server, not on
+  // krillion.io: that host answers those two paths `410 Gone`. The mirror's own
+  // client asks for them through this prefix, so the prefix follows them there.
+  const onParty = path === '/party/rooms' || path.startsWith('/party/rooms/') || path === '/party/activity'
+  const target = onParty
+    ? `https://party.krillion.io${path.slice('/party'.length)}${url.search}`
+    : `https://krillion.io/api${path}${url.search}`
   const headers = new Headers()
   const type = c.req.header('content-type')
   if (type) headers.set('content-type', type)
