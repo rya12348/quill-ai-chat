@@ -34,6 +34,8 @@ function capFor(size: string | undefined): number {
 }
 /** A full rarity meter pays out a spare heart. */
 const METER_FULL = 600
+/** The shipped table's own settings: `{lives: 2, maxLives: 5, meterTarget: 600,
+ *  minTurnMs: 8_000, fuseMinMs: 10_000, fuseMaxMs: 30_000, maxPlayers: 6}`. */
 const LIVES = 2
 const MAX_LIVES = 5
 const METER_STEP = 50
@@ -50,7 +52,7 @@ const FUSE_FLOOR_MS = 8_000
 /** A phone in a pocket throttles its timers to about one tick a minute, so a
  *  seated player who switches tabs is not absent — the fuse is what punishes
  *  them. Only a lobby seat, which nobody is playing from, is ever reclaimed. */
-const IDLE_KICK_MS = 180_000
+const IDLE_KICK_MS = 1_800_000
 /** A listed table is only joinable while its host is still sitting at it. */
 const HOST_FRESH_MS = 90_000
 /** A pass that leaves less than eight seconds puts eight back on the clock. */
@@ -87,6 +89,7 @@ type RoomRow = {
   fuse_ms: number
   meter_target: number
   last: string
+  swap_at: number
   winner: string | null
   size: string
   rated: number
@@ -180,6 +183,7 @@ function ensureSchema(db: D1Database): Promise<void> {
         "ALTER TABLE butter_rooms ADD COLUMN last TEXT NOT NULL DEFAULT '{}'",
         "ALTER TABLE butter_rooms ADD COLUMN size TEXT NOT NULL DEFAULT 'party'",
         "ALTER TABLE butter_rooms ADD COLUMN seen TEXT NOT NULL DEFAULT '[]'",
+        'ALTER TABLE butter_rooms ADD COLUMN swap_at INTEGER NOT NULL DEFAULT 0',
       ]) {
         try {
           await db.prepare(sql).run()
@@ -363,7 +367,12 @@ function seenOf(room: RoomRow): string[] {
 }
 
 /** How many past categories a room remembers before it is willing to repeat. */
-const SEEN_KEEP = 20
+/** The shipped `SEEN_CATEGORIES_MAX`: a table remembers this many past cards
+ *  before it is willing to repeat one. */
+const SEEN_KEEP = 300
+/** The shipped `CATEGORY_SWAP_MS`: a spent card is held back this long before
+ *  the next category is dealt, so the table sees the swap happen. */
+const CATEGORY_SWAP_MS = 1_300
 
 function dealCard(
   room: RoomRow,
@@ -465,6 +474,20 @@ async function advance(
   let used = usedOf(room)
   let swapped = false
   let history = seen
+  // Every answer on the card is spent. The shipped table holds the next card
+  // for `CATEGORY_SWAP_MS` instead of dealing it inside the same pass, so the
+  // puffer stays where it is and the new category arrives a beat later.
+  if (!popped && used.length >= topic.answers.length) {
+    const swapAt = Number(room.swap_at) || 0
+    if (!swapAt) {
+      await database
+        .prepare(`UPDATE butter_rooms SET swap_at = ?, updated_at = ? WHERE id = ?`)
+        .bind(now() + CATEGORY_SWAP_MS, now(), room.id)
+        .run()
+      return (await roomOf(database, room.id)) ?? room
+    }
+    if (now() < swapAt) return room
+  }
   if (popped) {
     // A pop ends the round: new card, cleared answers, new hidden fuse.
     topic = nextPartyTopic(room, [...seen, topic.prompt])
@@ -490,7 +513,7 @@ async function advance(
 
   await database
     .prepare(
-      `UPDATE butter_rooms SET turn = ?, turn_at = ?, round = ?, fuse_ms = ?, fuse_end = ?, topic = ?, used = ?, seen = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE butter_rooms SET turn = ?, turn_at = ?, round = ?, fuse_ms = ?, fuse_end = ?, topic = ?, used = ?, seen = ?, swap_at = 0, updated_at = ? WHERE id = ?`,
     )
     .bind(
       next?.pid ?? null,
@@ -520,6 +543,13 @@ function refusalMessage(name: string, answer: string, repeat: boolean): string {
 async function settleFuse(database: D1Database, room: RoomRow): Promise<RoomRow> {
   if (room.status !== 'playing' || !room.fuse_end) return room
   let current = room
+  // A card whose answers are all spent is dealt again once the swap hold is
+  // up — no answer can land until it is, so the poll that notices is the one
+  // that deals it.
+  if (current.status === 'playing' && Number(current.swap_at) && now() >= Number(current.swap_at)) {
+    const players = await playersOf(database, current.id)
+    current = await advance(database, current, players, false)
+  }
   for (let guard = 0; guard < 6; guard += 1) {
     if (current.status !== 'playing' || now() < current.fuse_end) break
     const players = await playersOf(database, current.id)
@@ -554,6 +584,9 @@ function freshAnswer(topic: ButterTopic, used: string[]): string | undefined {
   const left: string[] = []
   topic.answers.forEach((answer, index) => {
     if (spent.has(flatAnswer(answer))) return
+    // The town cards carry qualified spellings for matching ("the sycamore
+    // (Simsbury)"): a bot says the plain name, the way a person would.
+    if (/\((simsbury|shs)\)$| in simsbury$/i.test(answer)) return
     left.push(answer)
     const tier = topic.tiers?.[index]
     if (tier === 'plankton' || tier === 'tooclever' || tier === 'schooler') famous.push(answer)
