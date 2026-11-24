@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono'
 
 import { answerTier, closestAnswer, flatAnswer, nextTopic, parseSegs, sameAnswer, type ButterTier, type MeterSeg, type ButterTopic } from '../butter-topics'
 import { SIMSBURY_CARDS } from '../butter-simsbury'
+import { cachedCard, fullCard } from '../butter-cards-full'
 import { requireDb } from '../db'
 import type { AppContext } from '../env'
 
@@ -719,7 +720,10 @@ async function snapshot(database: D1Database, code: string, pid: string) {
     host: room.host,
     // Only the prompt crosses the wire: the accepted list stays on the server.
     prompt: topic.prompt,
-    left: Math.max(0, topic.answers.length - used.length),
+    // "Left" is the real card's count once it has been read: the bundled sample
+    // stops at 1,203 answers, and a card with 12,000 would otherwise claim to be
+    // spent a tenth of the way through.
+    left: Math.max(0, (cachedCard(topic.prompt)?.answers.length ?? topic.answers.length) - used.length),
     rated: room.rated === 1,
     rating,
     turnAt: room.turn_at,
@@ -1031,7 +1035,10 @@ butter.post('/say', async (c) => {
 
   const topic = topicOf(room)
   const used = usedOf(room)
-  const tier = answerTier(topic, answer)
+  // The real card, not the bundled sample: 1.8M answers ride in static files
+  // because the worker cannot carry them, and this is where they are read.
+  const card = (await fullCard(topic.prompt, c.env.ASSETS, new URL(c.req.url).origin)) ?? topic
+  const tier = answerTier(card, answer)
   // "labradr" after "labrador" is the same answer twice, so a near-miss of a
   // spent answer counts as a repeat and the card does not hand out free points.
   const repeat = used.some((spent) => sameAnswer(spent, answer))

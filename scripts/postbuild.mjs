@@ -53,6 +53,9 @@ for (const name of readdirSync(assetDir).sort()) {
 // changed illustration can stay behind the previous service-worker cache.
 for (const file of listFiles(client).sort()) {
   if (file.startsWith('assets/')) continue
+  // The party's answer cards are 37MB of static data fetched on demand; they
+  // have no place in the shell's cache version.
+  if (file.startsWith('puffer/')) continue
   digest.update(file)
   digest.update(readFileSync(join(client, file)))
 }
@@ -61,6 +64,9 @@ const version = digest.digest('hex').slice(0, 12)
 // index.html is served at /; sw.js must never be cached by its own worker.
 const precache = listFiles(client)
   .filter((file) => file !== 'sw.js')
+  // Never precache the party's card files: 939 of them, 37MB, and the game only
+  // ever opens the one card it is playing.
+  .filter((file) => !file.startsWith('puffer/'))
   .map((file) => (file === 'index.html' ? '/' : `/${file.replaceAll('\\', '/')}`))
 
 const swPath = join(client, 'sw.js')
