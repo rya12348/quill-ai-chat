@@ -11,7 +11,7 @@ import { cx } from '../lib/cx'
  * network calls beyond the files themselves.
  */
 
-type Entry = { p: string; s: number; twin: string | null }
+type Entry = { p: string; s: number; twin: string | null; shot?: string | null }
 
 const ROOT = '/krillion-source/'
 
@@ -245,7 +245,7 @@ export function KrillionSource() {
           {loading && !text && <p className="p-4 text-[12px] text-faint">loading…</p>}
           {entry && !isCode(entry.p) && <p className="p-4 text-[12px] text-faint">This file is not text.</p>}
           {entry && isCode(entry.p) && (
-            <div className="flex min-h-full font-mono text-[12px] leading-[1.6]">
+            <div className={cx('flex font-mono text-[12px] leading-[1.6]', !entry.shot && 'min-h-full')}>
               <pre className="shrink-0 select-none border-r border-line/60 px-3 py-3 text-right text-faint" aria-hidden>
                 {Array.from({ length: lines }, (_, index) => index + 1).join('\n')}
               </pre>
@@ -255,6 +255,22 @@ export function KrillionSource() {
                 dangerouslySetInnerHTML={{ __html: html }}
               />
             </div>
+          )}
+
+          {/* A page file is markup plus the picture of what it becomes, so the
+              two can be read together. */}
+          {entry?.shot && (
+            <figure className="border-t border-line bg-bg/50 px-4 py-4">
+              <img
+                src={ROOT + entry.shot}
+                alt={`What ${entry.p} renders as`}
+                loading="lazy"
+                className="w-full rounded-control border border-line bg-surface"
+              />
+              <figcaption className="mt-2 text-[11.5px] text-faint">
+                What this page renders — captured from krillion.io at 1280×800
+              </figcaption>
+            </figure>
           )}
         </div>
       </section>
