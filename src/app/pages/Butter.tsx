@@ -148,7 +148,13 @@ const REEF = {
 /** Perch art per seat: which rock, how high its top sits, and how it scales. */
 const PERCH = [1, 6, 4, 8, 2, 5, 3, 7]
 const PERCH_ANCHOR = [0, 0.24, 0.16, 0.2, 0.14, 0.16, 0.44, 0.2, 0.24]
-const PERCH_SCALE = [0, 166 / 305, 0.625, 180 / 278, 213 / 244, 213 / 285, 245 / 293, 178 / 270, 167 / 287]
+// The perch is drawn at the ring's own perch size: the shipped table renders a
+// 96px perch on a wide screen and the plate, the meter and the name all hang off
+// that number, so scaling each perch art down by its own aspect left every seat
+// half the size of the one it is meant to match.
+const PERCH_SCALE = [0, 1, 1, 1, 1, 1, 1, 1, 1]
+/** Each perch art's height as a share of its width. */
+const PERCH_ASPECT = [0, 166 / 305, 0.625, 180 / 278, 213 / 244, 213 / 285, 245 / 293, 178 / 270, 167 / 287]
 
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value))
 
@@ -207,54 +213,39 @@ function geometry(w: number, h: number, mode: 'door' | 'round', seats: number, r
     }
   }
   const crowded = seats > 8
-  // The ring lives between the prompt card and the dock, then snaps to the stone
-  // circle the reef art draws, exactly the way the engine lays it out. Both
-  // edges are measured when they can be: the card is taller than one line of
-  // prompt, and the dock shorter than the lobby's start panel.
+  // The ring lives between the prompt card and the floor, then the art's stone
+  // circle is asked to follow it — the shipped layout in one sentence. Every
+  // number here is the shipped one: the card's bottom plus 78, the page height
+  // less the band the lobby's start panel (170) or the round's dock (144) sits
+  // in, a ring capped at 320 by 230, and a centre on the art's 9/16 axis so the
+  // stone circle is centred where the shipped page draws it.
   const cardBottom = chrome?.cardBottom || 208
   const top = Math.max(cardBottom, mobile ? 148 : 190) + (mobile ? 62 : 78)
-  // The lobby's start panel is taller than the in-round dock, and a seat tucked
-  // behind it is a player you cannot see. Who is at the table stands above it.
-  // A plate hangs below its perch, and the dock draws its refusal and the card's
-  // spell-check in the band above its input. The ring stops above both: the
-  // bottom seat is always your own, and it was ending up under the dock.
   const perchBase = mobile ? clamp(0.155 * w, 72, 108) : 96
-  const plateDrop = Math.round(perchBase * 0.42 + 30)
-  const floor = chrome?.dockTop
-    ? Math.max(top + 110, chrome.dockTop - 8 - plateDrop)
-    : h - (reserve ?? (mobile ? 150 : 144))
+  const reserveFloor = h - (reserve ?? (mobile ? 150 : 144))
+  const floor = Math.max(top + 120, reserveFloor)
   const scale = clamp((floor - top) / (mobile ? 330 : 350), 0.72, 1)
   const fit = Math.max(0.78, Math.min(1, Math.sqrt(8 / Math.max(1, seats))))
   const spr = Math.round((mobile ? clamp(0.15 * w, 70, 104) : 92) * scale * fit)
   const perch = Math.round(perchBase * scale * fit)
   const gutter = w < 700 ? 48 : 64
-  const side = mobile ? 8 : 276
-  const wantX = Math.max(60, Math.min(crowded ? (mobile ? 400 : 560) : 320, w / 2 - gutter - side - perch / 2 - 6))
-  const wantY = Math.max(50, Math.min(crowded ? 380 : 230, (floor - top) / 2))
-  // The reef art decides where the stone circle sits, but Ink's shell is shorter
-  // than the shipped page and the pane clamp can park that circle above the band
-  // the card and dock leave behind. The ring takes the band and the art follows
-  // it, so seats are never squeezed together by art placement.
-  const pane = paneFor(w, h, w / 2, (top + floor) / 2)
-  const reef = REEF[pane.k]
-  const bandCy = (top + floor) / 2
-  const paneCy = pane.oy + reef.ay * pane.s
-  const cy = Math.abs(paneCy - bandCy) > 24 ? bandCy : paneCy
-  const paneShift = paneCy - cy
-  const cx = pane.ox + reef.ax * pane.s
-  const stoneX = reef.rx * pane.s
-  const stoneY = reef.ry * pane.s
-  const stoneFit = Math.max(0, 1 - Math.hypot(perch / 2 / stoneX, 8 / stoneY))
-  const sideRoom = Math.min(cx - gutter, w - gutter - cx)
-  const rx = Math.min(wantX, stoneX * stoneFit, Math.max(40, sideRoom - side - perch / 2 - 6))
-  const ry = Math.min(wantY, stoneY * stoneFit, Math.max(40, Math.min(cy - top, floor - cy - 10)))
-  // The puffer is a fixed base size scaled by the ring fit, exactly as the
-  // shipped renderer sizes it: 150 px on a wide screen, 30% of the width on a
-  // narrow one (never under 124 or over 170), then multiplied by the fit.
+  const cx = Math.round(w * 0.5625)
+  const cy = Math.round((top + floor) / 2)
+  const wantX = crowded ? (mobile ? 400 : 560) : 320
+  const wantY = crowded ? 380 : 230
+  const rx = Math.max(60, Math.min(wantX, w / 2 - gutter - perch / 2 - 6))
+  const ry = Math.max(50, Math.min(wantY, (floor - top) / 2))
+  // The art follows the ring rather than the other way round: the pane is
+  // placed on the ring's centre, and when the clamp parks it too high the art
+  // is slid down so the stone circle still lands under the seats.
+  const paneBase = paneFor(w, h, cx, cy)
+  const reef = REEF[paneBase.k]
+  const paneCy = paneBase.oy + reef.ay * paneBase.s
+  const pane = { ...paneBase, oy: paneBase.oy - (paneCy - cy) }
   const fs = Math.round(
     Math.min((mobile ? clamp(0.3 * w, 124, 170) : 150) * scale, Math.max(96, ry * 1.2)),
   )
-  return { cx, cy, rx, ry, spr, perch, fs, scale, pane: { ...pane, oy: pane.oy + paneShift } }
+  return { cx, cy, rx, ry, spr, perch, fs, scale, pane }
 }
 
 /** Where the reef art lands: the pane is sized to cover the page, then offset so
@@ -279,6 +270,14 @@ function seatPoint(index: number, count: number, geo: Geometry) {
   if (count === 2) {
     const a = index === 0 ? Math.PI : 0
     return { x: geo.cx + Math.cos(a) * geo.rx, y: geo.cy + Math.sin(a) * geo.ry, a }
+  }
+  // Up to eight seats the shipped table spaces them by equal angle, not by equal
+  // arc: six seats sit at 90, 150, 210, 270, 330 and 30 degrees, which is what
+  // puts the outermost plates on the ring's own left and right edges. Only a
+  // crowded table (>8) switches to even arc length.
+  if (count <= 8) {
+    const angle = Math.PI / 2 + (index / count) * Math.PI * 2
+    return { x: geo.cx + Math.cos(angle) * geo.rx, y: geo.cy + Math.sin(angle) * geo.ry, a: angle }
   }
   const marks: number[] = [0]
   const steps = 128
@@ -1450,7 +1449,7 @@ export function Butter() {
         // The start panel with ADD A BOT and its two hints is ~235px tall on a
         // phone, and the bottom seat's plate hangs below its perch, so the ring
         // has to clear both or a player hides behind the start button.
-        snap && snap.status !== 'playing' ? (viewport.w < 1100 ? 262 : 220) : undefined,
+        snap && snap.status !== 'playing' ? (viewport.w < 1100 ? 262 : 170) : undefined,
         chrome,
       ),
     [viewport.w, viewport.h, mode, seats.length, snap?.status, chrome],
@@ -1864,36 +1863,6 @@ export function Butter() {
                         ROOM <b>{snap.code}</b>
                       </span>
                     </div>
-                    {/* The table's seats, the way the real lobby draws them: one
-                        puck per seat up to the room's cap, with the seated
-                        players' names and hearts. */}
-                    <div className="pf-lobby-pucks">
-                      {Array.from({ length: snap.cap ?? 6 }, (_, index) => {
-                        const player = snap.players[index]
-                        return (
-                          <div
-                            key={player ? player.pid : `open-${index}`}
-                            className={`pf-lobby-puck${player ? ' pf-lobby-puck-seated' : ''}`}
-                          >
-                            {player ? (
-                              <>
-                                <span className="pf-lobby-puck-name">{player.name}</span>
-                                <span className="pf-lobby-puck-hearts">
-                                  {Array.from({ length: Math.min(player.hearts, 3) }, (_, heartIndex) => (
-                                    <span key={heartIndex} aria-hidden="true">
-                                      ♥
-                                    </span>
-                                  ))}
-                                </span>
-                                {snap.host === player.pid && <span className="pf-lobby-puck-host">HOST</span>}
-                              </>
-                            ) : (
-                              <span className="pf-lobby-puck-open">open</span>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
                     <button
                       type="button"
                       className="ds-begin-btn"
@@ -2205,8 +2174,13 @@ function seatSpot(index: number, total: number, geo: Geometry) {
   const point = seatPoint(index, total, geo)
   const sway = 0.8 + 0.2 * ((Math.sin(point.a) + 1) / 2)
   const perchWidth = geo.perch * scale
-  const y = point.y - (1 - anchor) * perchWidth * sway
-  return { perch, anchor, scale, point, sway, perchWidth, y }
+  // The perch art's height is its width times its own aspect; the seat lifts by
+  // the height, which is why a 94px perch only rises ~28px, not 70.
+  const perchHeight = perchWidth * PERCH_ASPECT[perch]
+  // The shipped table seats the sprite ~0.68 of the way up its own perch: a ring
+  // built on the full offset floats every plate a whole perch above the stone.
+  const y = point.y - (1 - anchor) * perchHeight * sway * 0.68
+  return { perch, anchor, scale, point, sway, perchWidth, perchHeight, y }
 }
 
 function Seat({
@@ -2224,7 +2198,6 @@ function Seat({
   mascot,
   target,
   maxLives,
-  dockTop,
 }: {
   player: Player
   index: number
@@ -2243,13 +2216,16 @@ function Seat({
   /** Top of the dock in stage pixels, so a plate never draws under it. */
   dockTop?: number
 }) {
-  const { perch, anchor, point, sway, perchWidth, y } = seatSpot(index, total, geo)
+  const { perch, anchor, point, sway, perchWidth, perchHeight, y } = seatSpot(index, total, geo)
   // The plate hangs below the perch. On the seat at the bottom of the ring that
   // can land inside the dock, so it rises over its perch instead of hiding the
   // name and the hearts behind the input.
-  const plateDrop = (1 - anchor) * perchWidth * sway + 5
-  const plateTop =
-    dockTop && point.y + plateDrop + 29 > dockTop - 4 ? dockTop - 4 - 29 - point.y : plateDrop
+  // The plate hangs off the perch's height, not its width — the same 0.68 lift
+  // the seat itself uses, plus the eight pixels the shipped table leaves under
+  // the stone. It is never pushed aside for the dock: the shipped lobby lets the
+  // front plate sit on top of its start panel, and lifting it hid the name.
+  const plateDrop = (1 - anchor) * perchHeight * sway * 0.68 + 8
+  const plateTop = plateDrop
   const out = player.hearts <= 0
   const waiting = status === 'lobby'
   // The shipped table pops the heart that was just lost and springs in one

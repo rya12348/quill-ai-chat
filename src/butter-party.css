@@ -419,7 +419,7 @@ body:has(.pf-root[data-mode=lobby],.pf-root[data-mode=round]) button[aria-contro
 @keyframes pf-heart-pop{0%{color:#fff;transform:scale(1.8)}40%{transform:scale(.6)translateY(4px)}to{transform:none}}
 .pf-heart.gain{animation:.8s cubic-bezier(.2,1.7,.4,1) pf-heart-gain}
 @keyframes pf-heart-gain{0%{transform:scale(.1)}}
-.pf-meter{background:#0a1322;width:34px;height:5px;display:flex;position:relative;overflow:hidden;box-shadow:0 0 0 2px #060d1a}
+.pf-meter{background:#0a1322;width:calc(var(--pf-perch) * .6);height:6px;display:flex;position:relative;overflow:hidden;box-shadow:0 0 0 2px #060d1a}
 .pf-meter i{height:100%;transition:width .5s var(--ds-ease-out,ease-out);flex:none;display:block;box-shadow:inset -1px 0 #050a1499}
 .pf-meter.full{box-shadow:0 0 0 2px #060d1a,0 0 8px #ffd166cc}
 .pf-seat-meter{position:absolute;left:0;transform:translate(-50%);box-shadow:0 0 0 1px #060d1a,0 2px 0 1px #03081280}
@@ -647,7 +647,7 @@ body:has(.pf-root[data-mode=lobby],.pf-root[data-mode=round]) button[aria-contro
 .pf-side .pf-panel{flex:none;min-height:0;overflow:hidden}
 .pf-side .pf-panel.chat{flex:1;display:flex}
 .pf-chat-btn,.pf-chat-sheet{display:none}
-.pf-lobby-foot{padding-bottom:22px}
+.pf-lobby-foot{padding-bottom:88px}
 .pf-lobby .pf-settings{display:none}
 .pf-desktop-rules{display:block}
 .pf-lobby-side .pf-set{text-align:left;justify-content:space-between;align-items:center;margin-bottom:10px;padding:9px 12px 8px;display:flex}
