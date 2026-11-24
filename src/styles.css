@@ -979,12 +979,14 @@ html.dark .prose-chat pre {
 }
 
 
-/* A corner chip, in the same pixel frame as the rest of the reef, so the party
-   is never a dead end. It sits above the stage and stays out of the ring. */
+/* The corner menu, in the same pixel frame as the rest of the reef, so the party
+   is never a dead end. It sits in the shipped slot — 185px in, past the ad rail
+   the real page keeps on its left — and stays out of the ring. On a phone there
+   is no rail, so it goes back to the window's own corner. */
 .butter-page .pf-dive-link.pf-dive-corner {
   position: absolute;
   top: 8px;
-  left: 10px;
+  left: 185px;
   z-index: 30;
   margin: 0;
   padding: 5px 9px 3px;
@@ -997,13 +999,14 @@ html.dark .prose-chat pre {
   opacity: 1;
 }
 
-.butter-page .pf-dive-link.pf-dive-corner::before {
-  content: '◀ ';
-  opacity: 0.75;
-}
 .butter-page .pf-dive-link.pf-dive-corner:focus-visible {
   outline: 2px solid #4de3ff;
   outline-offset: 2px;
+}
+@media (max-width: 700px) {
+  .butter-page .pf-dive-link.pf-dive-corner {
+    left: 10px;
+  }
 }
 
 /* The real dive plays in a 561px-tall area at a 651px window: the bottom 90px
