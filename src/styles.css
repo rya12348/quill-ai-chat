@@ -847,7 +847,7 @@ html.dark .prose-chat pre {
   position: fixed;
   top: 8px;
   left: calc(var(--kr-ad-left, 0px) + 5px);
-  z-index: 65;
+  z-index: 80;
   display: grid;
   place-items: center;
   width: 44px;
@@ -856,7 +856,10 @@ html.dark .prose-chat pre {
   border: 0;
   background: 0 0;
   color: #7d93b8;
-  pointer-events: none;
+  /* The shipped page draws this menu over its own stage; here it is a real
+     button, so it has to sit above the reef and take the click. */
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .butter-dive .ds-site-menu::before {
@@ -1104,6 +1107,9 @@ html.dark .prose-chat pre {
 .butter-page .pf-dive-link.pf-dive-corner {
   display: grid;
   place-items: center;
+  z-index: 80;
+  pointer-events: auto;
+  cursor: pointer;
   width: 44px;
   height: 44px;
   padding: 0;

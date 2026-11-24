@@ -88,6 +88,12 @@ const SINK_MS: Record<TierId, number> = {
   krillion: 4600,
 }
 
+/** The fall above is the shipped one, stretched a little: at the shipped speed
+ *  the chip was gone before the word could be read. */
+const SINK_SCALE = 1.35
+/** The beat between the answer coming to rest and the banner taking its place. */
+const FEEDBACK_HOLD_MS = 900
+
 /** The sideways wobble the answer chip swims through while it sinks, with the
  *  tilt the engine pairs with it. Every tier has its own curve. */
 function chipWobble(tier: TierId, t: number): { x: number; rot: number } {
@@ -851,23 +857,27 @@ export function ButterDive() {
   useEffect(() => {
     if (phase !== 'sinking') return
     const result = results[results.length - 1]
-    const duration = result?.tier ? SINK_MS[result.tier] : 900
+    const duration = (result?.tier ? SINK_MS[result.tier] : 900) * SINK_SCALE
     const started = performance.now()
     let raf = 0
+    let settle = 0
     setSinkT(0)
     const step = (now: number) => {
       const t = Math.min(1, (now - started) / duration)
       setSinkT(t)
       if (t < 1) raf = requestAnimationFrame(step)
-      else setPhase('feedback')
+      // The answer stays where it landed for a beat before the banner covers it,
+      // so the word and the tier it earned can be read together.
+      else settle = window.setTimeout(() => setPhase('feedback'), FEEDBACK_HOLD_MS)
     }
     raf = requestAnimationFrame(step)
     // A tab that is not painting holds rAF back; the dive still has to land, so
     // the fall is timed on the clock as well.
-    const landing = window.setTimeout(() => setPhase('feedback'), duration + 120)
+    const landing = window.setTimeout(() => setPhase('feedback'), duration + FEEDBACK_HOLD_MS + 120)
     return () => {
       cancelAnimationFrame(raf)
       window.clearTimeout(landing)
+      window.clearTimeout(settle)
     }
   }, [phase, results])
 
