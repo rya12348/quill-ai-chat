@@ -113,7 +113,7 @@ export function Shell() {
       <MobileNavContext.Provider value={() => setDrawer(true)}>
         <div className="flex min-w-0 flex-1 flex-col">
           {!isChatSurface && (
-            <header className="shell-mobile-bar flex h-12 shrink-0 items-center gap-2 px-3 md:hidden">
+            <header className="flex h-12 shrink-0 items-center gap-2 px-3 md:hidden">
               <Button variant="ghost" size="icon" aria-label="Open menu" onClick={() => setDrawer(true)}>
                 <MenuIcon />
               </Button>

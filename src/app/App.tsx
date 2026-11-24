@@ -3,8 +3,6 @@ import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from 'react
 
 import { Butter } from './pages/Butter'
 import { ButterDive } from './pages/ButterDive'
-import { ButterPacks } from './pages/ButterPacks'
-import { ButterRun } from './pages/ButterRun'
 import { KrillionSource } from './pages/KrillionSource'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
@@ -149,12 +147,6 @@ function Gate() {
           {/* The dive is the front door, the way krillion.io is: the party
               sits one step in, at /butter/party. */}
           <Route path="butter" element={<ButterDive />} />
-          {/* Their shelf: five packs of thirty games, then the archive of days
-              that have already surfaced. One runner plays both. */}
-          <Route path="butter/packs" element={<ButterPacks view="packs" />} />
-          <Route path="butter/archive" element={<ButterPacks view="archive" />} />
-          <Route path="butter/archive/:date" element={<ButterRun />} />
-          <Route path="butter/unlimited/:pack" element={<ButterRun />} />
           <Route path="butter/party" element={<Butter />} />
           {/* Deliberately outside /butter/*: that prefix is a game surface and
               hides the sidebar this page is reached from. */}

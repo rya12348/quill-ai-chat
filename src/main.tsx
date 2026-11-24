@@ -7,7 +7,6 @@ import { initTheme } from './app/lib/theme'
 import './styles.css'
 import './retro.css'
 import './butter-party.css'
-import './butter-modes.css'
 import './dive.css'
 
 initTheme()
