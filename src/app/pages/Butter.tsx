@@ -60,6 +60,8 @@ type Snapshot = {
   winner: { name: string; you: boolean } | null
 }
 type RoomRow = { id: string; status: string; size?: string; players: number; cap?: number; hostName?: string; rated?: boolean; rating?: number }
+/** A room on krillion.io's own Puffer Party, read through /api/butter/real. */
+type RealRoom = { code: string; host: string; players: number; maxPlayers: number; phase: string }
 
 const NAME_KEY = 'butter.name'
 const BUDDY_KEY = 'butter.buddy'
@@ -1113,6 +1115,10 @@ export function Butter() {
   // another heart. Five is what the room's hearts row can draw.
   const [lives, setLives] = useState(2)
   const livesPicked = useRef(false)
+  // krillion.io's real Puffer Party tables, so the door can send a player into
+  // a live room on the real server.
+  const [realRooms, setRealRooms] = useState<RealRoom[]>([])
+  const [realPlayers, setRealPlayers] = useState(0)
   const [howTo, setHowTo] = useState(false)
   const [, frame] = useState(0)
   // A fresh card slides in over CATEGORY_SWAP_MS (1300ms) on the shipped table.
@@ -1212,6 +1218,31 @@ export function Butter() {
       window.clearInterval(beat)
     }
   }, [code, pid])
+
+  // krillion.io's live Puffer Party tables. Their join carries a guest token
+  // that only a Turnstile pass bound to their origin can mint, so a row here is
+  // a hand-off: it opens that room's own page, where their client verifies the
+  // browser and seats you on their server.
+  useEffect(() => {
+    if (code) return
+    let alive = true
+    const pull = async () => {
+      try {
+        const payload = (await call('/real')) as { rooms?: RealRoom[]; players?: number }
+        if (!alive) return
+        setRealRooms(Array.isArray(payload.rooms) ? payload.rooms : [])
+        setRealPlayers(Number(payload.players) || 0)
+      } catch {
+        // Their server is a bonus on our door, never a reason for it to fail.
+      }
+    }
+    void pull()
+    const timer = window.setInterval(pull, 20_000)
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+    }
+  }, [code])
 
   useEffect(() => {
     if (!snap || snap.status !== 'playing') {
@@ -1838,6 +1869,38 @@ export function Butter() {
                         </button>
                       )
                     })}
+                  </div>
+                </div>
+
+                {/* The real game's own server, read through the worker. A chair
+                    here joins on krillion.io, which is the only place their
+                    Turnstile pass can be minted. */}
+                <div className="pf-panel">
+                  <h3>
+                    REAL PUFFER PARTY{' '}
+                    <small aria-live="polite">
+                      {realPlayers ? `${realPlayers.toLocaleString()} PLAYING` : 'KRILLION.IO'}
+                    </small>
+                  </h3>
+                  <div className="pf-rooms">
+                    {realRooms.length === 0 && <div className="pf-empty">no live krillion rooms right now</div>}
+                    {realRooms.map((room) => (
+                      <a
+                        key={room.code}
+                        className="pf-room"
+                        href={`https://krillion.io/party/${room.code}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="joins on krillion.io · their server checks the browser and seats you"
+                      >
+                        <span className="c">{room.code}</span>
+                        <span className="h">{room.host || 'a table'}</span>
+                        <span className={`s${room.phase === 'round' ? ' playing' : ''}`}>
+                          {room.players}/{room.maxPlayers} · {room.phase === 'round' ? 'PLAYING' : 'IN THE LOBBY'}
+                        </span>
+                        <span className="go">JOIN ▸</span>
+                      </a>
+                    ))}
                   </div>
                 </div>
               </div>

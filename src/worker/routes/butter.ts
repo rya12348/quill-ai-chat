@@ -1089,6 +1089,58 @@ butter.get('/rooms', async (c) => {
   return c.json({ rooms, playing }, 200, { 'cache-control': 'no-store' })
 })
 
+/** The real Puffer Party's front door.
+ *
+ * Their `GET /rooms` and `/activity` are public, so Butter can show who is
+ * playing right now and which tables have a free chair. Seating you on their
+ * server is not something Butter can do: every join carries a guest token from
+ * `POST /api/party/token`, and that endpoint only mints one for a Cloudflare
+ * Turnstile pass bound to krillion.io (`403 party-verification`). So these rows
+ * hand you to the room's own page, where their client does the verification and
+ * seats you on their server — which is the one honest way in.
+ */
+const REAL_PARTY_ORIGIN = 'https://party.krillion.io'
+type RealRoom = { code: string; host: string; players: number; maxPlayers: number; phase: string }
+let realPartyCache: { at: number; rooms: RealRoom[]; players: number } | null = null
+
+butter.get('/real', async (c) => {
+  // Their list moves second by second, but a lobby full of visitors must not
+  // hammer someone else's server: one read every eight seconds is enough.
+  if (realPartyCache && now() - realPartyCache.at < 8_000) {
+    return c.json({ rooms: realPartyCache.rooms, players: realPartyCache.players }, 200, { 'cache-control': 'no-store' })
+  }
+  let rooms: RealRoom[] = []
+  let players = 0
+  try {
+    const [listRes, activityRes] = await Promise.all([
+      fetch(`${REAL_PARTY_ORIGIN}/rooms`, { signal: AbortSignal.timeout(6_000) }),
+      fetch(`${REAL_PARTY_ORIGIN}/activity`, { signal: AbortSignal.timeout(6_000) }),
+    ])
+    const list = listRes.ok ? ((await listRes.json().catch(() => null)) as { rooms?: unknown[] } | null) : null
+    const activity = activityRes.ok ? ((await activityRes.json().catch(() => null)) as { players?: number } | null) : null
+    players = Number(activity?.players) || 0
+    rooms = (Array.isArray(list?.rooms) ? list.rooms : [])
+      .map((entry) => {
+        const room = (entry ?? {}) as Record<string, unknown>
+        return {
+          code: String(room.code ?? '').slice(0, 4),
+          host: String(room.hostName ?? '').slice(0, 16),
+          players: Number(room.players) || 0,
+          maxPlayers: Number(room.maxPlayers) || 0,
+          phase: String(room.phase ?? 'lobby'),
+        }
+      })
+      // A row is a chair: only tables that still have one, the fullest first.
+      .filter((room) => room.code && room.maxPlayers > 0 && room.players < room.maxPlayers && room.phase !== 'over')
+      .sort((a, b) => b.players - a.players)
+      .slice(0, 8)
+  } catch {
+    // Their server is a bonus on our door, never a reason for it to fail.
+  }
+  realPartyCache = { at: now(), rooms, players }
+  return c.json({ rooms, players }, 200, { 'cache-control': 'no-store' })
+})
+
 butter.get('/state', async (c) => {
   const database = db(c)
   await ensureSchema(database)
@@ -1236,14 +1288,20 @@ butter.post('/say', async (c) => {
       why: repeat ? 'repeat' : 'miss',
       at: now(),
     })
-    // A miss stays with the person who missed: the refusal says they can try
-    // again, so the puffer must not move, the card must not turn over and
-    // nothing is scored. There is no miss counter in the shipped game — the
-    // whole client bundle has no `misses` field at all — and its `reject()` is
-    // a shake and a chip, no heart and no pass. The fuse is the only clock, and
-    // the room's `misses` column belongs to the pop tally, so a typo must not
-    // write to it.
-    await database.prepare(`UPDATE butter_rooms SET updated_at = ? WHERE id = ?`).bind(now(), code).run()
+    // A miss stays with the person who missed — the refusal says they can try
+    // again, so the puffer does not move and nothing is scored — but it spends
+    // one of the card's two chances. Pops spend the other, so the card only
+    // turns over when the counter reaches two.
+    const misses = (Number(room.misses) || 0) + 1
+    if (misses >= 2) {
+      await database.prepare(`UPDATE butter_rooms SET misses = 0 WHERE id = ?`).bind(code).run()
+      const advanced = await advance(database, { ...room, misses: 0 }, players, true)
+      return c.json(await snapshot(database, advanced.id, pid), 200, { 'cache-control': 'no-store' })
+    }
+    await database
+      .prepare(`UPDATE butter_rooms SET misses = ?, updated_at = ? WHERE id = ?`)
+      .bind(misses, now(), code)
+      .run()
     return c.json(await snapshot(database, code, pid), 200, { 'cache-control': 'no-store' })
   }
 
