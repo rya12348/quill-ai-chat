@@ -49,8 +49,6 @@ const METER_FULL = 600
  *  minTurnMs: 8_000, fuseMinMs: 10_000, fuseMaxMs: 30_000, maxPlayers: 6}`. */
 const LIVES = 2
 const MAX_LIVES = 3
-const METER_STEP = 50
-const MAX_METER_TARGET = 5000
 const FUSE_MS = 30_000
 const MIN_FUSE_MS = 10_000
 /** The shipped settings: every turn's fuse is random in this window, not a
