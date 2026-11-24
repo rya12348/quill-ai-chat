@@ -204,6 +204,25 @@ export function Sea({ depthRef }: { depthRef: { current: number } }) {
           ctx.fillRect(0, 0, w, Math.max(0, surface))
         }
 
+        // The shipped art carries its sun in the top-right of the sky, but the
+        // copy Ink paints is a squarer crop, so the sun is off the top of the
+        // frame. It is drawn back here at the shipped corner: a blocky disc
+        // half out of shot with its glow spilling down over the clouds.
+        const sunX = w * 0.855
+        const sunY = surface - 460
+        const glow = ctx.createRadialGradient(sunX, sunY, 8, sunX, sunY, 165)
+        glow.addColorStop(0, 'rgba(255,238,176,0.9)')
+        glow.addColorStop(0.4, 'rgba(255,228,145,0.34)')
+        glow.addColorStop(1, 'rgba(255,228,145,0)')
+        ctx.fillStyle = glow
+        ctx.fillRect(sunX - 165, sunY - 165, 330, 330)
+        ctx.fillStyle = '#ffe08a'
+        ctx.fillRect(sunX - 27, sunY - 40, 54, 80)
+        ctx.fillRect(sunX - 40, sunY - 27, 80, 54)
+        ctx.fillStyle = '#f8cf78'
+        ctx.fillRect(sunX - 34, sunY + 27, 68, 7)
+        ctx.fillRect(sunX + 27, sunY - 34, 7, 68)
+
         // The swell: a lit crest with the water's own colour filled beneath.
         ctx.beginPath()
         ctx.moveTo(0, surface)

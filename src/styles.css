@@ -822,10 +822,15 @@ html.dark .prose-chat pre {
 }
 
 @media (min-width: 1060px) {
+  /* The shipped page only makes room for its ad rails and adhesion strip when
+     one actually fills; with none, the dive owns the window edge to edge. Ink
+     never fills them, so the box stays flush — which is also why the shipped
+     intro sits 90px lower and its mute/settings/wardrobe stack hugs the right
+     edge at this size. */
   .butter-dive .kr-ad-layout {
-    --kr-ad-bottom: 90px;
-    --kr-ad-left: 180px;
-    --kr-ad-right: 180px;
+    --kr-ad-bottom: 0px;
+    --kr-ad-left: 0px;
+    --kr-ad-right: 0px;
   }
 }
 
@@ -876,8 +881,15 @@ html.dark .prose-chat pre {
   height: 18px;
 }
 
+.butter-dive .ds-mute {
+  /* The shipped chrome is fixed to the window, not to the stage the game plays
+     in, so the stack sits on the window's right edge. */
+  position: fixed;
+  right: 10px;
+}
+
 .butter-dive .ds-side-btn {
-  position: absolute;
+  position: fixed;
   right: 10px;
   z-index: 30;
   display: flex;
