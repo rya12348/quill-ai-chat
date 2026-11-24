@@ -968,7 +968,10 @@ butter.post('/start', async (c) => {
       JSON.stringify(history),
       players[0].pid,
       now(),
-      randomFuse(),
+      // The bar is drawn against `fuse_ms`, so the first card has to carry the
+      // same fuse it is actually burning: a second random draw here made the
+      // opening bar a different length from the clock behind it.
+      firstFuse,
       now() + COUNTDOWN_MS + firstFuse,
       METER_FULL,
       now(),
