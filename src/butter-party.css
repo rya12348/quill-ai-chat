@@ -183,6 +183,12 @@
 .ds-intro-meta{letter-spacing:.14em;color:#7d93b8e6;text-transform:uppercase;justify-content:space-between;align-items:center;gap:10px;font-size:14px;display:flex}
 .ds-intro-meta a{color:#7d93b8;background:#0b1526d9;border:1px solid #1b3050;padding:5px 12px 3px;text-decoration:none}
 .ds-intro-meta a:hover{color:#e8f1ff;border-color:#4de3ffa6}
+.pf-lives-row{letter-spacing:.14em;text-transform:uppercase;justify-content:center;align-items:center;gap:6px;margin:0 0 10px;font-size:12px;display:flex}
+.pf-lives-label{color:#7d93b8e6}
+.pf-lives-btn{width:34px;height:30px;color:#7d93b8;cursor:pointer;font:inherit;background:#101d33;border:0;padding:0 0 2px;font-size:16px;box-shadow:0 0 0 2px #050a14,0 0 0 4px #1b3050}
+.pf-lives-btn:hover,.pf-lives-btn:focus-visible{color:#e8f1ff;box-shadow:0 0 0 2px #050a14,0 0 0 4px #4de3ffa6;outline:none}
+.pf-lives-btn.on{color:#050a14;background:#4de3ff;box-shadow:0 0 0 2px #050a14,0 0 0 4px #4de3ff}
+.pf-lives-btn:disabled{opacity:.5;cursor:default}
 .ds-howto summary{cursor:pointer;letter-spacing:.18em;color:#7d93b8;text-transform:uppercase;font-size:14px;list-style:none}
 .ds-howto summary:before{content:"▸ "}
 .ds-howto[open] summary:before{content:"▾ "}

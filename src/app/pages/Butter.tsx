@@ -1108,6 +1108,11 @@ export function Butter() {
   const pollMisses = useRef(0)
   const [busy, setBusy] = useState(false)
   const [privacy, setPrivacy] = useState<'public' | 'private'>('public')
+  // The host's lives setting, the way the shipped lobby's settings screen has
+  // one: every seat opens on this count and a full meter is the only way to add
+  // another heart. Five is what the room's hearts row can draw.
+  const [lives, setLives] = useState(2)
+  const livesPicked = useRef(false)
   const [howTo, setHowTo] = useState(false)
   const [, frame] = useState(0)
   // A fresh card slides in over CATEGORY_SWAP_MS (1300ms) on the shipped table.
@@ -1181,6 +1186,11 @@ export function Butter() {
         }
         pollMisses.current = 0
         setSnap(payload)
+        // Until the host touches the picker it mirrors the table's own setting,
+        // so a rematch shows the lives the room is actually playing for.
+        if (!livesPicked.current && payload.maxLives) {
+          setLives(Math.max(1, Math.min(5, Number(payload.maxLives) || 2)))
+        }
         setError('')
       } catch (failure) {
         // A dropped poll is normal on a busy table: try again quickly, and only
@@ -1298,7 +1308,7 @@ export function Butter() {
       const seats = Math.max(1, (CAP_FOR[size] ?? 6) - 1)
       const created = (await call('/create', { name: cleanName(), size, bots: seats, client: clientId() })) as { code: string; pid: string }
       remember(created.code, created.pid)
-      await call('/start', { code: created.code, pid: created.pid })
+      await call('/start', { code: created.code, pid: created.pid, lives })
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not find a table.')
     } finally {
@@ -1329,7 +1339,7 @@ export function Butter() {
       const seats = Math.max(1, (CAP_FOR[size] ?? 6) - 1)
       const created = (await call('/create', { name: cleanName(), size, rated: true, bots: seats, client: clientId() })) as { code: string; pid: string }
       remember(created.code, created.pid)
-      await call('/start', { code: created.code, pid: created.pid })
+      await call('/start', { code: created.code, pid: created.pid, lives })
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not find a rated table.')
     } finally {
@@ -1357,14 +1367,14 @@ export function Butter() {
     try {
       // Take the dealt table straight from the response: waiting for the next
       // poll leaves the host staring at the lobby after the round has begun.
-      const payload = (await call('/start', { code, pid })) as unknown as Snapshot
+      const payload = (await call('/start', { code, pid, lives })) as unknown as Snapshot
       setSnap(payload)
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not start.')
     } finally {
       setBusy(false)
     }
-  }, [code, pid])
+  }, [code, pid, lives])
 
   const pass = useCallback(async () => {
     if (!code || !pid || !typed.trim()) return
@@ -1872,6 +1882,26 @@ export function Butter() {
                         ROOM <b>{snap.code}</b>
                       </span>
                     </div>
+                    {isHost && (
+                      <div className="pf-lives-row" role="group" aria-label="Lives per player">
+                        <span className="pf-lives-label">LIVES</span>
+                        {[1, 2, 3, 4, 5].map((count) => (
+                          <button
+                            key={count}
+                            type="button"
+                            className={`pf-lives-btn${count === lives ? ' on' : ''}`}
+                            aria-pressed={count === lives}
+                            disabled={busy}
+                            onClick={() => {
+                              livesPicked.current = true
+                              setLives(count)
+                            }}
+                          >
+                            {count}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <button
                       type="button"
                       className="ds-begin-btn"
@@ -1918,7 +1948,7 @@ export function Butter() {
                     <input
                       className="ds-input"
                       type="text"
-                      maxLength={40}
+                      maxLength={256}
                       autoComplete="off"
                       spellCheck={false}
                       enterKeyHint="go"

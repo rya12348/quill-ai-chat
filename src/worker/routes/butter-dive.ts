@@ -129,7 +129,9 @@ butterDive.post('/answer', async (c) => {
   const answer = String(body.answer ?? '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 40)
+    // The shipped `MAX_ANSWER_LENGTH`: a card can carry an answer past forty
+    // characters, and a shorter cut refused it before it was ever rated.
+    .slice(0, 256)
   if (!/^p[1-7]$/.test(promptId)) return c.json({ error: 'Bad prompt' }, 400)
   if (!answer) return c.json({ error: 'Type an answer first.' }, 400)
 

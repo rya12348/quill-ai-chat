@@ -643,7 +643,18 @@ async function settleFuse(database: D1Database, room: RoomRow): Promise<RoomRow>
     // advance() owns the pass and the end-of-game check. Call it even when
     // nobody is left: a solo table whose last heart just melted must finish
     // instead of re-settling the same expired fuse on every poll.
-    current = await advance(database, current, updated, true)
+    // A pop is one of the card's two chances, not a card change of its own: the
+    // live room kept the same category running after a pop, so the card only
+    // turns over when the second chance goes.
+    const misses = (Number(current.misses) || 0) + 1
+    const nextCard = misses >= 2
+    // advance() rewrites the room row but not this counter, so the chance has to
+    // be written here or the next miss starts counting from zero again.
+    await database
+      .prepare(`UPDATE butter_rooms SET misses = ? WHERE id = ?`)
+      .bind(nextCard ? 0 : misses, current.id)
+      .run()
+    current = await advance(database, { ...current, misses: nextCard ? 0 : misses }, updated, nextCard)
     if (!nextAlive(updated, victim.pid)) break
   }
   return current
@@ -869,6 +880,8 @@ async function snapshot(database: D1Database, code: string, pid: string) {
     size: room.size || 'party',
     cap: capFor(room.size),
     serverNow: now(),
+    // The card's chances used up so far: a miss and a pop both spend one.
+    misses: Number(room.misses) || 0,
     players: players.map((player) => ({
       pid: player.pid,
       name: player.name,
@@ -1224,18 +1237,13 @@ butter.post('/say', async (c) => {
       at: now(),
     })
     // A miss stays with the person who missed: the refusal says they can try
-    // again, so the puffer must not move and nothing is scored. The table gets
-    // two chances on each card, and the second one turns it over.
-    const misses = (Number(room.misses) || 0) + 1
-    if (misses >= 2) {
-      await database.prepare(`UPDATE butter_rooms SET misses = 0 WHERE id = ?`).bind(code).run()
-      const advanced = await advance(database, { ...room, misses: 0 }, players, true)
-      return c.json(await snapshot(database, advanced.id, pid), 200, { 'cache-control': 'no-store' })
-    }
-    await database
-      .prepare(`UPDATE butter_rooms SET misses = ?, updated_at = ? WHERE id = ?`)
-      .bind(misses, now(), code)
-      .run()
+    // again, so the puffer must not move, the card must not turn over and
+    // nothing is scored. There is no miss counter in the shipped game — the
+    // whole client bundle has no `misses` field at all — and its `reject()` is
+    // a shake and a chip, no heart and no pass. The fuse is the only clock, and
+    // the room's `misses` column belongs to the pop tally, so a typo must not
+    // write to it.
+    await database.prepare(`UPDATE butter_rooms SET updated_at = ? WHERE id = ?`).bind(now(), code).run()
     return c.json(await snapshot(database, code, pid), 200, { 'cache-control': 'no-store' })
   }
 

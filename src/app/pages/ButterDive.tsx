@@ -35,7 +35,7 @@ const ANSWER_MS = 25_000
 const PREVIEW_MS = 3_000
 const ROUNDS = 7
 const METRES_PER_POINT = 10
-const MAX_ANSWER_LENGTH = 40
+const MAX_ANSWER_LENGTH = 256
 const PLAYER_KEY = 'butter.dive.player'
 
 /** The shipped tier ladder: name, points, depth and the line under the banner. */
