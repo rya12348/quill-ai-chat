@@ -1099,7 +1099,9 @@ export function Butter() {
   // `chedder → cheddar` above the input before an answer is ever sent.
   const [correction, setCorrection] = useState<{ typed: string; value: string; repeat: boolean } | null>(null)
   const [chatText, setChatText] = useState('')
-  const [chatOpen, setChatOpen] = useState(false)
+  // The shipped table keeps its chat open down the right-hand side for the
+  // whole game; there is no button that reveals it.
+  const [chatOpen] = useState(true)
   const [chatError, setChatError] = useState('')
   const pollMisses = useRef(0)
   const [busy, setBusy] = useState(false)
@@ -2012,39 +2014,18 @@ export function Butter() {
 
             {snap.status === 'playing' && (
               <>
-                <button
-                  type="button"
-                  className="font-pixel"
-                  aria-expanded={chatOpen}
-                  onClick={() => setChatOpen((open) => !open)}
-                  style={{
-                    position: 'fixed',
-                    right: 14,
-                    bottom: 118,
-                    zIndex: 45,
-                    padding: '6px 10px',
-                    fontSize: 15,
-                    letterSpacing: 1,
-                    color: '#8be9ff',
-                    background: 'rgba(5,10,20,0.92)',
-                    border: '1px solid #1b3050',
-                    borderRadius: 4,
-                    cursor: 'pointer',
-                  }}
-                >
-                  CHAT{(snap.chat?.length ?? 0) > 0 ? ` ${snap.chat?.length}` : ''}
-                </button>
                 {chatOpen && (
                   <aside
                     aria-label="Table chat"
                     className="font-pixel"
                     style={{
                       position: 'fixed',
-                      right: 14,
-                      bottom: 156,
+                      right: 10,
+                      top: 68,
+                      bottom: 12,
                       zIndex: 46,
-                      width: 244,
-                      maxHeight: '52vh',
+                      width: 268,
+                      maxHeight: 'none',
                       display: 'flex',
                       flexDirection: 'column',
                       background: 'rgba(4,9,18,0.96)',
@@ -2066,14 +2047,6 @@ export function Butter() {
                       }}
                     >
                       <span>TABLE CHAT</span>
-                      <button
-                        type="button"
-                        onClick={() => setChatOpen(false)}
-                        aria-label="Close chat"
-                        style={{ background: 'none', border: 0, color: '#8fa3c4', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
-                      >
-                        ×
-                      </button>
                     </div>
                     <div style={{ padding: '7px 9px', overflowY: 'auto', flex: 1, fontSize: 14, lineHeight: 1.35 }}>
                       {(snap.chat ?? []).length === 0 ? (

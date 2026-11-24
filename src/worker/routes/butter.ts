@@ -93,6 +93,7 @@ type RoomRow = {
   host: string
   status: string
   round: number
+  misses: number
   turn: string | null
   topic: string
   used: string
@@ -213,6 +214,7 @@ function ensureSchema(db: D1Database): Promise<void> {
         "ALTER TABLE butter_rooms ADD COLUMN size TEXT NOT NULL DEFAULT 'party'",
         "ALTER TABLE butter_rooms ADD COLUMN seen TEXT NOT NULL DEFAULT '[]'",
         'ALTER TABLE butter_rooms ADD COLUMN swap_at INTEGER NOT NULL DEFAULT 0',
+        'ALTER TABLE butter_rooms ADD COLUMN misses INTEGER NOT NULL DEFAULT 0',
         'ALTER TABLE butter_players ADD COLUMN answers INTEGER NOT NULL DEFAULT 0',
         'ALTER TABLE butter_players ADD COLUMN pops INTEGER NOT NULL DEFAULT 0',
         'ALTER TABLE butter_players ADD COLUMN place INTEGER',
@@ -268,7 +270,7 @@ async function roomOf(database: D1Database, code: string): Promise<RoomRow | und
   return (
     (await database
       .prepare(
-        `SELECT id, host, status, round, turn, turn_at, topic, used, seen, fuse_end, fuse_ms, meter_target, lives, last, winner, size, rated, settled, updated_at FROM butter_rooms WHERE id = ?`,
+        `SELECT id, host, status, round, misses, turn, turn_at, topic, used, seen, fuse_end, fuse_ms, meter_target, lives, last, winner, size, rated, settled, updated_at FROM butter_rooms WHERE id = ?`,
       )
       .bind(code)
       .first<RoomRow>()) ?? undefined
@@ -1172,6 +1174,20 @@ butter.post('/say', async (c) => {
       why: repeat ? 'repeat' : 'miss',
       at: now(),
     })
+    // A miss is also a hand-over: the puffer goes to the next seat, so a wrong
+    // answer costs the table its turn but not a life. The card only turns over
+    // once the table has burned both of its chances on it.
+    const misses = (Number(room.misses) || 0) + 1
+    if (misses >= 2) {
+      await database.prepare(`UPDATE butter_rooms SET misses = 0 WHERE id = ?`).bind(code).run()
+      const advanced = await advance(database, { ...room, misses: 0 }, players, true)
+      return c.json(await snapshot(database, advanced.id, pid), 200, { 'cache-control': 'no-store' })
+    }
+    const nextSeat = nextAlive(players, pid)
+    await database
+      .prepare(`UPDATE butter_rooms SET turn = ?, turn_at = ?, misses = ?, updated_at = ? WHERE id = ?`)
+      .bind(nextSeat?.pid ?? null, now(), misses, now(), code)
+      .run()
     return c.json(await snapshot(database, code, pid), 200, { 'cache-control': 'no-store' })
   }
 
