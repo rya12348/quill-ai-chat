@@ -58,6 +58,10 @@ const FUSE_MS = 30_000
 const MIN_FUSE_MS = 10_000
 /** `minTurnMs`: a pass never leaves the next seat less than eight seconds. */
 const MIN_TURN_MS = 8_000
+/** The shipped `MAX_ANSWER_LENGTH`. Cards really carry answers longer than this
+ *  (35,483 of the 1.8M answers in the bank run past forty characters), and a
+ *  forty-character cut refused every one of them. */
+const MAX_ANSWER_LENGTH = 256
 /** The shipped settings: every turn's fuse is random in this window, not a
  *  shrinking clock. Krillion's client carries `fuseMinMs: 10_000` and
  *  `fuseMaxMs: 30_000`, and its own bot script describes the result as "the
@@ -1179,7 +1183,7 @@ butter.post('/say', async (c) => {
   const answer = String(body.answer ?? '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 40)
+    .slice(0, MAX_ANSWER_LENGTH)
   if (!answer) return c.json({ error: 'Type an answer first.' }, 400)
   let room = await roomOf(database, code)
   if (!room) return c.json({ error: 'No room with that code.' }, 404)
@@ -1220,12 +1224,17 @@ butter.post('/say', async (c) => {
       at: now(),
     })
     // A miss stays with the person who missed: the refusal says they can try
-    // again, so the puffer must not move, the card must not turn over and
-    // nothing is scored. The fuse is the only clock in the game — the shipped
-    // `reject()` is a shake and a chip, no heart and no pass.
+    // again, so the puffer must not move and nothing is scored. The table gets
+    // two chances on each card, and the second one turns it over.
+    const misses = (Number(room.misses) || 0) + 1
+    if (misses >= 2) {
+      await database.prepare(`UPDATE butter_rooms SET misses = 0 WHERE id = ?`).bind(code).run()
+      const advanced = await advance(database, { ...room, misses: 0 }, players, true)
+      return c.json(await snapshot(database, advanced.id, pid), 200, { 'cache-control': 'no-store' })
+    }
     await database
       .prepare(`UPDATE butter_rooms SET misses = ?, updated_at = ? WHERE id = ?`)
-      .bind((Number(room.misses) || 0) + 1, now(), code)
+      .bind(misses, now(), code)
       .run()
     return c.json(await snapshot(database, code, pid), 200, { 'cache-control': 'no-store' })
   }
@@ -1311,15 +1320,20 @@ butter.post('/check', async (c) => {
   const answer = String(body.answer ?? '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 40)
+    .slice(0, MAX_ANSWER_LENGTH)
   const none = { value: null, repeat: false }
   if (!answer) return c.json(none, 200, { 'cache-control': 'no-store' })
   const room = await roomOf(database, code)
   if (!room || room.status !== 'playing') return c.json(none, 200, { 'cache-control': 'no-store' })
   const players = await playersOf(database, code)
   if (!players.some((player) => player.pid === pid)) return c.json({ error: 'You are not at this table.' }, 403)
+  // The pill has to read the same card the table plays from. Checking the
+  // bundled sample answered null for answers /say accepts (a 44-character
+  // island name is on the real card and nowhere in the sample), so the dock
+  // stayed silent on a perfectly good word.
   const topic = topicOf(room)
-  const hit = closestAnswer(topic, answer)
+  const card = (await fullCard(topic.prompt, c.env.ASSETS, new URL(c.req.url).origin)) ?? topic
+  const hit = closestAnswer(card, answer)
   const repeat = hit ? usedOf(room).some((spent) => sameAnswer(spent, answer)) : false
   return c.json({ value: hit?.value ?? null, repeat }, 200, { 'cache-control': 'no-store' })
 })
