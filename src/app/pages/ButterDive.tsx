@@ -1551,10 +1551,13 @@ export function ButterDive() {
               {correction && (
                 <div className="ds-correction" id="answer-correction" aria-live="polite">
                   <div className="ds-preview-pill ds-px ds-correction-panel">
+                    {/* The card's own pill: the words you sent, then the words
+                        it spells them as, quoted and in the accent, with the
+                        line that tells you to send it again to keep it. */}
                     <span className="ds-correction-arrow">
-                      {correction.from} → {correction.to}
+                      “{correction.from}” → <b>“{correction.to}”</b>
                     </span>
-                    <span className="ds-correction-hint">auto-correct</span>
+                    <span className="ds-correction-hint">submit again to confirm · or edit</span>
                   </div>
                 </div>
               )}
