@@ -726,7 +726,6 @@ body:has(.pf-root[data-mode=lobby],.pf-root[data-mode=round]) button[aria-contro
 .pf-err .pf-confirm-leave{text-align:left;margin-top:10px;display:block}
 .pf-err .pf-confirm-leave:disabled{opacity:.55;cursor:default}
 .pf-rooms{flex-direction:column;display:flex}
-.pf-rooms a.pf-room{text-decoration:none;color:var(--pf-ink)}
 .pf-load-more{margin:14px auto 2px;padding:10px 20px;font-size:16px;display:block}
 .pf-load-more:focus-visible{outline-offset:4px;outline:2px solid #4de3ff}
 .pf-load-more:disabled{opacity:.55}
