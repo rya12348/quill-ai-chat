@@ -11,12 +11,12 @@ Open the code browser: `node tmp/krillion-viewer.mjs` → http://127.0.0.1:4178
 
 | path | contents |
 |---|---|
-| `pages/*.html` | 15 server-rendered routes (/, /party, /archive, /packs, /unlimited/classic, /geography, /lexicon, /movies, /sports, /account, /faq, /friends, /restore, /privacy, /terms), each with its RSC flight payload |
-| `_next/static/chunks/*.js` | 37 chunks — every `/_next/static` URL referenced anywhere in the pages or the chunks themselves resolves locally (checked: 0 missing) |
-| `_next/static/chunks/*.css` | 7 stylesheets, the originals behind the `.ds-*` rules already copied into `src/dive.css` and `src/butter-party.css` |
+| `pages/*.html` | 23 server-rendered routes: /, /party, /party/<code>, /archive, /archive/<day>, /packs, /unlimited, /unlimited/classic, /unlimited/movies, /geography, /lexicon, /movies, /sports, /account, /faq, /friends, /restore, /privacy, /terms, /answer-count and the fallbacks — each with its RSC flight payload |
+| `_next/static/chunks/*.js` | 33 JS chunks + 8 stylesheets — every `/_next/static` URL referenced anywhere in the pages or the chunks resolves locally (checked: 0 missing, 0 orphans) |
+| `_next/static/chunks/*.css` | the shipped stylesheets, the originals behind the `.ds-*` rules already copied into `src/dive.css` and `src/butter-party.css` |
 | `api/*.txt` | status, content type and body for all 18 `/api/*` paths the client names |
-| `assets/` | 82 images plus the 3 woff2 fonts the CSS references |
-| `pretty/*.js` | the 22 JS chunks re-printed indented by esbuild, for reading |
+| `assets/` | 92 images plus the 3 woff2 fonts the CSS references |
+| `pretty/*.js` | the 33 JS chunks re-printed indented by esbuild, for reading |
 | `viewer/` | highlight.js + theme used by the local browser |
 | `MIRROR.json` | the fetch report: counts, statuses, failures |
 | `INDEX.md` | generated table: each chunk, its size, module count, component names |
@@ -55,11 +55,29 @@ deployment, so there is no original `.tsx`. Each chunk opens with its CSS-module
 export map (`DailyIntro-module__…`, `DoneView-module__…`), which is what names
 the component you are reading.
 
+## Is it the whole game?
+
+The client, yes, and it is checkable rather than assumed:
+
+- The crawl follows the routes the code names, not just the menu: `/answer-count`,
+  `/archive/<day>`, `/party/<code>` and `/unlimited/<pack>` each carry chunks no
+  other page loads. They are why the first pass was short by five files.
+- `node tmp/verify-mirror.mjs` prints the closure: 41 chunks, 23 pages, every
+  `/_next/static` reference resolving, no chunk unreferenced.
+- Repeating the crawl returns `added: []`, so another pass adds nothing.
+
+The server does not ship: `/api/submit` grades answers against a bank that stays
+on the server, so the answer list and the tier thresholds cannot be here. That
+is a property of the game, not a gap in the crawl.
+
 ## Refreshing
 
 ```sh
 node tmp/krillion-fetch.mjs      # chunks + pages reachable from the home page
 node tmp/krillion-fetch2.mjs     # all routes, API payloads, assets, MIRROR.json
+node tmp/crawl-deep.mjs          # unlinked routes and the chunks only they load
+node tmp/verify-mirror.mjs       # closure check: 0 missing, 0 orphans
 node tmp/krillion-prettify.mjs   # pretty/*.js and INDEX.md
+node tmp/publish-source.mjs      # copy code into public/krillion-source
 node tmp/krillion-viewer.mjs     # the local browser
 ```
