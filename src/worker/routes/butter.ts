@@ -542,11 +542,11 @@ async function advance(
     history = card.seen
   }
 
-  // A pop lights a new fuse; a pass does not. The shipped room's own rule is
-  // that the fuse is hidden and random (10-30s) and never gets longer, so the
-  // seat a pass hands the puffer to inherits the clock already burning on it.
-  const fuseEnd = popped ? now() + POP_FREEZE_MS + strike : Number(room.fuse_end) || now() + strike
-  const fuseMs = popped ? strike : Number(room.fuse_ms) || strike
+  // A fresh fuse is struck on every pass: each seat that takes the puffer gets
+  // its own random 10-30s, so a pass is a clean breath rather than an inherited
+  // clock that runs out while the new holder is still reading the card.
+  const fuseEnd = popped ? now() + POP_FREEZE_MS + strike : now() + strike
+  const fuseMs = strike
 
   await database
     .prepare(
