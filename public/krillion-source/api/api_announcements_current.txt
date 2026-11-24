@@ -1,0 +1,3 @@
+HTTP 200 application/json
+
+{"announcement":null,"expiresAt":"2026-11-24T01:39:28.808Z"}

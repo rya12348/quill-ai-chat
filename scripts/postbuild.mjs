@@ -56,6 +56,9 @@ for (const file of listFiles(client).sort()) {
   // The party's answer cards are 37MB of static data fetched on demand; they
   // have no place in the shell's cache version.
   if (file.startsWith('puffer/')) continue
+  // Neither has the Krillion source mirror: 3.4MB of code that only the source
+  // page opens, one file at a time.
+  if (file.startsWith('krillion-source/')) continue
   digest.update(file)
   digest.update(readFileSync(join(client, file)))
 }
@@ -67,6 +70,9 @@ const precache = listFiles(client)
   // Never precache the party's card files: 939 of them, 37MB, and the game only
   // ever opens the one card it is playing.
   .filter((file) => !file.startsWith('puffer/'))
+  // The source mirror is read on demand too; precaching it would keep 3.4MB of
+  // Krillion's build in every visitor's cache.
+  .filter((file) => !file.startsWith('krillion-source/'))
   .map((file) => (file === 'index.html' ? '/' : `/${file.replaceAll('\\', '/')}`))
 
 const swPath = join(client, 'sw.js')

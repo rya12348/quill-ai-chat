@@ -26,6 +26,12 @@
   --color-danger: #b33525;
   --color-danger-soft: #fbe7e3;
 
+  /* Source viewer tokens, for the Krillion mirror's own syntax colours. */
+  --tk-comment: #7d7466;
+  --tk-string: #1a6b45;
+  --tk-number: #8a5a1c;
+  --tk-keyword: #8a3a0e;
+
   --radius-control: 10px;
   --radius-card: 16px;
   --radius-dialog: 20px;
@@ -57,6 +63,10 @@ html.dark {
   --color-warning-soft: #3a2c18;
   --color-danger: #f07f70;
   --color-danger-soft: #3b211e;
+  --tk-comment: #8e8578;
+  --tk-string: #7fcf9f;
+  --tk-number: #e0b070;
+  --tk-keyword: #f2a36c;
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 0 0 1px rgb(255 255 255 / 0.04);
   --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 12px 40px -12px rgb(0 0 0 / 0.65);
   --shadow-dialog: 0 0 0 1px rgb(255 255 255 / 0.06), 0 30px 80px -20px rgb(0 0 0 / 0.75);
@@ -1293,4 +1303,20 @@ html.dark .prose-chat pre {
 .butter-menu-go {
   margin-left: auto;
   font-size: 20px;
+}
+
+/* The Krillion source viewer's own syntax colours. They come from the mirror's
+   local code browser so the page reads the same way here as it does there. */
+.tk-comment {
+  color: var(--tk-comment);
+  font-style: italic;
+}
+.tk-string {
+  color: var(--tk-string);
+}
+.tk-number {
+  color: var(--tk-number);
+}
+.tk-keyword {
+  color: var(--tk-keyword);
 }

@@ -3,6 +3,7 @@ import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from 'react
 
 import { Butter } from './pages/Butter'
 import { ButterDive } from './pages/ButterDive'
+import { KrillionSource } from './pages/KrillionSource'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
 import { BacktickNewTab } from './components/BacktickNewTab'
@@ -147,6 +148,9 @@ function Gate() {
               sits one step in, at /butter/party. */}
           <Route path="butter" element={<ButterDive />} />
           <Route path="butter/party" element={<Butter />} />
+          {/* Deliberately outside /butter/*: that prefix is a game surface and
+              hides the sidebar this page is reached from. */}
+          <Route path="krillion-source" element={<KrillionSource />} />
           <Route path="room" element={<Room />} />
           <Route path="settings" element={<Settings />} />
         </Route>

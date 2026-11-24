@@ -277,6 +277,15 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
           Butter Party
         </NavLink>
         <NavLink
+          to="/krillion-source"
+          className={({ isActive }) =>
+            cx('relative mt-0.5 flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
+          }
+        >
+          <Code2 className="size-4" />
+          Krillion source code
+        </NavLink>
+        <NavLink
           to="/math"
           className={({ isActive }) =>
             cx('relative mt-0.5 flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')

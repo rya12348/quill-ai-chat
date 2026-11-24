@@ -1,0 +1,3 @@
+HTTP 200 application/json
+
+{"date":"2026-11-23","dayNumber":131,"resetsAt":"2026-11-24T05:00:00.000Z","prompts":[{"id":"p1","text":"Name an animal that eats fish (documented, regular part of its diet)"},{"id":"p2","text":"Name a movie that's at least two and a half hours long (100+ IMDb votes)"},{"id":"p3","text":"Name one of the Seven Wonders of the World (ancient or new)"},{"id":"p4","text":"Name a fictional vampire, werewolf, or ghost"},{"id":"p5","text":"Name an object that has a lens"},{"id":"p6","text":"Name a natural habitat"},{"id":"p7","text":"Name something that uses suction"}]}

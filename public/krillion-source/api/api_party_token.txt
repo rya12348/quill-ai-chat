@@ -1,0 +1,3 @@
+HTTP 403 application/json
+
+{"code":"party-verification","siteKey":"0x4AAAAAAF2eix0RNjibbMu0","guestId":"383c7dbfdf0159b0055260998df6467e543526cdefcf368787314f84d65cca14","error":"Complete the verification to join Puffer Party."}
