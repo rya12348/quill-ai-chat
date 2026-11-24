@@ -1,7 +1,9 @@
 import { Hono, type Context } from 'hono'
 
 import type { AppContext } from '../env'
-import { diveDay, rateDiveAnswer } from '../butter-dive-bank'
+import { diveDay, isSimsburySlot, rateDiveAnswer, simsburyTextAt } from '../butter-dive-bank'
+import { simsburyForDay } from '../butter-simsbury'
+import { TIERS, type ButterTier } from '../butter-topics'
 
 /**
  * The Daily Dive — Butter's seven-prompt dive.
@@ -51,6 +53,21 @@ async function upstream(path: string, init: RequestInit = {}): Promise<Response 
   }
 }
 
+/**
+ * Put the town's own rounds onto a day's seven prompts. The slots are fixed per
+ * day, so this is the same edit on the live deck and on the local one — and the
+ * ids stay p1…p7, which is what keeps the client, the rating and the answer
+ * sheet pointing at the same round.
+ */
+function withSimsbury<
+  T extends { id: string; text: string },
+>(prompts: T[], dayNumber: number): T[] {
+  return prompts.map((prompt, index) => {
+    const text = simsburyTextAt(dayNumber, index)
+    return text ? { ...prompt, text } : prompt
+  })
+}
+
 /** Today's seven prompts: the real card first, the local deck if it is down. */
 butterDive.get('/today', async (c) => {
   const res = await upstream('/api/today')
@@ -59,10 +76,16 @@ butterDive.get('/today', async (c) => {
       | { date?: string; dayNumber?: number; resetsAt?: string; prompts?: { id: string; text: string }[] }
       | null
     if (body && Array.isArray(body.prompts) && body.prompts.length === 7) {
-      return c.json({ ...body, source: 'live' }, 200, { 'cache-control': 'no-store' })
+      const dayNumber = diveDay(String(body.date ?? '')).dayNumber
+      return c.json(
+        { ...body, prompts: withSimsbury(body.prompts, dayNumber), source: 'live' },
+        200,
+        { 'cache-control': 'no-store' },
+      )
     }
   }
-  return c.json({ ...diveDay(), source: 'local' }, 200, { 'cache-control': 'no-store' })
+  const local = diveDay()
+  return c.json({ ...local, source: 'local' }, 200, { 'cache-control': 'no-store' })
 })
 
 /**
@@ -88,8 +111,14 @@ butterDive.post('/answer', async (c) => {
   if (!/^p[1-7]$/.test(promptId)) return c.json({ error: 'Bad prompt' }, 400)
   if (!answer) return c.json({ error: 'Type an answer first.' }, 400)
 
+  // A round of the town's own is rated here whatever deck the day came from:
+  // the other site has never heard of Simsbury.
+  const date = String(body.date ?? '')
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date) && isSimsburySlot(promptId, date)) {
+    return c.json(rateDiveAnswer(promptId, answer, date), 200, { 'cache-control': 'no-store' })
+  }
+
   if (body.via !== 'local') {
-    const date = String(body.date ?? '')
     const playerId = String(body.playerId ?? '')
     const runId = String(body.runId ?? '')
     // The live card only scores a dated, player-tagged run.
@@ -122,10 +151,29 @@ butterDive.get('/sheet', async (c) => {
   const body = res?.ok
     ? ((await res.json().catch(() => null)) as { prompts?: { id: string; text: string; answers?: unknown[] }[] } | null)
     : null
-  if (!body || !Array.isArray(body.prompts)) {
+  const day = diveDay(date)
+  const cards = new Map(simsburyForDay(day.dayNumber).map((entry) => [entry.index, entry.card]))
+  const upstreamPrompts = Array.isArray(body?.prompts) ? body.prompts : []
+  // The town's rounds are answered from this file, never from the other site,
+  // and they open even when the other site's sheets are down.
+  const prompts = day.prompts.map((prompt, index) => {
+    const card = cards.get(index)
+    if (!card) {
+      return upstreamPrompts.find((entry) => entry.id === prompt.id) ?? { id: prompt.id, text: prompt.text, answers: [] }
+    }
+    return {
+      id: prompt.id,
+      text: card.prompt,
+      answers: card.answers.map((answer, at) => {
+        const tier = (card.tiers?.[at] ?? 'schooler') as ButterTier
+        return { answer, tier, score: TIERS[tier]?.score ?? 0 }
+      }),
+    }
+  })
+  if (!upstreamPrompts.length && !cards.size) {
     return c.json({ error: 'The answer sheets are lost at sea.' }, 502)
   }
-  return c.json(body, 200, { 'cache-control': 'no-store' })
+  return c.json({ ...(body ?? {}), date, prompts }, 200, { 'cache-control': 'no-store' })
 })
 
 /**

@@ -10,6 +10,7 @@
  */
 
 import { BUTTER_TOPICS, answerTier, closestAnswer, type ButterTopic } from './butter-topics'
+import { SIMSBURY_CARDS, simsburyForDay } from './butter-simsbury'
 
 const DAY_MS = 86_400_000
 /** Dive #1: matches the shipped site's own numbering, which counts 23 Nov
@@ -65,6 +66,12 @@ export function diveDay(date = today()): DiveDay {
     id: `p${position + 1}`,
     text: pool[index].prompt,
   }))
+  // The town gets one or two rounds of its own, on the same slots whatever deck
+  // was dealt, so a live day and the local fallback carry the same cards.
+  for (const entry of simsburyForDay(dayNumber)) {
+    const prompt = prompts[entry.index]
+    if (prompt) prompt.text = entry.card.prompt
+  }
   const at = Date.parse(`${date}T00:00:00Z`)
   return {
     date,
@@ -78,7 +85,21 @@ export function diveDay(date = today()): DiveDay {
 export function diveCard(promptId: string, date = today()): ButterTopic | undefined {
   const prompt = diveDay(date).prompts.find((entry) => entry.id === promptId)
   if (!prompt) return undefined
-  return BUTTER_TOPICS.find((topic) => topic.prompt === prompt.text)
+  return (
+    BUTTER_TOPICS.find((topic) => topic.prompt === prompt.text) ??
+    (SIMSBURY_CARDS.find((card) => card.prompt === prompt.text) as unknown as ButterTopic | undefined)
+  )
+}
+
+/** Whether a round of a day's dive is one of the Simsbury cards. */
+export function isSimsburySlot(promptId: string, date = today()): boolean {
+  const prompt = diveDay(date).prompts.find((entry) => entry.id === promptId)
+  return Boolean(prompt && SIMSBURY_CARDS.some((card) => card.prompt === prompt.text))
+}
+
+/** The Simsbury text that belongs on a slot of a day, if it takes one. */
+export function simsburyTextAt(dayNumber: number, index: number): string | undefined {
+  return simsburyForDay(dayNumber).find((entry) => entry.index === index)?.card.prompt
 }
 
 export type DiveRating = {

@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono'
 
 import { answerTier, closestAnswer, flatAnswer, nextTopic, parseSegs, sameAnswer, type ButterTier, type MeterSeg, type ButterTopic } from '../butter-topics'
+import { SIMSBURY_CARDS } from '../butter-simsbury'
 import { requireDb } from '../db'
 import type { AppContext } from '../env'
 
@@ -322,6 +323,34 @@ function nextAlive(players: PlayerRow[], after: string | null): PlayerRow | unde
  * order. The real table always has something left to name, so a spent card is
  * replaced and the puffer keeps moving.
  */
+/** How many times the town turns up at one table: two games, or three. */
+function simsburyTarget(room: RoomRow): number {
+  let hash = 0
+  for (const character of room.id) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
+  return 2 + (hash % 2)
+}
+
+/**
+ * The Simsbury card this table is due, if it is due one. The town takes the
+ * second, fifth and eighth card of a game — so a short game still meets it once,
+ * a long one two or three times, and never twice in a row.
+ */
+function dueSimsbury(room: RoomRow, seen: string[]): ButterTopic | undefined {
+  const played = seen.filter((prompt) => SIMSBURY_CARDS.some((card) => card.prompt === prompt)).length
+  if (played >= simsburyTarget(room)) return undefined
+  const dueAt = [2, 5, 8][played] ?? Number.POSITIVE_INFINITY
+  if (room.round < dueAt) return undefined
+  const fresh = SIMSBURY_CARDS.filter((card) => !seen.includes(card.prompt))
+  if (!fresh.length) return undefined
+  const pick = fresh[(room.round * 7 + room.id.length + played) % fresh.length]
+  return pick as unknown as ButterTopic
+}
+
+/** The next card this table is dealt: the town's when it is due, else the bank. */
+function nextPartyTopic(room: RoomRow, seen: string[]): ButterTopic {
+  return dueSimsbury(room, seen) ?? nextTopic(seen)
+}
+
 /** The categories this table has already dealt, oldest first. */
 function seenOf(room: RoomRow): string[] {
   try {
@@ -342,7 +371,7 @@ function dealCard(
   const topic = topicOf(room)
   const used = usedOf(room)
   if (used.length < topic.answers.length) return { topic, used, swapped: false, seen }
-  const fresh = nextTopic([...seen, topic.prompt])
+  const fresh = nextPartyTopic(room, [...seen, topic.prompt])
   return { topic: fresh, used: [], swapped: true, seen: [...seen, fresh.prompt].slice(-SEEN_KEEP) }
 }
 
@@ -437,7 +466,7 @@ async function advance(
   let history = seen
   if (popped) {
     // A pop ends the round: new card, cleared answers, new hidden fuse.
-    topic = nextTopic([...seen, topic.prompt])
+    topic = nextPartyTopic(room, [...seen, topic.prompt])
     used = []
     history = [...seen, topic.prompt].slice(-SEEN_KEEP)
   } else {
@@ -917,7 +946,8 @@ butter.post('/start', async (c) => {
   // A rematch keeps the table's history, so the card it just finished is not
   // dealt straight back to it.
   const seen = seenOf(room)
-  const topic = nextTopic(seen)
+  // A rematch starts at round one, whatever the last game ended on.
+  const topic = nextPartyTopic({ ...room, round: 1 }, seen)
   const history = [...seen, topic.prompt].slice(-SEEN_KEEP)
   // The shipped table's fuse is `fuseMinMs: 10_000` to `fuseMaxMs: 30_000` on
   // every deal, the first one included.

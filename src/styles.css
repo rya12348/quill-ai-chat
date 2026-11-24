@@ -921,6 +921,17 @@ html.dark .prose-chat pre {
   }
 }
 
+/* The party's sea and foreground canvases are replaced elements too: without an
+   explicit size they sit at their 300x150 default and the water wash that tints
+   the reef never gets painted. */
+.butter-page canvas.ds-sea,
+.butter-page canvas.ds-fore {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
 /* The sheet asks for the game's own fonts through custom properties; Ink's
    theme does not define them, so without this every word falls back to Inter
    and the dive stops looking like the dive. VT323 is the face the sheet loads. */
