@@ -1765,6 +1765,35 @@ function addLoadingState(html: string, host: string): string {
 }
 
 /**
+ * A proxied page's ad and tracker machinery is the one part that has no business
+ * running here. It is what a network filter blocks by name, what turns a proxy
+ * request into a retry loop, and what leaves a game shell spinning on its own
+ * loader while fifteen ad frames fight over the main thread. The tags are
+ * dropped before the page is rewritten; the page's own scripts are untouched.
+ */
+const AD_HOSTS = /(?:^|\.)(?:googlesyndication\.com|doubleclick\.net|googleadservices\.com|googletagmanager\.com|google-analytics\.com|adtrafficquality\.google|5gvci\.com|rtmark\.net|usrpubtrck\.com|rapidexchange\.com|bmwguide\.org)$/i
+
+function isAdSource(src: string): boolean {
+  try {
+    return AD_HOSTS.test(new URL(src, 'https://ink.invalid').hostname)
+  } catch {
+    return false
+  }
+}
+
+function stripAdMarkup(html: string): string {
+  return html
+    .replace(/<(script|iframe)\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>[\s\S]*?<\/\1\s*>/gi, (tag, _name, dq, sq, bare) => {
+      const src = dq ?? sq ?? bare ?? ''
+      return isAdSource(src) ? '' : tag
+    })
+    .replace(/<(script|iframe)\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*\/?>/gi, (tag, _name, dq, sq, bare) => {
+      const src = dq ?? sq ?? bare ?? ''
+      return isAdSource(src) ? '' : tag
+    })
+}
+
+/**
  * FreezeNova's game pages inject a promo ad overlay while they are embedded.
  * The game is the page itself, so drop the ad loader and its wgplayer tag
  * without touching the Unity loader or canvas.
@@ -1966,12 +1995,12 @@ export function renderProxyPage(
   const googleHost = /^google\.[a-z.]+$/i.test(target.hostname.replace(/^www\./i, ''))
   const googleHome = googleHost && (target.pathname === '/' || target.pathname === '/webhp')
   const stripGoogleScripts = searchPage || googleHome
-  const cleaned = stripGameAdScripts(rootRelative(
+  const cleaned = stripAdMarkup(stripGameAdScripts(rootRelative(
     (stripGoogleScripts ? stripSearchScripts(html) : html)
       .replace(/<meta\b[^>]*http-equiv\s*=\s*["']?(?:content-security-policy|refresh)["']?[^>]*>/gi, '')
       .replace(/<base\b[^>]*>/gi, ''),
     origin,
-  ))
+  )))
   const withAssets = proxyAssetTags(cleaned, finalUrl, app.href)
   const based = addBase(withAssets, base)
   const withFullscreen = addFullscreenFallback(based)
