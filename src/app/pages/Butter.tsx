@@ -1443,13 +1443,29 @@ export function Butter() {
     }
   }, [chatText, code, pid])
 
-  const leave = () => {
+  // The real table's exit door: a live round is given up at the server (that is
+  // what its confirm dialog warns about), a lobby seat is just released. Either
+  // way this browser goes back to the door.
+  const leaveRef = useRef<HTMLDialogElement | null>(null)
+  const leave = useCallback(async () => {
+    const at = code
+    const who = pid
+    if (at && who) {
+      try {
+        await call('/leave', { code: at, pid: who })
+      } catch {
+        // The seat could not be released (offline, or the room already went);
+        // the door still opens rather than trapping the player at the table.
+      }
+    }
     localStorage.removeItem(ROOM_KEY)
     setCode('')
     setPid('')
     setSnap(null)
     setTyped('')
-  }
+    setMySaid(null)
+    setError('')
+  }, [code, pid])
 
   /* ---------------------------------------------------------------- derived */
 
@@ -2215,6 +2231,55 @@ export function Butter() {
             </div>
           </dialog>
         )}
+
+        {/* The shipped exit door, top-left beside the menu. A round in flight
+            asks first; a lobby seat just walks out. */}
+        {snap && (
+          <button
+            className="pf-leave"
+            type="button"
+            aria-label="Leave room"
+            title="Leave room"
+            onClick={() => {
+              if (snap.status === 'playing') leaveRef.current?.showModal()
+              else void leave()
+            }}
+          >
+            <svg viewBox="0 0 20 20" fill="currentColor" shapeRendering="crispEdges" aria-hidden="true">
+              <path d="M2 2h8v2H4v12h6v2H2z M8 9h8V7h-2V5h2v2h2v2h2v2h-2v2h-2v2h-2v-2h2v-2H8z" />
+            </svg>
+          </button>
+        )}
+        <dialog
+          ref={leaveRef}
+          className="pf-confirm"
+          aria-labelledby="pf-leave-title"
+          aria-describedby="pf-leave-body"
+        >
+          <div className="pf-panel">
+            <h3 id="pf-leave-title">LEAVE THE GAME?</h3>
+            <p id="pf-leave-body">
+              You&apos;re still floating. Leaving gives up your seat in this game, and you can&apos;t come
+              back into it.
+              {snap?.rated ? ' This is a rated game—leaving can cost you Elo.' : ''}
+            </p>
+            <div className="pf-confirm-buttons">
+              <button type="button" className="ds-next-btn" autoFocus onClick={() => leaveRef.current?.close()}>
+                KEEP PLAYING
+              </button>
+              <button
+                type="button"
+                className="pf-confirm-leave"
+                onClick={() => {
+                  leaveRef.current?.close()
+                  void leave()
+                }}
+              >
+                LEAVE
+              </button>
+            </div>
+          </div>
+        </dialog>
 
         {error && snap && <p className="pf-err">{error}</p>}
       </div>

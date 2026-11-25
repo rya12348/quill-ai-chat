@@ -24,6 +24,6 @@ what is live.
 <!-- deploy:begin -->
 - live commit: `cb97980b005c74627df01be404454d12674b811a-dirty`
 - built: 2026-11-25T02:59:29.790Z
-- checked: 2026-11-25T03:00:07.897Z
+- checked: 2026-11-25T03:00:11.670Z
 - site: https://www.inkbrowser.dpdns.org
 <!-- deploy:end -->

@@ -1083,6 +1083,54 @@ butter.post('/join', async (c) => {
   return c.json({ code, pid: result.pid }, 201, { 'cache-control': 'no-store' })
 })
 
+/**
+ * A player walking out — the real table's own exit door.
+ *
+ * A lobby seat is simply removed. A live round is given up, which is what the
+ * shipped confirm dialog warns about: the seat is handed zero hearts and the
+ * puffer passes through the normal path, so leaving mid-round ends the game the
+ * same way a pop does instead of inventing an end-of-round rule here.
+ */
+butter.post('/leave', async (c) => {
+  if (crossSite(c)) return c.json({ error: 'Cross-site request refused.' }, 403)
+  const database = db(c)
+  await ensureSchema(database)
+  const body = (await c.req.json().catch(() => ({}))) as { code?: string; pid?: string }
+  const code = cleanCode(body.code)
+  const pid = String(body.pid ?? '')
+  if (code.length !== 4 || !pid) return c.json({ error: 'Bad seat' }, 400)
+  let room = await roomOf(database, code)
+  // Already gone (a double press, or the idle reaper beat us to it): the door is
+  // open either way.
+  if (!room) return c.json({ ok: true }, 200, { 'cache-control': 'no-store' })
+  const players = await playersOf(database, code)
+  const me = players.find((player) => player.pid === pid)
+  if (!me) return c.json({ ok: true }, 200, { 'cache-control': 'no-store' })
+  await say(database, code, `${me.name} left the table.`, 'bad')
+  if (room.status === 'playing') {
+    const given = players.map((player) => (player.pid === pid ? { ...player, hearts: 0 } : player))
+    room = await retrying(() => advance(database, room as RoomRow, given, 'pass'))
+  }
+  await database.prepare(`DELETE FROM butter_players WHERE room = ? AND pid = ?`).bind(code, pid).run()
+  const left = players.filter((player) => player.pid !== pid)
+  // An empty table is not a room any more — the same sweep reapIdle does. A
+  // table left holding nothing but bots is empty in the only way that counts:
+  // nobody is there to deal to.
+  if (!left.length || left.every((player) => player.bot === 1)) {
+    await database.prepare(`DELETE FROM butter_feed WHERE room = ?`).bind(code).run()
+    await database.prepare(`DELETE FROM butter_chat WHERE room = ?`).bind(code).run()
+    await database.prepare(`DELETE FROM butter_rooms WHERE id = ?`).bind(code).run()
+    return c.json({ ok: true, closed: true }, 200, { 'cache-control': 'no-store' })
+  }
+  // The host's chair leaving must not strand the survivors without a start
+  // button, so the longest-waiting seat takes over.
+  if (room.host === pid) {
+    await database.prepare(`UPDATE butter_rooms SET host = ?, updated_at = ? WHERE id = ?`).bind(left[0].pid, now(), code).run()
+    await say(database, code, `${left[0].name} is hosting now.`, 'note')
+  }
+  return c.json({ ok: true }, 200, { 'cache-control': 'no-store' })
+})
+
 butter.get('/rooms', async (c) => {
   const database = db(c)
   await ensureSchema(database)

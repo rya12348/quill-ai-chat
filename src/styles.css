@@ -1031,6 +1031,19 @@ html.dark .prose-chat pre {
   }
 }
 
+/* The exit door. The shipped sheet anchors it 44px right of the menu, which in
+   the real page sits 5px from the edge; Ink's corner menu sits 185px in (10px on
+   a phone), so the door follows the menu instead of floating on its own. */
+.butter-page .pf-leave {
+  top: 8px;
+  left: 227px;
+}
+@media (max-width: 700px) {
+  .butter-page .pf-leave {
+    left: 52px;
+  }
+}
+
 /* The real dive plays in a 561px-tall area at a 651px window: the bottom 90px
    is its ad strip, and the dock, the next button and the intro are lifted clear
    of it. Ink has no strip there, but matching the frame is what keeps the dock
