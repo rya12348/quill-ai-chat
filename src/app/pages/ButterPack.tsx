@@ -4,6 +4,15 @@ import { Link, useSearchParams } from 'react-router'
 import { ButterMenu } from '../components/ButterMenu'
 import { bandFor, MAX_SCORE, packOf, ROUNDS, TIERS, type TierId } from '../lib/butter-packs'
 import { PACK_WORLDS, PX_PER_POINT, image, paintPackWorld, themeImages } from '../lib/pack-world'
+import {
+  createGoldSpriteController,
+  createMascotSpriteController,
+  playMascotState,
+  seasonalKrillSprite,
+  type GoldSprite,
+  type MascotSprite,
+  type MascotState,
+} from '../lib/butter-sprites'
 
 /**
  * A themed pack — the movies, the gauntlet, the atlas, the notebook — and the
@@ -206,11 +215,21 @@ export function ButterPack({ packId }: { packId: string }) {
   const stageRef = useRef<HTMLDivElement | null>(null)
   const seaRef = useRef<HTMLCanvasElement | null>(null)
   const worldRef = useRef<HTMLDivElement | null>(null)
+  const mascotHostRef = useRef<HTMLDivElement | null>(null)
+  const mascotRef = useRef<HTMLImageElement | null>(null)
+  const carRef = useRef<HTMLImageElement | null>(null)
+  const mascotCtl = useRef<MascotSprite | null>(null)
+  const carCtl = useRef<GoldSprite | null>(null)
+  // The ladder appears rung by rung: the shipped one is appended at opacity 0
+  // and faded in on the next frame, so the transition has something to run on.
+  const [rungsIn, setRungsIn] = useState(false)
   const worldTheme = PACK_WORLDS[pack.id as keyof typeof PACK_WORLDS]
   // The shipped strip starts just behind the gate; the camera follows the score.
   const targetRef = useRef(-45)
 
   const points = useMemo(() => results.reduce((sum, result) => sum + result.score, 0), [results])
+  // One krillion anywhere in the run gilds the krill and the car for good.
+  const gold = results.some((result) => result.tier === 'krillion')
   targetRef.current = phase === 'intro' || phase === 'loading' || phase === 'error' ? -45 : points
 
   useEffect(() => {
@@ -584,6 +603,82 @@ export function ButterPack({ packId }: { packId: string }) {
     }
   }, [worldTheme])
 
+  /* ------------------------------------------- the krill and the buddy car */
+
+  // Both are the shipped controllers: the mascot's gold swap, its season swap
+  // and its fx layers come from `createMascotSpriteController`, and the movies'
+  // car from the shared `createGoldSpriteController` it hands the two files to.
+  useEffect(() => {
+    const img = mascotRef.current
+    if (!img) return
+    const mascot = createMascotSpriteController(img)
+    mascotCtl.current = mascot
+    let car: GoldSprite | null = null
+    if (worldTheme?.kind === 'cinema' && carRef.current) {
+      car = createGoldSpriteController(carRef.current, worldTheme.car, worldTheme.carGold)
+      carCtl.current = car
+    }
+    return () => {
+      mascot.destroy()
+      car?.destroy()
+      mascotCtl.current = null
+      carCtl.current = null
+    }
+  }, [worldTheme])
+
+  // The shipped `plunge` sets the gold on both sprites and the class on both
+  // elements; the krill's own `.gold` is what starts the aura breathing.
+  useEffect(() => {
+    mascotCtl.current?.setGold(gold)
+    carCtl.current?.setGold(gold)
+    carRef.current?.classList.toggle('gold', gold)
+    mascotHostRef.current?.classList.toggle('gold', gold)
+  }, [gold])
+
+  // The shipped per-tier reaction, off its own `plunge` switch: a miss and a
+  // plankton answer droop, a Too Clever answer faints, the rest celebrate, and a
+  // krillion gilds on top of that.
+  useEffect(() => {
+    if (phase !== 'feedback') return
+    const landed = results[results.length - 1]
+    const img = mascotRef.current
+    if (!landed || !img) return
+    const state: MascotState = !landed.tier
+      ? 'sad'
+      : landed.tier === 'plankton'
+        ? 'sad'
+        : landed.tier === 'tooclever'
+          ? 'faint'
+          : 'celebrate'
+    const ms = !landed.tier ? 2600 : landed.tier === 'plankton' ? 4200 : landed.tier === 'tooclever' ? 2400 : 1250
+    playMascotState(img, state, ms)
+    const host = mascotHostRef.current
+    if (landed.tier !== 'krillion' || !host) return
+    host.classList.remove('gilding')
+    void host.offsetWidth
+    host.classList.add('gilding')
+    const timer = window.setTimeout(() => host.classList.remove('gilding'), 1200)
+    return () => window.clearTimeout(timer)
+  }, [phase, results])
+
+  // The ladder is laid out on the plunge and faded in rung by rung; the shipped
+  // one is appended at opacity 0 and flipped on the next frame for that reason.
+  useEffect(() => {
+    if (phase !== 'feedback') {
+      setRungsIn(false)
+      return
+    }
+    setRungsIn(false)
+    const frame = requestAnimationFrame(() => setRungsIn(true))
+    // A tab that is not being painted is never handed a frame, and the ladder
+    // still has to be readable when it is looked at.
+    const timer = window.setTimeout(() => setRungsIn(true), 120)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.clearTimeout(timer)
+    }
+  }, [phase, round])
+
   /* -------------------------------------------------------------- render */
 
   const prompt = deck?.prompts[round] ?? null
@@ -604,6 +699,12 @@ export function ButterPack({ packId }: { packId: string }) {
   }))
   const scrolling = worldTheme?.kind === 'cinema' || worldTheme?.kind === 'gauntlet'
   const at = (score: number) => (scrolling ? { left: PX_PER_POINT * score } : undefined)
+  // The mascot and the car ride the strip at the camera's own score, which is
+  // where the shipped engine writes them each frame. The two still worlds have
+  // no strip to ride, so they hold the middle of the stage.
+  const stripLeft = (score: number) => (scrolling ? PX_PER_POINT * score : '50%')
+  // The ladder starts where the round did: every rung is that many points on.
+  const ladderBase = points - (last?.score ?? 0)
   const hudLabel =
     pack.id === 'movies' ? 'SCENE' : pack.id === 'sports' ? 'YARD' : pack.id === 'geography' ? 'LEG' : pack.id === 'lexicon' ? 'PAGE' : 'DEPTH'
 
@@ -657,6 +758,28 @@ export function ButterPack({ packId }: { packId: string }) {
               </>
             )}
 
+            {worldTheme?.kind === 'cinema' && (
+              <img
+                ref={carRef}
+                className={`dr-buddy-car pk-car${gold ? ' gold' : ''}`}
+                src={worldTheme.car}
+                alt=""
+                aria-hidden
+                style={{ left: stripLeft(points) }}
+              />
+            )}
+
+            <div
+              className="ds-mascot pk-mascot"
+              title="a friend"
+              ref={mascotHostRef}
+              style={{ left: stripLeft(points) }}
+            >
+              <span className="ds-mascot-sprite">
+                <img ref={mascotRef} src="/tiers/krillion.png" alt="krill" />
+              </span>
+              <span className="ds-blub">blub!</span>
+            </div>
             {(phase === 'preview' || phase === 'answering') && prompt && (
               <div className="ds-card ds-px" style={{ ...at(points), animationDelay: '0.45s' }}>
                 <div className="rnd">
@@ -679,6 +802,37 @@ export function ButterPack({ packId }: { packId: string }) {
                 </div>
                 ),
               )}
+
+            {/* The tier ladder, laid out on the plunge the way the shipped one is:
+                every rung sits where an answer of that tier would have landed from
+                the score this round started at, alternating its tag above and below
+                the line, and turns gold once the camera has passed it. */}
+            {scrolling &&
+              phase === 'feedback' &&
+              last?.tier &&
+              Object.entries(TIERS).map(([id, tier], index) => {
+                const rung = ladderBase + tier.score
+                const passed = points > rung - 0.5
+                return (
+                  <div
+                    key={id}
+                    className={`ds-tierline${passed ? ' passed' : ''}`}
+                    style={{
+                      left: PX_PER_POINT * rung,
+                      opacity: rungsIn ? 1 : 0,
+                      transition: `opacity .55s ease-out ${90 * index}ms`,
+                      ['--tc' as string]: `var(--tier-${id})`,
+                      ['--tag-y' as string]: index % 2 ? '-52px' : '-24px',
+                    }}
+                  >
+                    <div className="tag">
+                      <img src={seasonalKrillSprite(`/tiers/${id}.png`)} alt="" />
+                      {tier.name.toUpperCase()} &middot; {tier.score}
+                    </div>
+                    <i className="pole" />
+                  </div>
+                )
+              })}
 
             {phase === 'feedback' && last && (
               <div

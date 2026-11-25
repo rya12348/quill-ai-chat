@@ -56,6 +56,48 @@
   height: 100%;
 }
 
+/* The krill, the buddy car and the tier ladder are the shipped ones; the bundle
+   places them from its engine with a transform off the stage's corner, and its
+   stylesheet only ever gives them their size and paint. The strip's x is written
+   inline at the camera's own score, so what is left here is the offset onto the
+   road, above the car the krill rides. */
+.dive-page .ds-root .pk-mascot {
+  top: auto;
+  bottom: calc(42% + 22px);
+  margin-left: -32px;
+}
+
+.dive-page .ds-root[data-world] .dr-buddy-car.pk-car {
+  top: auto;
+  bottom: calc(42% - 9px);
+  margin-left: -46px;
+}
+
+/* Both are named by the shipped sheet but were not captured with it: the ladder's
+   flash when a rung lights, and the krill's blub floating up. */
+@keyframes ds-line-flash {
+  0% {
+    filter: brightness(3);
+  }
+  to {
+    filter: brightness();
+  }
+}
+
+@keyframes ds-blub-up {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  20% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+}
+
 /* The endless dive keeps its own still plate: its world is the vertical reef the
    daily dive renders, not one of the four pack strips. */
 .dive-page .pk-scene {
