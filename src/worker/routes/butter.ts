@@ -765,7 +765,21 @@ async function playBots(database: D1Database, room: RoomRow): Promise<RoomRow> {
       .bind(JSON.stringify(used), target, now(), current.id)
       .run()
     await say(database, current.id, `${me.name}: ${answer}`, 'good')
-    if (spares) await say(database, current.id, `${me.name} filled the meter: +1 ♥ spare life.`, 'good')
+    // A bot's answer is an answer: it flashes over the bot's own seat for the
+    // same 2.2s a person's does. Without this event the seats of a quick-play
+    // table sat silent while the puffer hopped around them.
+    await setLast(database, current.id, {
+      kind: 'tier',
+      name: me.name,
+      answer: reply,
+      tier: tier.id,
+      points: tier.score,
+      at: now(),
+    })
+    if (spares) {
+      await say(database, current.id, `${me.name} filled the meter: +1 ♥ spare life.`, 'good')
+      await setLast(database, current.id, { kind: 'spare', name: me.name, answer: reply, points: 0, at: now() })
+    }
     current = await advance(
       database,
       { ...current, used: JSON.stringify(used), meter_target: target },
