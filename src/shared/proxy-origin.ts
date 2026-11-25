@@ -18,9 +18,13 @@
  * project's own `pages.dev` address) keeps proxied pages on the app origin,
  * sandboxed, exactly as before.
  */
+// The frame host is deliberately not a `.pages.dev` name. A network filter keeps
+// `.pages.dev` in its proxy bucket, so a frame served from it is blocked as an
+// embed even when the page around it loads. This Worker is the same build against
+// the same D1, on a hostname that carries no such reputation.
 const CONTENT_ORIGINS: Record<string, string> = {
-  'https://www.inkbrowser.dpdns.org': 'https://ink-harbor-2f9.pages.dev',
-  'https://inkbrowser.dpdns.org': 'https://ink-harbor-2f9.pages.dev',
+  'https://www.inkbrowser.dpdns.org': 'https://ink-live.cadoffryan.workers.dev',
+  'https://inkbrowser.dpdns.org': 'https://ink-live.cadoffryan.workers.dev',
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
@@ -49,5 +53,10 @@ export function contentOriginFor(origin: string): string | undefined {
  * proxied page would share an origin with Ink's own document and could read it.
  */
 export function isContentHost(hostname: string): boolean {
-  return hostname === 'ink-harbor-2f9.pages.dev' || hostname === 'stet-preview.localhost'
+  return (
+    hostname === 'ink-live.cadoffryan.workers.dev' ||
+    // Older frames (and preview deployments of this project) still point here.
+    hostname === 'ink-harbor-2f9.pages.dev' ||
+    hostname === 'stet-preview.localhost'
+  )
 }
