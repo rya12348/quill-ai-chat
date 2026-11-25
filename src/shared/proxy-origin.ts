@@ -18,13 +18,14 @@
  * project's own `pages.dev` address) keeps proxied pages on the app origin,
  * sandboxed, exactly as before.
  */
-// The frame host is deliberately not a `.pages.dev` name. A network filter keeps
-// `.pages.dev` in its proxy bucket, so a frame served from it is blocked as an
-// embed even when the page around it loads. This Worker is the same build against
-// the same D1, on a hostname that carries no such reputation.
+// The frame host is a first-party subdomain of Ink's own domain, not a free host.
+// A network filter keeps `.pages.dev` and `*.workers.dev` in its proxy bucket, so
+// a frame served from either is blocked as an embed even when the page around it
+// loads. `pxy` is the same Pages project (same Worker, same D1) reached through a
+// hostname the filter has no verdict on.
 const CONTENT_ORIGINS: Record<string, string> = {
-  'https://www.inkbrowser.dpdns.org': 'https://ink-live.cadoffryan.workers.dev',
-  'https://inkbrowser.dpdns.org': 'https://ink-live.cadoffryan.workers.dev',
+  'https://www.inkbrowser.dpdns.org': 'https://pxy.inkbrowser.dpdns.org',
+  'https://inkbrowser.dpdns.org': 'https://pxy.inkbrowser.dpdns.org',
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
@@ -54,6 +55,8 @@ export function contentOriginFor(origin: string): string | undefined {
  */
 export function isContentHost(hostname: string): boolean {
   return (
+    hostname === 'pxy.inkbrowser.dpdns.org' ||
+    // Frames opened before the move still point at these hosts.
     hostname === 'ink-live.cadoffryan.workers.dev' ||
     // Older frames (and preview deployments of this project) still point here.
     hostname === 'ink-harbor-2f9.pages.dev' ||
