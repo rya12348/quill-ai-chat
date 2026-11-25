@@ -732,8 +732,22 @@ app.get('/api/web-proxy/:token/ws', requireDb, async (c) => {
   if (target.protocol !== 'wss:' && target.protocol !== 'ws:') {
     return c.body('That socket address is invalid.', 400, { 'content-type': 'text/plain; charset=utf-8' })
   }
-  const upstream = await fetch(target.href.replace(/^ws(s?):/i, 'http$1:'), { headers: c.req.raw.headers })
+  // Only the tunnel's own request headers go upstream. The browser's handshake
+  // (its key, version and extensions) describes a connection to the content
+  // host, and passing it on makes the target answer the wrong handshake, which
+  // reaches the page as an immediate 1006 close.
+  const headers = new Headers()
+  for (const [name, value] of c.req.raw.headers) {
+    if (name === 'host' || name === 'origin' || name === 'referer' || name === 'connection' || name === 'upgrade') continue
+    if (name.startsWith('sec-websocket-') && name !== 'sec-websocket-protocol') continue
+    headers.set(name, value)
+  }
+  headers.set('upgrade', 'websocket')
+  headers.set('connection', 'Upgrade')
+  headers.set('origin', target.origin)
+  const upstream = await fetch(target.href.replace(/^ws(s?):/i, 'http$1:'), { headers })
   if (upstream.status !== 101) {
+    console.error('proxy socket:', target.host, upstream.status)
     return c.body('That server did not accept the connection.', 502, { 'content-type': 'text/plain; charset=utf-8' })
   }
   return upstream
