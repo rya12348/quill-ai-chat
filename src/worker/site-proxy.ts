@@ -1464,6 +1464,71 @@ window.addEventListener('message',function(event){
 ${navigate}
 function isHttp(url){return url.protocol==='http:'||url.protocol==='https:'}
 function isProxy(url){return url.href===proxy||url.href.indexOf(proxy+'?')===0}
+// Everything a page loads has to come back through the capability route. The
+// document's own tags are rewritten on the server, but ad loaders, analytics
+// and anti-block probes build fresh <script>/<img>/<link> elements at runtime
+// with absolute addresses; those used to leave the browser and reach the site's
+// real domain, which is exactly what a network filter sees and blocks.
+var proxyPath=new URL(proxy).pathname;
+function rewriteAsset(value){
+  var url;try{url=new URL(String(value),document.baseURI)}catch(error){return null}
+  if(url.protocol!=='http:'&&url.protocol!=='https:')return null;
+  if(url.pathname.indexOf(proxyPath)===0)return null;
+  if(url.origin===appOrigin)url=new URL(url.pathname+url.search,origin);
+  return proxy+'/p/'+url.protocol.slice(0,-1)+'/'+url.host+url.pathname+(url.search?'?q='+encodeURIComponent(url.search.slice(1)):'');
+}
+function patchProperty(ctor,prop){
+  try{
+    var desc=Object.getOwnPropertyDescriptor(ctor.prototype,prop);
+    if(!desc||!desc.set)return;
+    Object.defineProperty(ctor.prototype,prop,{configurable:true,enumerable:desc.enumerable,get:desc.get,set:function(value){
+      var next=rewriteAsset(value);
+      return desc.set.call(this,next==null?value:next);
+    }});
+  }catch(error){}
+}
+patchProperty(window.HTMLScriptElement,'src');
+patchProperty(window.HTMLImageElement,'src');
+patchProperty(window.HTMLIFrameElement,'src');
+patchProperty(window.HTMLMediaElement,'src');
+patchProperty(window.HTMLSourceElement,'src');
+patchProperty(window.HTMLEmbedElement,'src');
+patchProperty(window.HTMLLinkElement,'href');
+try{
+  var nativeSetAttribute=Element.prototype.setAttribute;
+  Element.prototype.setAttribute=function(name,value){
+    if(/^(?:src|href|data-src)$/i.test(name)&&typeof value==='string'){
+      var next=rewriteAsset(value);
+      if(next!=null)value=next;
+    }
+    return nativeSetAttribute.call(this,name,value);
+  };
+}catch(error){}
+// A socket the page opens at its own host is addressed to the content host here,
+// so it has to be pointed back at the site and tunnelled: a chat client that
+// connects to wss://<site>/ws cannot otherwise reach its server from the proxy.
+var NativeWebSocket=window.WebSocket;
+if(NativeWebSocket){
+  var wsProxy=proxy.replace(/^http/,'ws')+'/ws?url=';
+  function rewriteSocket(value){
+    var url;try{url=new URL(String(value),document.baseURI)}catch(error){return value}
+    if(url.protocol!=='ws:'&&url.protocol!=='wss:')return value;
+    if(url.pathname.indexOf(proxyPath)===0)return value;
+    if(url.host===location.host){
+      var base=origin.replace(/^https:/,'wss:').replace(/^http:/,'ws:');
+      try{url=new URL(url.pathname+url.search,base)}catch(error){return value}
+    }
+    return wsProxy+encodeURIComponent(url.href);
+  }
+  var ProxyWebSocket=function(url,protocols){
+    var target=rewriteSocket(url);
+    if(protocols===undefined)return new NativeWebSocket(target);
+    return new NativeWebSocket(target,protocols);
+  };
+  ProxyWebSocket.prototype=NativeWebSocket.prototype;
+  ['CONNECTING','OPEN','CLOSING','CLOSED'].forEach(function(key){ProxyWebSocket[key]=NativeWebSocket[key]});
+  window.WebSocket=ProxyWebSocket;
+}
 function open(url){
   if(!isHttp(url))return;
   // A capability URL is already inside the preview: go there. Returning here

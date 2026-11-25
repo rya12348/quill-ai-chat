@@ -706,6 +706,40 @@ app.get('/api/web-proxy/:token/p/*', requireDb, async (c) => {
 })
 
 /**
+ * A socket tunnel for a proxied page.
+ *
+ * A chat client opens its socket at its own host (`wss://site/ws`), which inside
+ * the proxy is the content host and accepts nothing. The page shim points those
+ * sockets here instead, so the site's real host never reaches the network — and
+ * a network filter therefore has nothing to block. The capability token is
+ * checked before the tunnel opens, so this is not an open relay.
+ */
+app.get('/api/web-proxy/:token/ws', requireDb, async (c) => {
+  const token = c.req.param('token')
+  const missing = () => c.body('Live preview not found.', 404, { 'content-type': 'text/plain; charset=utf-8' })
+  if (!isWebProxyToken(token)) return missing()
+  const row = await c.get('db').prepare(`SELECT token FROM build_embeds WHERE token = ?`).bind(token).first<{ token: string }>()
+  if (!row) return missing()
+  if ((c.req.header('upgrade') ?? '').toLowerCase() !== 'websocket') {
+    return c.body('This route only accepts a WebSocket.', 426, { 'content-type': 'text/plain; charset=utf-8' })
+  }
+  let target: URL
+  try {
+    target = new URL(c.req.query('url') ?? '')
+  } catch {
+    return c.body('That socket address is invalid.', 400, { 'content-type': 'text/plain; charset=utf-8' })
+  }
+  if (target.protocol !== 'wss:' && target.protocol !== 'ws:') {
+    return c.body('That socket address is invalid.', 400, { 'content-type': 'text/plain; charset=utf-8' })
+  }
+  const upstream = await fetch(target.href.replace(/^ws(s?):/i, 'http$1:'), { headers: c.req.raw.headers })
+  if (upstream.status !== 101) {
+    return c.body('That server did not accept the connection.', 502, { 'content-type': 'text/plain; charset=utf-8' })
+  }
+  return upstream
+})
+
+/**
  * A token-scoped live-site proxy. The token is the capability: it lets a
  * sandboxed preview load a saved site, follow its public links, load its
  * embedded frames and submit its GET forms, all without sending the signed-in
