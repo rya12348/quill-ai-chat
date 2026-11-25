@@ -2017,8 +2017,13 @@ export function renderProxyPage(
   // kiwi's game shell covers its own game with a loader that it only clears from
   // the game frame's load event. In a proxied frame that event can be missed, and
   // the shell then shows that cover forever, so the cover is never painted.
-  const ready = /id="kiwiLoading"/.test(withNav)
+  let ready = /id="kiwiLoading"/.test(withNav)
     ? withNav.replace(/<\/head>/i, '<style>#kiwiLoading{display:none!important}</style></head>')
     : withNav
+  // kiwi's chat client only arms its Start button after it can read a class off
+  // its own parent document. Framed by the app that read fails, so the button is
+  // disabled and its click handler returns before doing anything. Inside the
+  // proxy the page is already where it belongs, so the gate is opened.
+  ready = ready.replace('let modeReady = window.parent === window;', 'let modeReady = true;')
   return addLoadingState(ready, target.hostname.replace(/^www\./, ''))
 }
