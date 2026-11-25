@@ -33,6 +33,7 @@ import { browserGateway } from './routes/browser-gateway'
 import { buffy } from './routes/buffy'
 import { butter } from './routes/butter'
 import { butterDive } from './routes/butter-dive'
+import { butterPacks } from './routes/butter-packs'
 import { chat } from './routes/chat'
 import { humanizer } from './routes/humanizer'
 import { localAuth } from './routes/local-auth'
@@ -1041,6 +1042,7 @@ app.route('/api/traffic', traffic)
 // Mounted before the party router: the dive is public and needs no database,
 // and `/api/butter` would otherwise claim the whole path.
 app.route('/api/butter-dive', butterDive)
+app.route('/api/butter-packs', butterPacks)
 app.route('/api/butter', butter)
 /**
  * Butter is the copy. `/butter` serves the mirrored site's own pages — the same

@@ -2,7 +2,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from 'react'
 
 import { Butter } from './pages/Butter'
+import { ButterArchive } from './pages/ButterArchive'
 import { ButterDive } from './pages/ButterDive'
+import { ButterPack } from './pages/ButterPack'
+import { ButterPacks } from './pages/ButterPacks'
 import { KrillionSource } from './pages/KrillionSource'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
@@ -148,6 +151,15 @@ function Gate() {
               sits one step in, at /butter/party. */}
           <Route path="butter" element={<ButterDive />} />
           <Route path="butter/party" element={<Butter />} />
+          {/* The rest of the game's own shelf: the endless dive, the four
+              themed packs and the logbook. */}
+          <Route path="butter/packs" element={<ButterPacks />} />
+          <Route path="butter/endless" element={<ButterPack packId="classic" />} />
+          <Route path="butter/movies" element={<ButterPack packId="movies" />} />
+          <Route path="butter/sports" element={<ButterPack packId="sports" />} />
+          <Route path="butter/geography" element={<ButterPack packId="geography" />} />
+          <Route path="butter/lexicon" element={<ButterPack packId="lexicon" />} />
+          <Route path="butter/archive" element={<ButterArchive />} />
           {/* Deliberately outside /butter/*: that prefix is a game surface and
               hides the sidebar this page is reached from. */}
           <Route path="krillion-source" element={<KrillionSource />} />

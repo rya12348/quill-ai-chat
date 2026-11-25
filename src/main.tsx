@@ -8,6 +8,7 @@ import './styles.css'
 import './retro.css'
 import './butter-party.css'
 import './dive.css'
+import './butter-packs.css'
 
 initTheme()
 // A reload starts with no unread room messages, so never keep the previous

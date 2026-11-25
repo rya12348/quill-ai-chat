@@ -1601,19 +1601,12 @@ export function ButterDive() {
                 </div>
                 <div className="ds-intro-meta" style={{ flexWrap: 'wrap' }}>
                   <span>dive #{day.dayNumber}</span>
-                  {/* The shipped row's three chips. Ink has no archive, themed
-                      packs or unlimited mode, so they are the look of the row
-                      and nothing more. */}
+                  {/* The shipped row's three chips, each one opening the page it
+                      names. */}
                   <div className="butter-dive-meta-links">
-                    <a aria-hidden="true" tabIndex={-1}>
-                      ARCHIVE ⟲
-                    </a>
-                    <a aria-hidden="true" tabIndex={-1}>
-                      THEMED PACKS
-                    </a>
-                    <a aria-hidden="true" tabIndex={-1}>
-                      UNLIMITED ∞
-                    </a>
+                    <Link to="/butter/archive">ARCHIVE ⟲</Link>
+                    <Link to="/butter/packs">THEMED PACKS</Link>
+                    <Link to="/butter/endless">UNLIMITED ∞</Link>
                   </div>
                 </div>
               </div>

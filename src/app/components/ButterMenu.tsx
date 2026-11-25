@@ -9,7 +9,10 @@ import { Link, useLocation } from 'react-router'
 
 const DIVE: ReadonlyArray<{ to: string; label: string }> = [
   { to: '/butter', label: 'Daily dive' },
+  { to: '/butter/endless', label: 'Unlimited' },
   { to: '/butter/party', label: 'Puffer party' },
+  { to: '/butter/archive', label: 'Archive' },
+  { to: '/butter/packs', label: 'Themed packs' },
 ]
 
 const INK: ReadonlyArray<{ to: string; label: string; icon: typeof Home }> = [
