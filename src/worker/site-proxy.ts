@@ -1477,7 +1477,8 @@ function rewriteAsset(value){
   // kiwi's game shell re-fetches this monitor with a fresh cache-buster until an
   // answer looks unproxied, which never happens here. Answering it with an empty
   // script that loads instantly ends the retry loop instead of feeding it.
-  if(/(?:^|\/)(?:kiwi-request-control|ads\/cbr)\.js$/i.test(url.pathname))return 'data:text/javascript,';
+  var probeFile=url.pathname.slice(url.pathname.lastIndexOf('/')+1);
+  if(probeFile==='kiwi-request-control.js'||probeFile==='cbr.js')return 'data:text/javascript,';
   if(url.origin===appOrigin)url=new URL(url.pathname+url.search,origin);
   return proxy+'/p/'+url.protocol.slice(0,-1)+'/'+url.host+url.pathname+(url.search?'?q='+encodeURIComponent(url.search.slice(1)):'');
 }
