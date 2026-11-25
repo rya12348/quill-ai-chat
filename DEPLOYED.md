@@ -22,8 +22,8 @@ promise: **`/api/version` is the truth**, and a docs-only commit may sit on top 
 what is live.
 
 <!-- deploy:begin -->
-- live commit: `4e35c8b2664f30cd5024e0ab3ae21f08bf119520`
-- built: 2026-11-25T03:03:27.608Z
-- checked: 2026-11-25T03:05:44.961Z
+- live commit: `21e16b9b219932dfd8993a6fbac58548afafe701-dirty`
+- built: 2026-11-25T03:16:17.039Z
+- checked: 2026-11-25T03:17:06.978Z
 - site: https://www.inkbrowser.dpdns.org
 <!-- deploy:end -->

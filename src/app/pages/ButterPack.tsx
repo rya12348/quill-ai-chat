@@ -77,6 +77,103 @@ function keep(pack: string, game: number, saved: Saved | null): void {
   }
 }
 
+/* ------------------------------------------------------ the percentile, once */
+
+/**
+ * How the shipped result screen keeps a run from being recorded twice: the
+ * finished run claims its percentile in local storage before the request goes
+ * out, and every later mount of the same run reads the claim back instead of
+ * posting again — a reload, or the logbook reopening it, shows the stored number.
+ * The in-memory copies cover a remount inside the tab (and an answer that is
+ * still in flight), the stored copy covers a reload.
+ */
+type Claim = { betterThan: number | null; at: number }
+const CLAIMS_KEY = 'butter.pack.claims'
+const claims = new Map<string, Claim>() // runId → what the table answered
+const pending = new Map<string, Promise<number | null>>()
+let claimsRead = false
+
+function readClaims(): void {
+  if (claimsRead) return
+  claimsRead = true
+  try {
+    const raw = localStorage.getItem(CLAIMS_KEY)
+    if (!raw) return
+    const stored = JSON.parse(raw) as Record<string, Claim>
+    for (const [runId, claim] of Object.entries(stored ?? {})) {
+      if (!claim || typeof claim.at !== 'number') continue
+      claims.set(runId, {
+        betterThan: typeof claim.betterThan === 'number' ? claim.betterThan : null,
+        at: claim.at,
+      })
+    }
+  } catch {
+    /* unreadable storage only costs the shortcut, not the run */
+  }
+}
+
+/** Keep the newest handful of runs — the logbook can reopen an older one. */
+function keepClaim(runId: string, claim: Claim): void {
+  readClaims()
+  claims.set(runId, claim)
+  try {
+    const newest = [...claims.entries()].sort((a, b) => b[1].at - a[1].at).slice(0, 24)
+    localStorage.setItem(CLAIMS_KEY, JSON.stringify(Object.fromEntries(newest)))
+  } catch {
+    /* a full quota still leaves the in-memory claim */
+  }
+}
+
+/**
+ * Post one finished run's score exactly once. Resolves the run's percentile, or
+ * null when the table could not be asked (the gauge reads without the crowd).
+ */
+function completeOnce(run: {
+  pack: string
+  game: number
+  runId: string
+  version: string
+  score: number
+  receipts: string[]
+}): Promise<number | null> {
+  readClaims()
+  // The run already claimed its post — including one the table refused: asking
+  // again on every open is what turned one run into two submissions.
+  const claimed = claims.get(run.runId)
+  if (claimed) return Promise.resolve(claimed.betterThan)
+  const already = pending.get(run.runId)
+  if (already) return already
+  // The claim goes down before the request, the way the shipped screen writes
+  // its receipt first, so a second mount in the same tick finds it instead of
+  // posting the same run twice.
+  keepClaim(run.runId, { betterThan: null, at: Date.now() })
+  const work = (async () => {
+    try {
+      const res = await fetch(`/api/butter-packs/${run.pack}/${run.game}/complete`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          playerId: playerId(),
+          score: run.score,
+          receipts: run.receipts,
+          runId: run.runId,
+          version: run.version,
+        }),
+      })
+      const body = (await res.json().catch(() => null)) as { betterThan?: number } | null
+      if (!res.ok || typeof body?.betterThan !== 'number') return null
+      keepClaim(run.runId, { betterThan: body.betterThan, at: Date.now() })
+      return body.betterThan
+    } catch {
+      return null
+    } finally {
+      pending.delete(run.runId)
+    }
+  })()
+  pending.set(run.runId, work)
+  return work
+}
+
 /** The four chips a pack's own HUD shows under the score. */
 function tierIcon(tier: TierId | null): string {
   if (!tier) return '—'
@@ -362,24 +459,19 @@ export function ButterPack({ packId }: { packId: string }) {
     }
     const complete = async () => {
       const receipts = results.map((result) => result.receipt).filter((item): item is string => Boolean(item))
-      if (receipts.length !== ROUNDS) return
-      try {
-        const res = await fetch(`/api/butter-packs/${pack.id}/${deck.game}/complete`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            playerId: playerId(),
-            score: points,
-            receipts,
-            runId: runIdRef.current,
-            version: deck.version,
-          }),
-        })
-        const body = (await res.json().catch(() => null)) as { betterThan?: number } | null
-        if (live && res.ok && typeof body?.betterThan === 'number') setCurve({ betterThan: body.betterThan })
-      } catch {
-        /* the gauge still reads without the crowd */
-      }
+      const runId = runIdRef.current
+      if (receipts.length !== ROUNDS || !runId) return
+      // One post per run, the way the shipped screen claims it: reopening a
+      // finished run reads its stored percentile back instead of asking again.
+      const betterThan = await completeOnce({
+        pack: pack.id,
+        game: deck.game,
+        runId,
+        version: deck.version,
+        score: points,
+        receipts,
+      })
+      if (live && betterThan !== null) setCurve({ betterThan })
     }
     void load()
     void complete()
