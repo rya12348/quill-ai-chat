@@ -45,6 +45,17 @@ const SAMPLE_CAP = Number(process.env.ALIAS_SAMPLE_CAP) || 600
 
 const dry = process.argv.includes('--dry-run')
 
+/**
+ * Take the sheet whole: every answer, not just the trimmed card.
+ *
+ * Aliases hang off answers, so a card trimmed to 8000 of 195,000 can only pay
+ * out the aliases of the answers it kept. `--full` keeps all of them for the
+ * sheet in hand. It is a deliberate, per-run choice: one dive's sheet is 18 MB
+ * of JSON here, and the biggest card of it fetches at 13 MB over the wire.
+ */
+const uncapped = process.argv.includes('--full') || process.env.ALIAS_FULL === '1'
+const cardCap = uncapped ? Number.POSITIVE_INFINITY : CARD_CAP
+
 /** The worker's tier code → digit, the order the card files are written in. */
 const DIGITS = { krillion: '5', deepcut: '4', rare: '3', schooler: '2', tooclever: '1', plankton: '0' }
 
@@ -247,8 +258,10 @@ const takenPrompts = new Set(daily.map((card) => card.prompt))
 const bundled = bundledPrompts()
 /** Cards built this run, so their sample does not need the file read back. */
 const fresh = new Map()
-const report = { newCards: 0, updated: 0, aliases: 0, answers: 0, skipped: 0 }
+const report = { newCards: 0, updated: 0, aliases: 0, answers: 0, skipped: 0, appended: 0 }
 const writes = []
+/** Per-card before/after, so a run reports what it actually bought. */
+const touched = []
 
 for (const prompt of sheet.body.prompts ?? []) {
   const text = String(prompt.text ?? '')
@@ -259,16 +272,27 @@ for (const prompt of sheet.body.prompts ?? []) {
   if (existing) {
     const body = existing.body
     const answers = body.a.map(String)
+    const tiers = [...String(body.t ?? '')]
     const bySpelling = new Map(answers.map((answer, index) => [flatAnswer(answer), index]))
     const aliases = body.x && typeof body.x === 'object' && !Array.isArray(body.x) ? body.x : {}
-    const before = Object.keys(aliases).length
+    const before = { answers: answers.length, aliases: Object.keys(aliases).length }
+    let appended = 0
     for (const entry of entries) {
-      const at = bySpelling.get(flatAnswer(entry.answer))
+      let at = bySpelling.get(flatAnswer(entry.answer))
       // The sheet accepts this answer but our copy of the card was trimmed and
-      // does not carry it: there is no payout for the alias to point at.
+      // does not carry it. Capped runs skip it (no payout for the alias to point
+      // at); `--full` puts the answer back so the alias has somewhere to land.
       if (at === undefined) {
-        report.skipped += 1
-        continue
+        if (!uncapped) {
+          report.skipped += 1
+          continue
+        }
+        answers.push(String(entry.answer))
+        tiers.push(DIGITS[entry.tier] ?? '2')
+        at = answers.length - 1
+        bySpelling.set(flatAnswer(entry.answer), at)
+        appended += 1
+        report.appended += 1
       }
       for (const alias of entry.aliases ?? []) {
         const key = flatAnswer(alias)
@@ -276,13 +300,18 @@ for (const prompt of sheet.body.prompts ?? []) {
         aliases[key] = at
       }
     }
-    const added = Object.keys(aliases).length - before
-    if (added) {
+    const added = Object.keys(aliases).length - before.aliases
+    if (added || appended) {
       report.aliases += added
       report.updated += 1
       if (Object.keys(aliases).length) body.x = aliases
+      if (appended) {
+        body.a = answers
+        body.t = tiers.join('')
+      }
       writes.push({ file: existing.file, text: JSON.stringify(body) })
-      console.log(`  +${String(added).padStart(4)} aliases  ${text}`)
+      touched.push({ prompt: text, from: before, to: { answers: answers.length, aliases: Object.keys(aliases).length }, added, appended })
+      console.log(`  +${String(appended).padStart(6)} answers  +${String(added).padStart(6)} aliases  ${text}`)
     }
     // A card file without a sample cannot be dealt: `nextTopic` picks from the
     // bundled list. Repair that here, so a lost or hand-cleaned sample heals on
@@ -300,7 +329,7 @@ for (const prompt of sheet.body.prompts ?? []) {
   }
 
   // A prompt the bank has never held: this dive is where its card comes from.
-  const kept = trim(entries, CARD_CAP)
+  const kept = trim(entries, cardCap)
   if (!kept.length) continue
   const built = cardBody(text, kept)
   fresh.set(text, built)
@@ -309,6 +338,13 @@ for (const prompt of sheet.body.prompts ?? []) {
   report.newCards += 1
   report.answers += built.answers.length
   report.aliases += Object.keys(built.body.x ?? {}).length
+  touched.push({
+    prompt: text,
+    from: { answers: 0, aliases: 0 },
+    to: { answers: built.answers.length, aliases: Object.keys(built.body.x ?? {}).length },
+    added: Object.keys(built.body.x ?? {}).length,
+    appended: built.answers.length,
+  })
   if (!takenPrompts.has(text) && !bundled.has(text)) {
     const sample = trim(kept, SAMPLE_CAP)
     daily.push({
@@ -381,7 +417,17 @@ if (dry) {
   fs.writeFileSync(INDEX, JSON.stringify(index))
 }
 
+if (touched.length) {
+  console.log('')
+  for (const row of touched) {
+    console.log(
+      `  ${String(row.from.answers).padStart(7)} -> ${String(row.to.answers).padStart(7)} answers  ` +
+        `${String(row.from.aliases).padStart(7)} -> ${String(row.to.aliases).padStart(7)} aliases  ${row.prompt.slice(0, 44)}`,
+    )
+  }
+}
 console.log(
-  `\n${sheet.date}: ${report.newCards} new cards, ${report.updated} cards given aliases, ` +
-    `${report.aliases} aliases, ${report.answers} answers, ${report.skipped} answers we do not carry`,
+  `\n${sheet.date}: ${report.newCards} new cards, ${report.updated} cards changed, ` +
+    `${report.aliases} aliases, ${report.answers} answers, ${report.appended} answers restored, ` +
+    `${report.skipped} answers we do not carry`,
 )
