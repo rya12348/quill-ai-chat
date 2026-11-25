@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router'
 
 import { ButterMenu } from '../components/ButterMenu'
 import { bandFor, MAX_SCORE, packOf, ROUNDS, TIERS, type TierId } from '../lib/butter-packs'
+import { PACK_WORLDS, PX_PER_POINT, image, paintPackWorld, themeImages } from '../lib/pack-world'
 
 /**
  * A themed pack — the movies, the gauntlet, the atlas, the notebook — and the
@@ -203,8 +204,14 @@ export function ButterPack({ packId }: { packId: string }) {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const runIdRef = useRef('')
   const stageRef = useRef<HTMLDivElement | null>(null)
+  const seaRef = useRef<HTMLCanvasElement | null>(null)
+  const worldRef = useRef<HTMLDivElement | null>(null)
+  const worldTheme = PACK_WORLDS[pack.id as keyof typeof PACK_WORLDS]
+  // The shipped strip starts just behind the gate; the camera follows the score.
+  const targetRef = useRef(-45)
 
   const points = useMemo(() => results.reduce((sum, result) => sum + result.score, 0), [results])
+  targetRef.current = phase === 'intro' || phase === 'loading' || phase === 'error' ? -45 : points
 
   useEffect(() => {
     document.title = `${pack.name} · Butter`
@@ -498,6 +505,85 @@ export function ButterPack({ packId }: { packId: string }) {
     setPhase('intro')
   }, [deck, pack.id])
 
+  /**
+   * The strip itself. Every pack page is one long world the camera keeps centred:
+   * the shipped painter draws the sky and the ground on the canvas, the DOM
+   * cards ride inside the strip at twice their score, and the camera eases
+   * toward the current one exactly as the shipped renderer does.
+   */
+  useEffect(() => {
+    const canvas = seaRef.current
+    const theme = worldTheme
+    if (!canvas || !theme) return
+    const context = canvas.getContext('2d')
+    if (!context) return
+    let width = 1
+    let height = 1
+    let distance = -45
+    let dirty = true
+    let stopped = false
+    let frame = 0
+    let then = performance.now()
+    const pictures = themeImages(theme)
+    const onLoad = () => {
+      dirty = true
+    }
+    const draw = () => {
+      dirty = false
+      const ratio = Math.min(2, window.devicePixelRatio || 1)
+      const box = canvas.getBoundingClientRect()
+      width = Math.max(1, Math.round(box.width))
+      height = Math.max(1, Math.round(box.height))
+      if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+        canvas.width = Math.round(width * ratio)
+        canvas.height = Math.round(height * ratio)
+      }
+      context.setTransform(ratio, 0, 0, ratio, 0, 0)
+      paintPackWorld(context, theme, width, height, distance * PX_PER_POINT, onLoad)
+    }
+    const step = (time: number) => {
+      if (stopped) return
+      const dt = Math.min(0.05, Math.max(0.001, (time - then) / 1000))
+      then = time
+      const goal = targetRef.current
+      const next = distance + (goal - distance) * (1 - Math.exp(-3.4 * dt))
+      const moved = Math.abs(next - distance) > 0.02
+      distance = moved ? next : goal
+      if (moved || dirty) draw()
+      if (worldRef.current) {
+        // The world is 2px a point; the camera keeps its origin at mid-screen.
+        worldRef.current.style.transform = `translate3d(${width / 2 - PX_PER_POINT * distance}px,0,0)`
+      }
+      frame = requestAnimationFrame(step)
+    }
+    // First paint before the loop's first frame: a tab that is not being drawn
+    // never gets an animation frame, and a blank stage is not a loading state.
+    draw()
+    if (worldRef.current) {
+      worldRef.current.style.transform = `translate3d(${width / 2 - PX_PER_POINT * distance}px,0,0)`
+    }
+    frame = requestAnimationFrame(step)
+    // A picture that lands after the first frame has to trigger one more paint,
+    // and a resized stage needs the canvas resized with it.
+    const pending = window.setInterval(() => {
+      if (pictures.some((src) => !image(src).complete)) dirty = true
+      // Paint here as well as in the loop: a hidden tab is never handed an
+      // animation frame, and the strip should still be complete when it is
+      // looked at.
+      if (dirty && !stopped) draw()
+    }, 200)
+    const observer = new ResizeObserver(() => {
+      dirty = true
+    })
+    observer.observe(canvas)
+    return () => {
+      stopped = true
+      window.clearInterval(pending)
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+    }
+  }, [worldTheme])
+
   /* -------------------------------------------------------------- render */
 
   const prompt = deck?.prompts[round] ?? null
@@ -510,6 +596,16 @@ export function ButterPack({ packId }: { packId: string }) {
   const shownGame = deck?.game ?? game
   const band = bandFor(pack, points)
   const savedRun = deck ? loadSaved(pack.id, deck.game) : null
+  // Cards live where they were dealt: two pixels of strip for every point the
+  // table had when it dealt them. Only the two scrolling worlds place them.
+  const dealt = results.map((result, index) => ({
+    result,
+    start: results.slice(0, index).reduce((sum, entry) => sum + entry.score, 0),
+  }))
+  const scrolling = worldTheme?.kind === 'cinema' || worldTheme?.kind === 'gauntlet'
+  const at = (score: number) => (scrolling ? { left: PX_PER_POINT * score } : undefined)
+  const hudLabel =
+    pack.id === 'movies' ? 'SCENE' : pack.id === 'sports' ? 'YARD' : pack.id === 'geography' ? 'LEG' : pack.id === 'lexicon' ? 'PAGE' : 'DEPTH'
 
   return (
     <div className="dive-page butter-dive relative min-h-0 flex-1 overflow-hidden" data-phase={phase}>
@@ -519,16 +615,23 @@ export function ButterPack({ packId }: { packId: string }) {
         data-phase={phase === 'error' || phase === 'loading' ? 'intro' : phase}
       >
         <div className="ds-stage" ref={stageRef}>
-          <div
-            className={`pk-scene${phase === 'intro' || phase === 'loading' || phase === 'error' ? '' : ' pk-dim'}`}
-            style={{ backgroundImage: `url(${pack.scene ?? pack.art})` }}
-            aria-hidden
-          />
+          {worldTheme ? (
+            <canvas className="pk-sea" ref={seaRef} aria-hidden />
+          ) : (
+            <div
+              className={`pk-scene${phase === 'intro' || phase === 'loading' || phase === 'error' ? '' : ' pk-dim'}`}
+              style={{ backgroundImage: `url(${pack.scene ?? pack.art})` }}
+              aria-hidden
+            />
+          )}
           <div className="pk-shade" aria-hidden />
 
-          <div className="ds-world">
+          <div className="ds-world" ref={worldRef}>
             {(phase === 'intro' || phase === 'loading' || phase === 'error') && (
-              <div className="ds-surface pk-surface">
+              <div
+                className="ds-surface pk-surface"
+                style={worldTheme?.kind === 'cinema' ? { left: -690, width: 1200, right: 'auto' } : undefined}
+              >
                 <div className="ds-title">
                   {'BUTTER'.split('').map((letter, index) => (
                     <span key={index} style={{ animationDelay: `${0.18 * index}s` }}>
@@ -541,24 +644,50 @@ export function ButterPack({ packId }: { packId: string }) {
               </div>
             )}
 
+            {worldTheme?.kind === 'cinema' && (
+              <>
+                <img className="dr-gate" src={worldTheme.gate} alt="" style={{ left: -510 }} aria-hidden />
+                <img
+                  className="ds-floor dr-premiere"
+                  src={worldTheme.premiere}
+                  alt=""
+                  style={{ left: 14020 }}
+                  aria-hidden
+                />
+              </>
+            )}
+
             {(phase === 'preview' || phase === 'answering') && prompt && (
-              <div className="pk-center">
-                <div className="ds-card ds-px" style={{ animationDelay: '0.45s' }}>
-                  <div className="rnd">
-                    {pack.promptWord} {round + 1} OF {ROUNDS}
-                  </div>
-                  <div className="prompt">{prompt.text}</div>
-                  <div className="hint">{pack.hint}</div>
+              <div className="ds-card ds-px" style={{ ...at(points), animationDelay: '0.45s' }}>
+                <div className="rnd">
+                  {pack.promptWord} {round + 1} OF {ROUNDS}
                 </div>
+                <div className="prompt">{prompt.text}</div>
+                <div className="hint">{pack.hint}</div>
               </div>
             )}
 
+            {phase !== 'intro' && phase !== 'done' && phase !== 'loading' && phase !== 'error' &&
+              dealt.map(({ result, start }, index) =>
+                phase === 'feedback' && result === last ? null : (
+                <div className="ds-card ds-px" key={result.promptId} style={at(start)} aria-hidden>
+                  <div className="rnd">
+                    {pack.promptWord} {index + 1} OF {ROUNDS}
+                  </div>
+                  <div className="prompt">{result.promptText}</div>
+                  <div className="hint">{pack.hint}</div>
+                </div>
+                ),
+              )}
+
             {phase === 'feedback' && last && (
-              <div className="pk-center">
-                <div
-                  className={`ds-landed${last.tier ? '' : ' miss'}`}
-                  style={{ ['--tc' as string]: last.tier ? `var(--tier-${last.tier})` : 'var(--tier-miss)' }}
-                >
+              <div
+                className={`ds-landed${last.tier ? '' : ' miss'}`}
+                style={{
+                  ...at(points),
+                  ['--tc' as string]: last.tier ? `var(--tier-${last.tier})` : 'var(--tier-miss)',
+                }}
+              >
                   {last.tier && <img className="icon" src={`/tiers/${last.tier}.png`} alt="" />}
                   <div className="tname">{last.tier ? TIERS[last.tier].name.toUpperCase() : 'NOTHING LANDED'}</div>
                   <div className="tans">{last.answer ? `“${last.answer}”` : '—'}</div>
@@ -574,7 +703,6 @@ export function ButterPack({ packId }: { packId: string }) {
                           ? pack.missTyped
                           : 'the clock beat you to it.')}
                   </div>
-                </div>
               </div>
             )}
           </div>
@@ -585,10 +713,8 @@ export function ButterPack({ packId }: { packId: string }) {
 
           <div className="ds-hud">
             <div className="ds-pod ds-px">
-              <div className="label">{pack.promptWord}</div>
-              <div className="ds-depth-num">
-                {Math.min(round + (phase === 'done' ? 0 : 1), ROUNDS)}/{ROUNDS}
-              </div>
+              <div className="label">{hudLabel}</div>
+              <div className="ds-depth-num">{Math.floor(Math.max(0, points) / 100)}</div>
             </div>
             <div className="ds-hud-mid">
               <div className="ds-dots">

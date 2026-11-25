@@ -42,27 +42,22 @@
   height: 18px;
 }
 
-/* -------------------------------------------------------- a themed pack dive */
-
 .dive-page .pk-root {
   --pk-a: #4de3ff;
 }
 
-.dive-page .pk-root[data-world='cinema'] {
-  --pk-a: #ffd166;
-}
-.dive-page .pk-root[data-world='gauntlet'] {
-  --pk-a: #ffb000;
-}
-.dive-page .pk-root[data-world='globe'] {
-  --pk-a: #ff6b3d;
-}
-.dive-page .pk-root[data-world='notebook'] {
-  --pk-a: #7d9cff;
+/* The world strip is painted on this canvas under the DOM; the shipped theme
+   sheets appended below colour every control on top of it. */
+.dive-page .pk-sea {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
-/* The world's own scene, drawn behind everything the way each pack's renderer
-   paints its backdrop: the boulevard, the bowl, the atlas, the desk. */
+/* The endless dive keeps its own still plate: its world is the vertical reef the
+   daily dive renders, not one of the four pack strips. */
 .dive-page .pk-scene {
   position: absolute;
   inset: 0;
@@ -75,110 +70,6 @@
 .dive-page .pk-scene.pk-dim {
   filter: brightness(0.35) saturate(0.7);
   transition: filter 0.5s ease-out;
-}
-
-.dive-page .pk-shade {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(120% 80% at 50% 100%, #050a14e6 0%, #050a1400 60%),
-    linear-gradient(180deg, #050a14d9 0%, #050a1400 30%, #050a1400 60%, #050a14f2 100%);
-}
-
-.dive-page .pk-surface {
-  position: absolute;
-  top: 6%;
-  left: 0;
-  right: 0;
-  text-align: center;
-}
-
-.dive-page .pk-root[data-world] .ds-tagline {
-  color: var(--pk-a);
-  text-shadow:
-    0 2px #00000080,
-    0 0 16px var(--pk-a);
-}
-
-/* The card and the landed banner sit in the middle of the stage, not on the
-   dive's depth ladder: a pack's seven rounds all happen in one place. */
-.dive-page .pk-center {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 12px;
-  pointer-events: none;
-}
-
-.dive-page .pk-center .ds-card,
-.dive-page .pk-center .ds-landed {
-  position: relative;
-  top: auto;
-  left: auto;
-  right: auto;
-  margin: 0;
-  pointer-events: auto;
-}
-
-.dive-page .pk-center .ds-landed {
-  margin-top: 0;
-}
-
-.dive-page .pk-root[data-world] .ds-card {
-  border: 2px solid var(--pk-a);
-  box-shadow:
-    0 0 0 3px #050a14,
-    0 0 40px #0009,
-    inset 0 0 30px #050a1480;
-}
-
-.dive-page .pk-root[data-world] .ds-card .rnd,
-.dive-page .pk-root[data-world] .ds-depth-num,
-.dive-page .pk-root[data-world] .ds-preview-pill b {
-  color: var(--pk-a);
-}
-
-.dive-page .pk-root[data-world] .ds-card {
-  border-color: var(--pk-a);
-}
-
-.dive-page .pk-root[data-world] .ds-time-digits {
-  color: var(--pk-a);
-  text-shadow: 0 0 12px var(--pk-a);
-}
-
-.dive-page .pk-root[data-world] .ds-input:focus {
-  border-color: var(--pk-a);
-}
-
-.dive-page .pk-root[data-world] .ds-fuse-fill {
-  background: var(--pk-a);
-}
-
-.dive-page .pk-root[data-world] .ds-dive-btn {
-  background: var(--pk-a);
-  box-shadow:
-    0 0 0 2px #050a14,
-    0 3px 0 2px #00000080,
-    0 0 16px var(--pk-a);
-}
-
-.dive-page .pk-root[data-world] .ds-next-btn,
-.dive-page .pk-root[data-world] .ds-begin-btn {
-  background: #0a1120;
-  box-shadow:
-    0 0 0 3px #050a14,
-    0 0 0 6px var(--pk-a),
-    0 5px 0 6px #00000080,
-    0 0 22px var(--pk-a);
-}
-
-.dive-page .pk-root[data-world] .ds-begin-btn:disabled {
-  animation: none;
-  opacity: 0.7;
 }
 
 /* The picker link under the title screen: "choose a different expedition". */
@@ -393,4 +284,267 @@
   font-weight: 400;
   font-size: 18px;
   color: #4de3ff;
+}
+
+/* ---- the shipped per-world theme sheets, verbatim ---- */
+.ds-root[data-world=gauntlet]{background:#06080f}
+.ds-root[data-world=gauntlet] .ds-world{width:16400px;height:100%}
+.ds-root[data-world=gauntlet] .ds-surface{z-index:1;transition:opacity .9s ease-out;top:9%;right:auto}
+.ds-root[data-world=gauntlet][data-phase=preview] .ds-surface,.ds-root[data-world=gauntlet][data-phase=answering] .ds-surface,.ds-root[data-world=gauntlet][data-phase=feedback] .ds-surface,.ds-root[data-world=gauntlet][data-phase=done] .ds-surface{opacity:.12}
+.ds-root[data-world=gauntlet] .ds-title{text-shadow:-4px 3px #b34700,4px -3px #ffd166d9,0 0 30px #ffb00059}
+.ds-root[data-world=gauntlet] .ds-tagline{color:#ffb000;text-shadow:0 2px #0a0804d9,0 0 14px #ffb0008c,0 0 26px #06080fe6}
+.ds-root[data-world=gauntlet] .ds-subline{color:#c3cde0;text-shadow:0 2px #06080fe6,0 0 6px #06080ff2,0 0 16px #06080fcc}
+.ds-root[data-world=gauntlet] .gl-tunnel{width:480px;image-rendering:pixelated;filter:drop-shadow(0 0 24px #ffe7ba38);position:absolute;bottom:18%}
+.ds-root[data-world=gauntlet] .ds-floor.gl-podium{opacity:1;filter:drop-shadow(0 0 34px #ffd1664d);width:760px;top:auto;bottom:18%;-webkit-mask-image:linear-gradient(90deg,#0000,#000 14%);mask-image:linear-gradient(90deg,#0000,#000 14%)}
+.ds-root[data-world=gauntlet] .ds-amb{text-align:center;max-width:none;right:auto;overflow:visible;transform:translate(-50%)}
+.ds-root[data-world=gauntlet] .ds-amb.L{top:14%}
+.ds-root[data-world=gauntlet] .ds-amb.R{top:20%}
+.ds-root[data-world=gauntlet] .ds-amb.major{color:#ffb000;text-shadow:0 0 12px #ffb00073;letter-spacing:.26em;background:#080a1299;padding:6px 14px 4px;box-shadow:0 0 0 2px #ffb00059}
+.ds-root[data-world=gauntlet] .ds-tierline{border-top:none;border-left:2px dashed #7d93b85c;width:0;height:auto;inset:33% auto 20%}
+.ds-root[data-world=gauntlet] .ds-tierline .tag{left:0;right:auto;top:var(--tag-y,-24px);white-space:nowrap;transform:translate(-50%)}
+.ds-root[data-world=gauntlet] .ds-tierline.passed{border-left-color:var(--tc);box-shadow:0 0 16px var(--tc)}
+.ds-root[data-world=gauntlet] .ds-card{background:#0a0e18f0;width:min(480px,100vw - 44px);top:11%;right:auto;transform:translate(-50%);box-shadow:0 0 0 3px #ffb00052,0 0 50px #0009,inset 0 0 34px #04060c99}
+.ds-root[data-world=gauntlet] .ds-card .rnd{color:#ffb000}
+.ds-root[data-world=gauntlet] .ds-card{animation-name:gl-card-in}
+.ds-root[data-world=gauntlet] .ds-card.gone{animation-name:gl-card-gone}
+.ds-root[data-world=gauntlet] .ds-chip{box-shadow:none;background:0 0;justify-content:center;padding:0;display:flex;top:66%;left:0}
+.ds-root[data-world=gauntlet] .ds-chip:after{content:none}
+.ds-root[data-world=gauntlet] .gl-plate{box-shadow:0 0 0 3px var(--cc,#ffb000), 0 0 26px var(--cc,#ffb000);text-shadow:0 0 10px var(--cc,#ffb000);white-space:nowrap;background:#080c14f2;padding:7px 14px 5px}
+.ds-root[data-world=gauntlet] .ds-chip.gold .gl-plate{animation:ds-gold-pulse 1s var(--ds-ease-io) infinite}
+.ds-root[data-world=gauntlet] .ds-landed{background:#05080fe6;width:min(480px,100vw - 44px);margin-top:0;padding:14px 16px 16px;top:15%;right:auto;transform:translate(-50%);box-shadow:0 0 0 2px #ffb0004d,0 0 40px #020409a6}
+.ds-root[data-world=gauntlet] .ds-landed{animation-name:gl-banner-in}
+.ds-root[data-world=gauntlet] .gl-swarm-jersey{clip-path:polygon(0 0,30% 0,50% 14%,70% 0,100% 0,100% 34%,82% 40%,82% 100%,18% 100%,18% 40%,0 34%);background:linear-gradient(#2a3a55 0 42%,#1c2940 42% 100%);width:34px;height:30px;box-shadow:0 0 0 2px #060a12,0 0 12px #5e81be80,inset 0 -4px #060a12}
+.ds-root[data-world=gauntlet] .ds-mascot img:not(.celebrate):not(.faint):not(.sad):not(.roll){animation:gl-stride .6s var(--ds-ease-io) infinite}
+.ds-root[data-world=gauntlet] .ds-mascot.perched img:not(.celebrate):not(.faint):not(.sad):not(.roll){animation:ds-swim 2.6s var(--ds-ease-io) infinite}
+.ds-root[data-world=gauntlet] .ds-mascot img.roll{animation:.95s cubic-bezier(.34,1.2,.4,1) gl-flip}
+.ds-root[data-world=gauntlet] .ds-amb .dash{color:#ffb0004d}
+.ds-root[data-world=gauntlet] .ds-depth-num{color:#ffb000;text-shadow:0 0 12px #ffb0008c}
+.ds-root[data-world=gauntlet] .ds-edge{box-shadow:inset 0 0 90px 18px #ff52528c}
+.ds-root[data-world=gauntlet] .ds-preview-pill b{color:#ffb000}
+.ds-root[data-world=gauntlet] .ds-pod{background:linear-gradient(#0a0e18eb,#05080feb);box-shadow:0 0 0 2px #04060b,0 0 0 4px #223048,inset 0 2px #ffe9a80f}
+.ds-root[data-world=gauntlet] .ds-preview-pill,.ds-root[data-world=gauntlet] .ds-intro-meta a{background:#0a0e18eb}
+.ds-root[data-world=gauntlet] .ds-preview-pill{box-shadow:0 0 0 2px #04060b,0 0 0 4px #223048}
+.ds-root[data-world=gauntlet] .ds-intro-meta a{border-color:#223048}
+.ds-root[data-world=gauntlet] .ds-intro-meta a:hover{border-color:#ffb000a6}
+.ds-root[data-world=gauntlet] .ds-sonar-scope{background:repeating-conic-gradient(#ffb00066 0deg 2deg,#0000 2deg 30deg),radial-gradient(circle,#05080ffa 52%,#223048e6 100%);box-shadow:0 0 0 2px #04060b,0 0 0 4px #223048,0 0 18px #ffb00040,inset 0 0 14px #ffb0001a}
+.ds-root[data-world=gauntlet] .ds-sonar-scope:before{border-color:#ffb00040}
+.ds-root[data-world=gauntlet] .ds-sweep{background:linear-gradient(90deg,#ff3b30f2,#0000);box-shadow:0 0 8px #ff3b30cc}
+.ds-root[data-world=gauntlet] .ds-time-digits{color:#ffb000;text-shadow:0 0 12px #ffb000b3}
+.ds-root[data-world=gauntlet] .ds-time-digits.hot{color:#ff3b30;text-shadow:0 0 16px #ff3b30e6}
+.ds-root[data-world=gauntlet] .ds-input{caret-color:#ffb000;background:#0a0e18e6;border-color:#223048}
+.ds-root[data-world=gauntlet] .ds-input:focus{border-color:#ffb000a6}
+.ds-root[data-world=gauntlet] .ds-fuse{background:#0a0f18}
+.ds-root[data-world=gauntlet] .ds-fuse-fill{background:#ffb000}
+.ds-root[data-world=gauntlet] .ds-dock.hot .ds-fuse-fill{background:#ff3b30}
+.ds-root[data-world=gauntlet] .ds-dive-btn{color:#0a0704;background:#ffb000;box-shadow:0 0 0 2px #04060b,0 3px 0 2px #7d5a1d,0 0 16px #ffb00073}
+.ds-root[data-world=gauntlet] .ds-dive-btn:active{box-shadow:0 0 0 2px #04060b,0 1px 0 2px #7d5a1d}
+.ds-root[data-world=gauntlet] .ds-next-btn,.ds-root[data-world=gauntlet] .ds-begin-btn{background:#0a0e18;box-shadow:0 0 0 3px #04060b,0 0 0 6px #ffb000,0 5px 0 6px #223048,0 0 22px #ffb0004d}
+.ds-root[data-world=gauntlet] .ds-next-btn:hover,.ds-root[data-world=gauntlet] .ds-begin-btn:hover{box-shadow:0 0 0 3px #04060b,0 0 0 6px #ff3b30,0 5px 0 6px #223048,0 0 30px #ff3b3080}
+.ds-root[data-world=gauntlet] .ds-card,.ds-root[data-world=gauntlet] .ds-landed{width:480px}
+.ds-root[data-world=globe]{background:#05060c}
+.ds-root[data-world=globe] .ds-world{width:100%;height:100%;transform:none!important}
+.ds-root[data-world=globe] .ds-surface{z-index:1;width:auto;transition:opacity .9s ease-out;top:7%;left:0;right:0}
+.ds-root[data-world=globe][data-phase=preview] .ds-surface,.ds-root[data-world=globe][data-phase=answering] .ds-surface,.ds-root[data-world=globe][data-phase=feedback] .ds-surface,.ds-root[data-world=globe][data-phase=done] .ds-surface{opacity:.12}
+.ds-root[data-world=globe] .ds-title{text-shadow:-4px 3px #b33a22,4px -3px #ffd166d9,0 0 30px #ff6b3d66}
+.ds-root[data-world=globe] .ds-tagline{color:#ff6b3d;text-shadow:0 2px #0c0604d9,0 0 14px #ff6b3d8c,0 0 26px #05060ce6}
+.ds-root[data-world=globe] .ds-subline{color:#cfc8b8;text-shadow:0 2px #05060ce6,0 0 6px #05060cf2,0 0 16px #05060ccc}
+.ds-root[data-world=globe] .gl-amb{text-align:center;transform-origin:0 0;will-change:transform;max-width:none;inset:0 auto auto 0;overflow:visible}
+.ds-root[data-world=globe] .gl-amb.major{color:#ff6b3d;text-shadow:0 0 12px #ff6b3d73;letter-spacing:.26em;background:#0e0a0899;padding:6px 14px 4px;box-shadow:0 0 0 2px #ff6b3d59}
+.ds-root[data-world=globe] .gl-amb .dash{color:#ff6b3d4d}
+.ds-root[data-world=globe] .gl-tierline{transform-origin:0 0;will-change:transform;border:none;width:0;height:auto;inset:0 auto auto 0}
+.ds-root[data-world=globe] .gl-tierline .pole{background:repeating-linear-gradient(#b8895a6b 0 8px,#0000 8px 16px);width:2px;height:34vh;position:absolute;top:26px;left:-1px}
+.ds-root[data-world=globe] .gl-tierline.passed .pole{background:repeating-linear-gradient(180deg, var(--tc) 0 8px, transparent 8px 16px);box-shadow:0 0 16px var(--tc)}
+.ds-root[data-world=globe] .gl-tierline .tag{white-space:nowrap;top:0;left:0;right:auto;transform:translate(-50%)}
+.ds-root[data-world=globe] .ds-card{background:#140f0af0;width:min(480px,100vw - 44px);top:11%;left:50%;right:auto;transform:translate(-50%);box-shadow:0 0 0 3px #ff6b3d59,0 0 50px #0009,inset 0 0 34px #0a060499}
+.ds-root[data-world=globe] .ds-card .rnd{color:#ff6b3d}
+.ds-root[data-world=globe] .ds-card{animation-name:gl-card-in}
+.ds-root[data-world=globe] .ds-card.gone{animation-name:gl-card-gone}
+.ds-root[data-world=globe] .ds-chip{box-shadow:none;will-change:transform, left, top;background:0 0;justify-content:center;padding:0;display:flex;top:40%;left:50%}
+.ds-root[data-world=globe] .ds-chip:after{content:none}
+.ds-root[data-world=globe] .gl-plate{box-shadow:0 0 0 3px var(--cc,#ff6b3d), 0 0 26px var(--cc,#ff6b3d);text-shadow:0 0 10px var(--cc,#ff6b3d);white-space:nowrap;background:#100b08f2;padding:7px 14px 5px}
+.ds-root[data-world=globe] .ds-chip.gold .gl-plate{animation:ds-gold-pulse 1s var(--ds-ease-io) infinite}
+.ds-root[data-world=globe] .ds-landed{background:#0c0806e6;width:min(480px,100vw - 44px);margin-top:0;padding:14px 16px 16px;top:14%;left:50%;right:auto;overflow:visible;transform:translate(-50%);box-shadow:0 0 0 2px #ff6b3d4d,0 0 40px #040308a6}
+.ds-root[data-world=globe] .ds-landed:after{content:"";border:2px dashed var(--tc,#ff6b3d);opacity:.55;pointer-events:none;width:26px;height:32px;position:absolute;top:8px;right:8px}
+.ds-root[data-world=globe] .ds-landed{animation-name:gl-banner-in}
+.ds-root[data-world=globe] .ds-mascot img:not(.celebrate):not(.faint):not(.sad):not(.roll){animation:gl-stride .6s var(--ds-ease-io) infinite}
+.ds-root[data-world=globe] .ds-mascot.perched img:not(.celebrate):not(.faint):not(.sad):not(.roll){animation:ds-swim 2.6s var(--ds-ease-io) infinite}
+.ds-root[data-world=globe] .ds-mascot img.roll{animation:.95s cubic-bezier(.34,1.2,.4,1) gl-heelclick}
+.ds-root[data-world=globe] .ds-depth-num{color:#ff6b3d;text-shadow:0 0 12px #ff6b3d8c}
+.ds-root[data-world=globe] .ds-edge{box-shadow:inset 0 0 90px 18px #ff6b3d80}
+.ds-root[data-world=globe] .ds-preview-pill b{color:#ff6b3d}
+.ds-root[data-world=globe] .ds-pod{background:linear-gradient(#140f0aeb,#0c0806eb);box-shadow:0 0 0 2px #060408,0 0 0 4px #3a2c1c,inset 0 2px #ffe9a80f}
+.ds-root[data-world=globe] .ds-preview-pill,.ds-root[data-world=globe] .ds-intro-meta a{background:#140f0aeb}
+.ds-root[data-world=globe] .ds-preview-pill{box-shadow:0 0 0 2px #060408,0 0 0 4px #3a2c1c}
+.ds-root[data-world=globe] .ds-intro-meta a{border-color:#3a2c1c}
+.ds-root[data-world=globe] .ds-intro-meta a:hover{border-color:#ff6b3da6}
+.ds-root[data-world=globe] .ds-sonar-scope{background:repeating-conic-gradient(#ff6b3d66 0deg 2deg,#0000 2deg 30deg),radial-gradient(circle,#0c0806fa 52%,#3a2c1ce6 100%);box-shadow:0 0 0 2px #060408,0 0 0 4px #3a2c1c,0 0 18px #ff6b3d40,inset 0 0 14px #ff6b3d1a}
+.ds-root[data-world=globe] .ds-sonar-scope:before{border-color:#ff6b3d40}
+.ds-root[data-world=globe] .ds-sweep{background:linear-gradient(90deg,#ffd166f2,#0000);box-shadow:0 0 8px #ffd166cc}
+.ds-root[data-world=globe] .ds-time-digits{color:#ff6b3d;text-shadow:0 0 12px #ff6b3db3}
+.ds-root[data-world=globe] .ds-time-digits.hot{color:#ffd166;text-shadow:0 0 16px #ffd166e6}
+.ds-root[data-world=globe] .ds-input{caret-color:#ff6b3d;background:#140f0ae6;border-color:#3a2c1c}
+.ds-root[data-world=globe] .ds-input:focus{border-color:#ff6b3da6}
+.ds-root[data-world=globe] .ds-fuse{background:#1a120a}
+.ds-root[data-world=globe] .ds-fuse-fill{background:#ff6b3d}
+.ds-root[data-world=globe] .ds-dock.hot .ds-fuse-fill{background:#ffd166}
+.ds-root[data-world=globe] .ds-dive-btn{color:#140804;background:#ff6b3d;box-shadow:0 0 0 2px #060408,0 3px 0 2px #8a2e14,0 0 16px #ff6b3d73}
+.ds-root[data-world=globe] .ds-dive-btn:active{box-shadow:0 0 0 2px #060408,0 1px 0 2px #8a2e14}
+.ds-root[data-world=globe] .ds-next-btn,.ds-root[data-world=globe] .ds-begin-btn{background:#14100a;box-shadow:0 0 0 3px #060408,0 0 0 6px #ff6b3d,0 5px 0 6px #3a2c1c,0 0 22px #ff6b3d4d}
+.ds-root[data-world=globe] .ds-next-btn:hover,.ds-root[data-world=globe] .ds-begin-btn:hover{box-shadow:0 0 0 3px #060408,0 0 0 6px #ffd166,0 5px 0 6px #3a2c1c,0 0 30px #ffd16680}
+.ds-root[data-world=globe] .ds-card,.ds-root[data-world=globe] .ds-landed{width:480px}
+.ds-root[data-world=notebook]{background:#0a0805}
+.ds-root[data-world=notebook] .ds-world{width:100%;height:100%;transform:none!important}
+.ds-root[data-world=notebook] .ds-surface{z-index:1;width:auto;transition:opacity .9s ease-out;top:7%;left:0;right:0}
+.ds-root[data-world=notebook][data-phase=preview] .ds-surface,.ds-root[data-world=notebook][data-phase=answering] .ds-surface,.ds-root[data-world=notebook][data-phase=feedback] .ds-surface,.ds-root[data-world=notebook][data-phase=done] .ds-surface{opacity:.1}
+.ds-root[data-world=notebook] .ds-title{color:#26305c;text-shadow:-3px 3px #a0824673,3px -2px #ffd16680}
+.ds-root[data-world=notebook] .ds-tagline{color:#a8442c;text-shadow:0 1px #fff5dc80}
+.ds-root[data-world=notebook] .ds-subline{color:#6a6048;text-shadow:0 1px #fff5dc80}
+.ds-root[data-world=notebook] .nb-tiermark{will-change:transform;border:none;width:0;height:auto;inset:0 auto auto 0}
+.ds-root[data-world=notebook] .nb-tiermark .tick{background:#5a4a288c;width:24px;height:2px;position:absolute;top:-1px;left:-26px}
+.ds-root[data-world=notebook] .nb-tiermark .tag{letter-spacing:.14em;color:#8a7a54;white-space:nowrap;text-shadow:none;background:#f2e7c6bf;align-items:center;gap:5px;padding:2px 6px 1px;font-size:11px;display:flex;position:absolute;top:0;left:auto;right:32px;transform:translateY(-50%)}
+.ds-root[data-world=notebook] .nb-tiermark .tag img{opacity:.55;width:17px;height:17px}
+.ds-root[data-world=notebook] .nb-tiermark.passed .tick{background:var(--tc);box-shadow:0 0 10px var(--tc)}
+.ds-root[data-world=notebook] .nb-tiermark.passed .tag{color:var(--tc);text-shadow:0 0 9px var(--tc)}
+.ds-root[data-world=notebook] .nb-tiermark.passed .tag img{opacity:1}
+.ds-root[data-world=notebook] .nb-tiermark.over{opacity:.4!important}
+.ds-root[data-world=notebook] .nb-tiermark.over .tick{width:10px;left:-12px}
+.ds-root[data-world=notebook] .ds-card{background:linear-gradient(178deg,#f2e7c6,#e7d9b0);width:min(480px,100vw - 44px);top:10%;left:50%;right:auto;transform:translate(-50%)rotate(-.6deg);box-shadow:0 0 0 3px #3a2c148c,0 14px 40px #0000008c,inset 0 0 30px #a082462e}
+.ds-root[data-world=notebook] .ds-card:after{opacity:.5;background:repeating-linear-gradient(0deg,#0000 0 26px,#5a78be29 26px 27px)}
+.ds-root[data-world=notebook] .ds-card .rnd{color:#a8442c}
+.ds-root[data-world=notebook] .ds-card .prompt{color:#232842;text-shadow:none}
+.ds-root[data-world=notebook] .ds-card .hint{color:#8a7a54}
+.ds-root[data-world=notebook] .ds-card{animation-name:nb-card-in}
+.ds-root[data-world=notebook] .ds-card.gone{animation-name:nb-card-gone}
+.ds-root[data-world=notebook] .ds-chip{box-shadow:none;will-change:transform, left, top;background:0 0;justify-content:center;padding:0;display:flex;top:40%;left:50%}
+.ds-root[data-world=notebook] .ds-chip:after{content:none}
+.ds-root[data-world=notebook] .nb-plate{color:#232842;box-shadow:0 0 0 3px var(--cc,#7d9cff), 0 6px 22px #00000080;text-shadow:none;white-space:nowrap;background:#efe4c0;padding:7px 14px 5px}
+.ds-root[data-world=notebook] .ds-chip.gold .nb-plate{animation:ds-gold-pulse 1s var(--ds-ease-io) infinite}
+.ds-root[data-world=notebook] .ds-landed{width:min(480px,100vw - 44px);box-shadow:0 0 0 3px var(--tc,#7d9cff), 0 14px 44px #0000008c;background:linear-gradient(178deg,#f2e7c6,#e4d5aa);margin-top:0;padding:14px 16px 16px;top:13%;left:50%;right:auto;overflow:visible;transform:translate(-50%)rotate(.4deg)}
+.ds-root[data-world=notebook] .ds-landed .tname{color:var(--tc);text-shadow:0 1px #fff6}
+.ds-root[data-world=notebook] .ds-landed .tans{color:#232842}
+.ds-root[data-world=notebook] .ds-landed .tpts{color:#3a3524}
+.ds-root[data-world=notebook] .ds-landed .tsub{color:#8a7a54}
+.ds-root[data-world=notebook] .ds-landed.miss{background:linear-gradient(178deg,#d9cead,#c9bc96)}
+.ds-root[data-world=notebook] .ds-landed{animation-name:nb-banner-in}
+.ds-root[data-world=notebook] .ds-mascot{width:62px;height:82px}
+.ds-root[data-world=notebook] .ds-mascot img{filter:drop-shadow(0 10px 10px #14080480)drop-shadow(0 0 10px #ff5d8f40);animation:none}
+.ds-root[data-world=notebook] .ds-mascot.gold img{filter:none}
+.ds-root[data-world=notebook] .ds-mascot img.roll{animation:.95s cubic-bezier(.34,1.2,.4,1) nb-dip}
+.ds-root[data-world=notebook] .ds-depth-num{color:#ffd166;text-shadow:0 0 12px #ffd16680}
+.ds-root[data-world=notebook] .ds-edge{box-shadow:inset 0 0 90px 18px #ff963c80}
+.ds-root[data-world=notebook] .ds-preview-pill b{color:#ffd166}
+.ds-root[data-world=notebook] .ds-pod{background:linear-gradient(#18110af0,#0e0a06f0);box-shadow:0 0 0 2px #060408,0 0 0 4px #4a3820,inset 0 2px #ffe9a812}
+.ds-root[data-world=notebook] .ds-preview-pill,.ds-root[data-world=notebook] .ds-intro-meta a{background:#18110aeb}
+.ds-root[data-world=notebook] .ds-preview-pill{box-shadow:0 0 0 2px #060408,0 0 0 4px #4a3820}
+.ds-root[data-world=notebook] .ds-intro-meta a{border-color:#4a3820}
+.ds-root[data-world=notebook] .ds-intro-meta a:hover{border-color:#ffd166a6}
+.ds-root[data-world=notebook] .ds-sonar-scope{background:radial-gradient(circle at 38% 32%,#7d9cff33 0 18%,#0000 40%),radial-gradient(circle,#10142a 46%,#241a0c 78%,#4a3820 100%);box-shadow:0 0 0 2px #060408,0 0 0 4px #4a3820,0 0 18px #ffc46e40,inset 0 0 14px #14183ccc}
+.ds-root[data-world=notebook] .ds-sonar-scope:before{border-color:#b8935a66}
+.ds-root[data-world=notebook] .ds-sweep{background:linear-gradient(90deg,#ffd166e6,#0000);box-shadow:0 0 8px #ffd166b3}
+.ds-root[data-world=notebook] .ds-time-digits{color:#ffd166;text-shadow:0 0 12px #ffd166a6}
+.ds-root[data-world=notebook] .ds-time-digits.hot{color:#ff6b3d;text-shadow:0 0 16px #ff6b3de6}
+.ds-root[data-world=notebook] .ds-dock{--ds-wash:linear-gradient(180deg, #0a080500, #080603f0 26%);--ds-wash-end:#080603f0;background:var(--ds-wash)}
+.ds-root[data-world=notebook] .ds-input{caret-color:#ffd166;color:#f2e7c6;background:#18110aeb;border-color:#4a3820}
+.ds-root[data-world=notebook] .ds-input:focus{border-color:#ffd16699}
+.ds-root[data-world=notebook] .ds-dock.hot .ds-input{border-color:#ff6b3d}
+.ds-root[data-world=notebook] .ds-fuse{background:#1a1208}
+.ds-root[data-world=notebook] .ds-fuse-fill{background:#ffd166}
+.ds-root[data-world=notebook] .ds-dock.hot .ds-fuse-fill{background:#ff6b3d}
+.ds-root[data-world=notebook] .ds-dive-btn{color:#241a08;background:#ffd166;box-shadow:0 0 0 2px #060408,0 3px 0 2px #8a6a24,0 0 16px #ffd16666}
+.ds-root[data-world=notebook] .ds-dive-btn:active{box-shadow:0 0 0 2px #060408,0 1px 0 2px #8a6a24}
+.ds-root[data-world=notebook] .ds-next-btn,.ds-root[data-world=notebook] .ds-begin-btn{background:#14101e;box-shadow:0 0 0 3px #060408,0 0 0 6px #ffd166,0 5px 0 6px #4a3820,0 0 22px #ffd1664d}
+.ds-root[data-world=notebook] .ds-next-btn:hover,.ds-root[data-world=notebook] .ds-begin-btn:hover{box-shadow:0 0 0 3px #060408,0 0 0 6px #ffe9a8,0 5px 0 6px #4a3820,0 0 30px #ffe9a880}
+.ds-root[data-world=notebook] .ds-card,.ds-root[data-world=notebook] .ds-landed{width:480px}
+.ds-root[data-world=notebook] .ds-card{width:min(32vw,440px);top:16%;left:27%}
+.ds-root[data-world=notebook] .ds-landed{width:min(32vw,440px);top:18%;left:27%}
+.ds-root[data-world=hollywood]{background:#0e1130}
+.ds-root[data-world=hollywood] .ds-world{width:16400px;height:100%}
+.ds-root[data-world=hollywood] .ds-surface{z-index:1;transition:opacity .9s ease-out;top:9%;right:auto}
+.ds-root[data-world=hollywood][data-phase=preview] .ds-surface,.ds-root[data-world=hollywood][data-phase=answering] .ds-surface,.ds-root[data-world=hollywood][data-phase=feedback] .ds-surface,.ds-root[data-world=hollywood][data-phase=done] .ds-surface{opacity:.12}
+.ds-root[data-world=hollywood] .ds-title{text-shadow:-4px 3px #ff5d8f,4px -3px #ffd166d9,0 0 30px #ffd16659}
+.ds-root[data-world=hollywood] .ds-tagline{color:#ffd166;text-shadow:0 2px #14081ad9,0 0 14px #ffd1668c,0 0 26px #0e0618e6}
+.ds-root[data-world=hollywood] .ds-subline{color:#c7d0e6;text-shadow:0 2px #0e0618e6,0 0 6px #0e0618f2,0 0 16px #0e0618cc}
+.ds-root[data-world=hollywood] .dr-gate{width:430px;image-rendering:pixelated;filter:drop-shadow(0 0 24px #ffd16640);position:absolute;bottom:calc(42% - 9px)}
+.ds-root[data-world=hollywood] .ds-floor.dr-premiere{opacity:1;filter:drop-shadow(0 0 34px #ff5d8f4d);width:940px;top:auto;bottom:29.5%;-webkit-mask-image:linear-gradient(90deg,#0000,#000 14%);mask-image:linear-gradient(90deg,#0000,#000 14%)}
+.ds-root[data-world=hollywood] .ds-amb{text-align:center;max-width:none;right:auto;overflow:visible;transform:translate(-50%)}
+.ds-root[data-world=hollywood] .ds-amb.L{top:14%}
+.ds-root[data-world=hollywood] .ds-amb.R{top:20%}
+.ds-root[data-world=hollywood] .ds-amb.major{color:#ffd166;text-shadow:0 0 12px #ffd16673;letter-spacing:.26em;background:#14081a8c;padding:6px 14px 4px;box-shadow:0 0 0 2px #ffd16659}
+.ds-root[data-world=hollywood] .ds-tierline{border-top:none;border-left:2px dashed #7d93b85c;width:0;height:auto;inset:33% auto 30%}
+.ds-root[data-world=hollywood] .ds-tierline .tag{left:0;right:auto;top:var(--tag-y,-24px);white-space:nowrap;transform:translate(-50%)}
+.ds-root[data-world=hollywood] .ds-tierline.passed{border-left-color:var(--tc);box-shadow:0 0 16px var(--tc)}
+.ds-root[data-world=hollywood] .ds-card{background:#1a0d24ed;width:min(480px,100vw - 44px);top:11%;right:auto;transform:translate(-50%);box-shadow:0 0 0 3px #ffd16652,0 0 50px #0009,inset 0 0 34px #10061699}
+.ds-root[data-world=hollywood] .ds-card .rnd{color:#ffd166}
+.ds-root[data-world=hollywood] .ds-card{animation-name:dr-card-in}
+.ds-root[data-world=hollywood] .ds-card.gone{animation-name:dr-card-gone}
+.ds-root[data-world=hollywood] .ds-chip{box-shadow:none;background:0 0;justify-content:center;padding:0;display:flex;top:66%;left:0}
+.ds-root[data-world=hollywood] .ds-chip:after{content:none}
+.ds-root[data-world=hollywood] .dr-plate{box-shadow:0 0 0 3px var(--cc,#ffd166), 0 0 26px var(--cc,#ffd166);text-shadow:0 0 10px var(--cc,#ffd166);white-space:nowrap;background:#1a0d24f2;padding:7px 14px 5px}
+.ds-root[data-world=hollywood] .ds-chip.gold .dr-plate{animation:ds-gold-pulse 1s var(--ds-ease-io) infinite}
+.ds-root[data-world=hollywood] .ds-landed{background:#0a0512e0;width:min(480px,100vw - 44px);margin-top:0;padding:14px 16px 16px;top:15%;right:auto;transform:translate(-50%);box-shadow:0 0 0 2px #ffd1664d,0 0 40px #04020aa6}
+.ds-root[data-world=hollywood] .ds-landed{animation-name:dr-banner-in}
+.ds-root[data-world=hollywood] .dr-swarm-bus{clip-path:polygon(0 22%,8% 0,100% 0,100% 100%,0 100%);background:repeating-linear-gradient(90deg,#2a0f26 0 8px,#0000 8px 14px) 9px 5px/calc(100% - 15px) 9px no-repeat,linear-gradient(#ffb066 0 12%,#ff9f43 12% 58%,#b3661f 58% 100%);width:64px;height:26px;box-shadow:0 0 0 2px #14060f,0 0 12px #ff9f4380,inset 0 -4px #14060f}
+.ds-root[data-world=hollywood] .dr-buddy-car{z-index:10;width:92px;height:auto;image-rendering:pixelated;filter:drop-shadow(0 0 12px #ff5d8f73);pointer-events:none;will-change:transform;position:absolute;top:0;left:0}
+.ds-root[data-world=hollywood] .dr-buddy-car:not([src]){clip-path:polygon(0 40%,12% 0,88% 0,100% 40%,100% 100%,0 100%);background:linear-gradient(#ff5d8f 0 60%,#a02752 60% 100%);width:66px;height:20px}
+.ds-root[data-world=hollywood] .dr-buddy-car.gold{filter:none}
+.ds-root[data-world=hollywood] .ds-mascot img:not(.celebrate):not(.faint):not(.sad):not(.roll){animation:dr-ride 2.4s var(--ds-ease-io) infinite}
+.ds-root[data-world=hollywood] .ds-mascot.perched img:not(.celebrate):not(.faint):not(.sad):not(.roll){animation:ds-swim 2.6s var(--ds-ease-io) infinite}
+.ds-root[data-world=hollywood] .ds-mascot img.roll{animation:.95s cubic-bezier(.34,1.2,.4,1) dr-stunt}
+.ds-root[data-world=hollywood] .ds-amb .dash{color:#ffd1664d}
+.ds-root[data-world=hollywood] .ds-depth-num{color:#ffd166;text-shadow:0 0 12px #ffd1668c}
+.ds-root[data-world=hollywood] .ds-edge{box-shadow:inset 0 0 90px 18px #ff9f4399}
+.ds-root[data-world=hollywood] .ds-preview-pill b{color:#ffd166}
+.ds-root[data-world=hollywood] .ds-pod{background:linear-gradient(#1a0d24eb,#100616eb);box-shadow:0 0 0 2px #0c0414,0 0 0 4px #3a2050,inset 0 2px #ffe9a80f}
+.ds-root[data-world=hollywood] .ds-preview-pill,.ds-root[data-world=hollywood] .ds-intro-meta a{background:#1a0d24eb}
+.ds-root[data-world=hollywood] .ds-preview-pill{box-shadow:0 0 0 2px #0c0414,0 0 0 4px #3a2050}
+.ds-root[data-world=hollywood] .ds-intro-meta a{border-color:#3a2050}
+.ds-root[data-world=hollywood] .ds-intro-meta a:hover{border-color:#ffd166a6}
+.ds-root[data-world=hollywood] .ds-sonar-scope{background:repeating-conic-gradient(#ffd16666 0deg 2deg,#0000 2deg 30deg),radial-gradient(circle,#100616fa 52%,#3a2050e6 100%);box-shadow:0 0 0 2px #0c0414,0 0 0 4px #3a2050,0 0 18px #ffd16640,inset 0 0 14px #ffd1661a}
+.ds-root[data-world=hollywood] .ds-sonar-scope:before{border-color:#ffd16640}
+.ds-root[data-world=hollywood] .ds-sweep{background:linear-gradient(90deg,#ff5252f2,#0000);box-shadow:0 0 8px #ff5252cc}
+.ds-root[data-world=hollywood] .ds-time-digits{color:#ffd166;text-shadow:0 0 12px #ffd166b3}
+.ds-root[data-world=hollywood] .ds-time-digits.hot{color:#ff5252;text-shadow:0 0 16px #ff5252e6}
+.ds-root[data-world=hollywood] .ds-input{caret-color:#ffd166;background:#1a0d24e6;border-color:#3a2050}
+.ds-root[data-world=hollywood] .ds-input:focus{border-color:#ffd166a6}
+.ds-root[data-world=hollywood] .ds-fuse{background:#16081e}
+.ds-root[data-world=hollywood] .ds-fuse-fill{background:#ffd166}
+.ds-root[data-world=hollywood] .ds-dock.hot .ds-fuse-fill{background:#ff5252}
+.ds-root[data-world=hollywood] .ds-dive-btn{color:#14060f;background:#ffd166;box-shadow:0 0 0 2px #0c0414,0 3px 0 2px #7d5a1d,0 0 16px #ffd16673}
+.ds-root[data-world=hollywood] .ds-dive-btn:active{box-shadow:0 0 0 2px #0c0414,0 1px 0 2px #7d5a1d}
+.ds-root[data-world=hollywood] .ds-next-btn,.ds-root[data-world=hollywood] .ds-begin-btn{background:#1a0d24;box-shadow:0 0 0 3px #0c0414,0 0 0 6px #ffd166,0 5px 0 6px #3a2050,0 0 22px #ffd1664d}
+.ds-root[data-world=hollywood] .ds-next-btn:hover,.ds-root[data-world=hollywood] .ds-begin-btn:hover{box-shadow:0 0 0 3px #0c0414,0 0 0 6px #ff5d8f,0 5px 0 6px #3a2050,0 0 30px #ff5d8f80}
+.ds-root[data-world=hollywood] .ds-card,.ds-root[data-world=hollywood] .ds-landed{width:480px}
+.ds-root[data-world=hollywood][data-phase=tour] .ds-dots,.ds-root[data-world=hollywood][data-phase=tour] .ds-score-pod{display:none}
+.ds-root[data-world=hollywood][data-phase=tour] .ds-hud{opacity:1;transform:none}
+
+/* The pack cards are dealt into the world, so they keep the shipped card box
+   whatever width the stage is: the dive's own sheet sizes them for a 651px
+   window and lets a long prompt run past the frame. */
+.dive-page .pk-root[data-world] .ds-card,
+.dive-page .pk-root[data-world] .ds-landed {
+  box-sizing: border-box;
+  width: min(480px, calc(100vw - 44px));
+  right: auto;
+  padding: 14px 18px 13px;
+}
+
+.dive-page .pk-root[data-world] .ds-card .prompt {
+  font-size: clamp(20px, 3.3vw, 30px);
+  line-height: 1.12;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.dive-page .pk-root[data-world] .ds-card .rnd {
+  font-size: 13px;
+}
+
+.dive-page .pk-root[data-world] .ds-card .hint {
+  font-size: 12px;
+}
+
+/* A card or banner that has been answered is the landed banner's place; the
+   strip keeps the old ones only while the camera is still moving past them. */
+.dive-page .pk-root[data-world] .ds-card {
+  pointer-events: none;
 }

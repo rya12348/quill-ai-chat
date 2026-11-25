@@ -18,7 +18,7 @@ export type ButterPack = {
   tagline: string
   subline: string
   /** The world attribute the stylesheet themes against. */
-  world: 'cinema' | 'gauntlet' | 'globe' | 'notebook' | 'ocean'
+  world: 'hollywood' | 'gauntlet' | 'globe' | 'notebook' | 'ocean'
   accent: string
   panel: string
   ring: string
@@ -141,7 +141,7 @@ export const PACKS: ButterPack[] = [
     name: 'AT THE MOVIES',
     tagline: 'AT THE MOVIES',
     subline: '30 pictures · rarer answers drive farther',
-    world: 'cinema',
+    world: 'hollywood',
     accent: '#ffd166',
     panel: '#1a0d24',
     ring: '#3a2050',
