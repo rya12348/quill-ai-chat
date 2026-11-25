@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 
 import { ButterMenu } from '../components/ButterMenu'
@@ -495,6 +495,86 @@ function logbookOf(today: string) {
     if (streak > 400) break
   }
   return { played: dates.length, average: dates.length ? Math.round(total / dates.length) : 0, best, streak }
+}
+
+/**
+ * The result screen's "got an idea for a question?" box, copied from the shipped
+ * DoneView: it posts `{ playerId, text }` to `/api/suggest` and shows their three
+ * answers — `logged`, `that's plenty for today`, and the one-line error.
+ */
+function SuggestQuestion() {
+  const [text, setText] = useState('')
+  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'throttled' | 'error'>('idle')
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    const trimmed = text.trim()
+    if (trimmed.length < 3 || state === 'sending') return
+    setState('sending')
+    try {
+      const res = await fetch('/api/butter-dive/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId: playerId(), text: trimmed }),
+      })
+      const body = (await res.json().catch(() => null)) as { ok?: boolean; reason?: string } | null
+      if (body?.ok) setState('sent')
+      else if (body?.reason === 'throttled') setState('throttled')
+      else setState('error')
+    } catch {
+      setState('error')
+    }
+  }
+
+  if (state === 'sent') {
+    return (
+      <p className="font-mono-ui text-[12px] tracking-[0.12em] uppercase text-drift/60">
+        logged — it might surface in a future dive.
+      </p>
+    )
+  }
+  if (state === 'throttled') {
+    return (
+      <p className="font-mono-ui text-[12px] tracking-[0.12em] uppercase text-drift/60">
+        that&apos;s plenty for today — resurface tomorrow.
+      </p>
+    )
+  }
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-1.5">
+      <label
+        htmlFor="suggest-question"
+        className="font-mono-ui text-[12px] tracking-[0.12em] uppercase text-drift/60"
+      >
+        got an idea for a question? tell us what to ask
+      </label>
+      <div className="flex items-baseline gap-3 max-w-sm">
+        <input
+          id="suggest-question"
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value)
+            if (state === 'error') setState('idle')
+          }}
+          maxLength={160}
+          placeholder="name a type of cloud…"
+          className="flex-1 bg-transparent border-b border-drift/40 focus:border-lumen-cyan outline-none font-mono-ui text-[13px] text-foam placeholder:text-drift/40 py-1"
+        />
+        <button
+          type="submit"
+          disabled={text.trim().length < 3 || state === 'sending'}
+          className="font-mono-ui text-[12px] tracking-[0.12em] uppercase underline text-drift hover:text-lumen-cyan disabled:opacity-40 disabled:no-underline"
+        >
+          {state === 'sending' ? 'sending…' : 'submit'}
+        </button>
+      </div>
+      {state === 'error' && (
+        <p className="font-mono-ui text-[11px] tracking-[0.12em] uppercase text-lumen-pink/80">
+          couldn&apos;t send — try again in a moment.
+        </p>
+      )}
+    </form>
+  )
 }
 
 function playerId(): string {
@@ -1886,6 +1966,8 @@ export function ButterDive() {
                       </button>
                     ) : null}
                   </p>
+
+                  <SuggestQuestion />
                 </div>
               </div>
             </div>

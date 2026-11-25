@@ -172,6 +172,29 @@ butterDive.post('/answer', async (c) => {
 })
 
 /**
+ * Their `/api/suggest`: the box on the result screen that takes a question idea.
+ * The shipped client posts `{ playerId, text }` and reads `{ ok, reason }`, so
+ * this forwards exactly that and hands the reply back untouched — `throttled`
+ * is their daily limit, not ours to invent.
+ */
+butterDive.post('/suggest', async (c) => {
+  if (crossSite(c)) return c.json({ error: 'Cross-site request refused.' }, 403)
+  const body = (await c.req.json().catch(() => ({}))) as { playerId?: string; text?: string }
+  const text = String(body.text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160)
+  if (text.length < 3) return c.json({ error: 'Bad question' }, 400)
+  const res = await upstream('/api/suggest', {
+    method: 'POST',
+    body: JSON.stringify({ playerId: String(body.playerId ?? ''), text }),
+  })
+  const out = res?.ok ? ((await res.json().catch(() => null)) as { ok?: boolean; reason?: string } | null) : null
+  if (!out) return c.json({ ok: false, reason: 'unavailable' }, 502)
+  return c.json(out, 200, { 'cache-control': 'no-store' })
+})
+
+/**
  * The answer sheet behind a day: every answer on all seven cards, with the tier
  * that decides its rarity. The result screen's "the catch" opens straight onto
  * this, so a round can be read back answer by answer.
