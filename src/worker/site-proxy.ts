@@ -1347,8 +1347,16 @@ function allowFrame(frame){
   if(allowText.indexOf('pointer-lock')<0)allowParts.push('pointer-lock');
   if(allowParts.join('; ')!==existingAllow)frame.setAttribute('allow',allowParts.join('; '));
   if(!frame.hasAttribute('sandbox'))return;
+  // An opaque (sandboxed) document has Ink's own origin behind it, so the
+  // allow-same-origin flag would hand the child a real origin it must not have,
+  // and it is always dropped there. A document that already has a real origin
+  // (the content host) is isolated from the app, and a child keeping the flag
+  // shares only that origin. Camera-chat sites put their client in a sandboxed
+  // child frame, and without this the child stays opaque, where every
+  // getUserMedia call dies with an invalid security origin.
+  var opaque=window.origin==='null';
   var needed=['allow-scripts','allow-forms','allow-pointer-lock','allow-popups','allow-modals','allow-downloads'];
-  var flags=(frame.getAttribute('sandbox')||'').split(/\\s+/).filter(function(flag){return flag&&flag!=='allow-same-origin'&&flag!=='allow-popups-to-escape-sandbox'});
+  var flags=(frame.getAttribute('sandbox')||'').split(/\\s+/).filter(function(flag){return flag&&flag!=='allow-popups-to-escape-sandbox'&&(flag!=='allow-same-origin'||!opaque)});
   for(var i=0;i<needed.length;i++)if(flags.indexOf(needed[i])<0)flags.push(needed[i]);
   var nextSandbox=flags.join(' ');
   if(frame.getAttribute('sandbox')!==nextSandbox)frame.setAttribute('sandbox',nextSandbox);
