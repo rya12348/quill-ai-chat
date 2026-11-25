@@ -1504,6 +1504,32 @@ try{
     return nativeSetAttribute.call(this,name,value);
   };
 }catch(error){}
+// Markup the page renders through innerHTML is parsed by the browser, which sets
+// src attributes without going through the setters above. Sweep what lands in
+// the document so those requests stay inside the proxy too.
+function rewriteTree(node){
+  if(!node||node.nodeType!==1)return;
+  if(/^(?:IMG|SCRIPT|LINK|VIDEO|AUDIO|SOURCE|EMBED|IFRAME)$/.test(node.tagName)){
+    ['src','href','data-src'].forEach(function(attr){
+      if(!node.hasAttribute||!node.hasAttribute(attr))return;
+      var next=rewriteAsset(node.getAttribute(attr));
+      if(next!=null)nativeSetAttribute.call(node,attr,next);
+    });
+  }
+  if(node.querySelectorAll){
+    var list=node.querySelectorAll('img[src],script[src],link[href],video[src],audio[src],source[src],embed[src],iframe[src],[data-src]');
+    for(var i=0;i<list.length;i++)rewriteTree(list[i]);
+  }
+}
+try{
+  new MutationObserver(function(records){
+    for(var i=0;i<records.length;i++){
+      var record=records[i];
+      if(record.type==='attributes')rewriteTree(record.target);
+      else for(var j=0;j<record.addedNodes.length;j++)rewriteTree(record.addedNodes[j]);
+    }
+  }).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src','href','data-src']});
+}catch(error){}
 // A socket the page opens at its own host is addressed to the content host here,
 // so it has to be pointed back at the site and tunnelled: a chat client that
 // connects to wss://<site>/ws cannot otherwise reach its server from the proxy.
