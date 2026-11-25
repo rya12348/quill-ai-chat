@@ -566,9 +566,13 @@ export function rewriteAssetContent(
         return raw
       }
     }
+    // Absolute hrefs are rewritten too: a stylesheet that names its fonts or
+    // images by host (Google Fonts names fonts.gstatic.com) sends the browser
+    // straight to that host, which is a real request outside the Worker.
+    const cssRef = '(\\/(?!\\/)[^)"\']*|(?:https?:)?\\/\\/[^)"\']*)'
     const rewritten = css
-      .replace(/url\(\s*(["']?)(\/(?!\/)[^)"']*)\1\s*\)/gi, (_match, quote: string, path: string) => `url(${quote}${rewriteUrl(path)}${quote})`)
-      .replace(/(@import\s+)(["'])(\/(?!\/)[^"']+)\2/gi, (_match, prefix: string, quote: string, path: string) => `${prefix}${quote}${rewriteUrl(path)}${quote}`)
+      .replace(new RegExp(`url\\(\\s*(["']?)${cssRef}\\1\\s*\\)`, 'gi'), (_match, quote: string, path: string) => `url(${quote}${rewriteUrl(path)}${quote})`)
+      .replace(new RegExp(`(@import\\s+)(["'])${cssRef}\\2`, 'gi'), (_match, prefix: string, quote: string, path: string) => `${prefix}${quote}${rewriteUrl(path)}${quote}`)
     return encodeText(rewritten)
   }
   if (type.includes('javascript') || type.includes('ecmascript')) {
