@@ -1788,6 +1788,10 @@ function isAdSource(src: string): boolean {
 
 function stripAdMarkup(html: string): string {
   return html
+    // dns-prefetch and preconnect name a host to the browser directly, before a
+    // proxy ever sees a request: the connection is opened to the real host from
+    // the page's own preface. They are pure hints, so they go.
+    .replace(/<link\b[^>]*\brel\s*=\s*["']?(?:dns-prefetch|preconnect|prefetch|prerender)["']?[^>]*>/gi, '')
     .replace(/<(script|iframe)\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>[\s\S]*?<\/\1\s*>/gi, (tag, _name, dq, sq, bare) => {
       const src = dq ?? sq ?? bare ?? ''
       return isAdSource(src) ? '' : tag
@@ -1795,6 +1799,11 @@ function stripAdMarkup(html: string): string {
     .replace(/<(script|iframe)\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*\/?>/gi, (tag, _name, dq, sq, bare) => {
       const src = dq ?? sq ?? bare ?? ''
       return isAdSource(src) ? '' : tag
+    })
+    // An ad frame that is parked in data-src until script wakes it is still an
+    // ad frame; it never gets loaded through the proxy at all.
+    .replace(/<(script|iframe)\b[^>]*\bdata-src\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>/gi, (tag, _name, _raw, dq, sq, bare) => {
+      return isAdSource(dq ?? sq ?? bare ?? '') ? '' : tag
     })
 }
 
