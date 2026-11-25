@@ -26,6 +26,9 @@ export const INK_SITES: InkSite[] = [
   { id: 'freenova', name: 'FreeNova', url: 'https://freezenova.com/', color: '#22C55E' },
   { id: 'omegle', name: 'Omegle', url: 'https://omegle.onl/online/', color: '#3B5BFE', icon: '/apps/omegle.png' },
   { id: 'kiwi', name: 'kiwi', url: 'https://kiwi.college/', color: '#7CB342' },
+  // kiwi's own game shell wraps this client page in an ad gate and a request
+  // monitor that never settles behind a proxy, so the client is opened directly.
+  { id: 'kiwi-omegle', name: 'kiwi omegle', url: 'https://kiwi.college/storage/omegle.html', color: '#22C55E' },
   { id: 'instagram', name: 'Instagram', url: 'https://www.instagram.com/', color: '#E1306C' },
   { id: 'steam', name: 'Steam', url: 'https://store.steampowered.com/', color: '#1B2838' },
   { id: 'spotify', name: 'Spotify', url: 'https://open.spotify.com/', color: '#1DB954' },
