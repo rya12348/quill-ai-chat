@@ -513,17 +513,25 @@ function randomFuse(): number {
 }
 
 /**
- * Move the puffer on. A right answer hands the puffer to the next seat and
- * nothing else: the fuse it is burning keeps burning, which is the rule the
- * shipped room states in as many words — "the fuse is hidden and random (10 to
- * 30 seconds) and never gets longer". Only a pop strikes a new one, behind the
- * freeze, and a pop is also what deals the next category.
+ * Why the puffer is on the move. The shipped table names these four: `pass` is
+ * an accepted answer, `miss` a refused one, `pop` the fuse running out and
+ * `cleared` the card running out of chances.
+ */
+type Pass = 'pass' | 'miss' | 'pop' | 'cleared'
+
+/**
+ * Move the puffer on. A right answer hands it to the next seat and nothing
+ * else: the fuse it is burning keeps burning, which is the rule the shipped
+ * room states in as many words — "the fuse is hidden and random (10 to 30
+ * seconds) and never gets longer". A refused answer also hands it on, but the
+ * card stays; a pop costs a life and strikes a new fuse behind the freeze; and
+ * only a card whose chances are spent deals the next category.
  */
 async function advance(
   database: D1Database,
   room: RoomRow,
   players: PlayerRow[],
-  popped: boolean,
+  reason: Pass,
 ): Promise<RoomRow> {
   const alive = players.filter((player) => player.hearts > 0)
   // A table of one keeps going: there is nobody to outlast yet, but the round
@@ -558,7 +566,7 @@ async function advance(
   // Every answer on the card is spent. The shipped table holds the next card
   // for `CATEGORY_SWAP_MS` instead of dealing it inside the same pass, so the
   // puffer stays where it is and the new category arrives a beat later.
-  if (!popped && used.length >= Math.min(CARD_ACCEPTED_LIMIT, topic.answers.length)) {
+  if (reason === 'pass' && used.length >= Math.min(CARD_ACCEPTED_LIMIT, topic.answers.length)) {
     const swapAt = Number(room.swap_at) || 0
     if (!swapAt) {
       await database
@@ -569,32 +577,38 @@ async function advance(
     }
     if (now() < swapAt) return room
   }
-  if (popped) {
-    // A pop ends the round: new card, cleared answers, new hidden fuse.
+  if (reason === 'cleared') {
+    // The card's two chances are spent: a new category, its answers cleared and
+    // the puffer passing on with it. The shipped table sends this as the
+    // "cleared" category event, not as a pop.
     topic = nextPartyTopic(room, [...seen, topic.prompt])
     used = []
     history = [...seen, topic.prompt].slice(-SEEN_KEEP)
-  } else {
+    swapped = true
+  } else if (reason === 'pass') {
     const card = dealCard(room, seen)
     topic = card.topic
     used = card.used
     swapped = card.swapped
     history = card.seen
   }
+  // A miss and a pop both keep the card they happened on: a refusal is a shake,
+  // and a pop costs a life, not the category.
 
   // The fuse is shared and inherited. Krillion's FAQ: "If there are 20 seconds
   // left when you pass it, the next person inherits those 20 seconds. If there
   // are fewer than 8 seconds left, it goes back to 8. After a pop, a new random
   // fuse starts." That 8 is the shipped `minTurnMs`.
   const carried = Number(room.fuse_end) || 0
-  const fuseEnd = popped ? now() + POP_FREEZE_MS + strike : Math.max(now() + MIN_TURN_MS, carried)
+  const fuseEnd =
+    reason === 'pop' ? now() + POP_FREEZE_MS + strike : Math.max(now() + MIN_TURN_MS, carried)
   // The bar is drawn against the fuse it was struck at, so an inherited fuse
   // keeps the length it started with instead of being redrawn at random.
-  const fuseMs = popped ? strike : Number(room.fuse_ms) || strike
+  const fuseMs = reason === 'pop' ? strike : Number(room.fuse_ms) || strike
 
   // A new card takes every chip with it: an answer said on the old prompt would
   // read as an answer to the new one.
-  if (popped || swapped) {
+  if (swapped) {
     await database.prepare(`UPDATE butter_players SET last_answer = NULL WHERE room = ?`).bind(room.id).run()
   }
 
@@ -605,7 +619,7 @@ async function advance(
     .bind(
       next?.pid ?? null,
       now(),
-      popped ? room.round + 1 : room.round,
+      swapped ? room.round + 1 : room.round,
       fuseMs,
       fuseEnd,
       JSON.stringify(topic),
@@ -615,15 +629,15 @@ async function advance(
       room.id,
     )
     .run()
-  if (swapped) await say(database, room.id, `every answer on that card is used — new card: ${topic.prompt}.`, 'note')
-  if (popped) await say(database, room.id, `new card: ${topic.prompt}.`, 'note')
+  if (swapped) await say(database, room.id, `new card: ${topic.prompt}.`, 'note')
   return (await roomOf(database, room.id)) ?? room
 }
 
-/** A refusal is cheap: the card stays, the fuse keeps burning, try again. */
+/** A refusal costs a life? No — it costs the pass: the puffer moves on and the
+ *  card, with its fuse still burning, waits for the next seat. */
 function refusalMessage(name: string, answer: string, repeat: boolean): string {
-  if (repeat) return `${name} already said "${answer}" — try another.`
-  return `"${answer}" is not on that card — ${name} can try again.`
+  if (repeat) return `${name} already said "${answer}" — the puffer moves on.`
+  return `"${answer}" is not on that card — the puffer moves on from ${name}.`
 }
 
 /** Settle a fuse that ran out while nobody was polling. */
@@ -635,7 +649,7 @@ async function settleFuse(database: D1Database, room: RoomRow): Promise<RoomRow>
   // that deals it.
   if (current.status === 'playing' && Number(current.swap_at) && now() >= Number(current.swap_at)) {
     const players = await playersOf(database, current.id)
-    current = await advance(database, current, players, false)
+    current = await advance(database, current, players, 'pass')
   }
   for (let guard = 0; guard < 6; guard += 1) {
     if (current.status !== 'playing' || now() < current.fuse_end) break
@@ -656,18 +670,10 @@ async function settleFuse(database: D1Database, room: RoomRow): Promise<RoomRow>
     // advance() owns the pass and the end-of-game check. Call it even when
     // nobody is left: a solo table whose last heart just melted must finish
     // instead of re-settling the same expired fuse on every poll.
-    // A pop is one of the card's two chances, not a card change of its own: the
-    // live room kept the same category running after a pop, so the card only
-    // turns over when the second chance goes.
-    const misses = (Number(current.misses) || 0) + 1
-    const nextCard = misses >= 2
-    // advance() rewrites the room row but not this counter, so the chance has to
-    // be written here or the next miss starts counting from zero again.
-    await database
-      .prepare(`UPDATE butter_rooms SET misses = ? WHERE id = ?`)
-      .bind(nextCard ? 0 : misses, current.id)
-      .run()
-    current = await advance(database, { ...current, misses: nextCard ? 0 : misses }, updated, nextCard)
+    // A pop keeps the card: the category and every answer already said on it
+    // stay, the puffer moves to the next seat and the fuse is struck again
+    // behind the freeze. The card's two chances belong to refused answers.
+    current = await advance(database, current, updated, 'pop')
     if (!nextAlive(updated, victim.pid)) break
   }
   return current
@@ -766,7 +772,7 @@ async function playBots(database: D1Database, room: RoomRow): Promise<RoomRow> {
       players.map((player) =>
         player.pid === me.pid ? { ...player, meter, hearts, score: player.score + tier.score } : player,
       ),
-      false,
+      'pass',
     )
   }
   return current
@@ -893,7 +899,8 @@ async function snapshot(database: D1Database, code: string, pid: string) {
     size: room.size || 'party',
     cap: capFor(room.size),
     serverNow: now(),
-    // The card's chances used up so far: a miss and a pop both spend one.
+    // The card's chances used up so far: a refused answer spends one, and the
+    // second one turns the category over. Pops never spend them.
     misses: Number(room.misses) || 0,
     players: players.map((player) => ({
       pid: player.pid,
@@ -1235,8 +1242,8 @@ butter.post('/say', async (c) => {
   // at no other time — that is the whole game. Krillion's client keeps `.ds-reject`
   // and `.ds-reject-shake` for a refused answer and freezes the table on
   // `POP_FREEZE_MS` for a pop; its own bot stops sending after a refusal, which
-  // only makes sense if a refusal costs nothing. Charging a life for a wrong
-  // word here made the fuse pointless and ended rounds in two guesses.
+  // only makes sense if a refusal costs nothing. What a miss costs is the pass:
+  // the puffer moves on, so a wrong word still ends your turn.
   if (!tier || repeat) {
     await say(database, code, refusalMessage(playerName, answer, repeat), 'note')
     await setLast(database, code, {
@@ -1249,21 +1256,23 @@ butter.post('/say', async (c) => {
       why: repeat ? 'repeat' : 'miss',
       at: now(),
     })
-    // A miss stays with the person who missed — the refusal says they can try
-    // again, so the puffer does not move and nothing is scored — but it spends
-    // one of the card's two chances. Pops spend the other, so the card only
-    // turns over when the counter reaches two.
+    // A refused answer hands the puffer on — the seat that missed has had its
+    // turn, and the next one now has to name something — and it spends one of
+    // the card's two chances. When the second miss goes by the table has heard
+    // everything it is going to on that card, so a new category is dealt.
     const misses = (Number(room.misses) || 0) + 1
-    if (misses >= 2) {
-      await database.prepare(`UPDATE butter_rooms SET misses = 0 WHERE id = ?`).bind(code).run()
-      const advanced = await advance(database, { ...room, misses: 0 }, players, true)
-      return c.json(await snapshot(database, advanced.id, pid), 200, { 'cache-control': 'no-store' })
-    }
+    const cleared = misses >= 2
     await database
       .prepare(`UPDATE butter_rooms SET misses = ?, updated_at = ? WHERE id = ?`)
-      .bind(misses, now(), code)
+      .bind(cleared ? 0 : misses, now(), code)
       .run()
-    return c.json(await snapshot(database, code, pid), 200, { 'cache-control': 'no-store' })
+    const advanced = await advance(
+      database,
+      { ...room, misses: cleared ? 0 : misses },
+      players,
+      cleared ? 'cleared' : 'miss',
+    )
+    return c.json(await snapshot(database, advanced.id, pid), 200, { 'cache-control': 'no-store' })
   }
 
   // The card keeps the real spelling, so "labradr" scores as "labrador" and
@@ -1323,7 +1332,7 @@ butter.post('/say', async (c) => {
     players.map((player) =>
       player.pid === pid ? { ...player, meter, hearts, score: player.score + tier.score } : player,
     ),
-    false,
+    'pass',
   )
   return c.json(await snapshot(database, advanced.id, pid), 200, { 'cache-control': 'no-store' })
 })

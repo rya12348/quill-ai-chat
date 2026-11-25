@@ -1104,6 +1104,9 @@ export function Butter() {
   // My answer, echoed locally until the snapshot comes back with it.
   const [mySaid, setMySaid] = useState<{ text: string; round: number } | null>(null)
   const chatList = useRef<HTMLDivElement | null>(null)
+  // A second enter press while the first answer is still in flight would be a
+  // refused send, so the dock holds it shut until the reply lands.
+  const sending = useRef(false)
   useEffect(() => {
     // Twice: the text lays out after the commit, and a shorter window can make a
     // panel that used to fit start overflowing without a new line arriving.
@@ -1395,7 +1398,14 @@ export function Butter() {
   }, [code, pid, lives])
 
   const pass = useCallback(async () => {
+    // The dock takes typing from any seat — you can line an answer up while
+    // somebody else holds the puffer — but only the holder's enter sends it.
     if (!code || !pid || !typed.trim()) return
+    if (!snap || snap.status !== 'playing' || snap.turn !== snap.you) return
+    // One press, one answer: the round trip is slow enough to double-fire
+    // enter, and the second send came back as a refusal.
+    if (sending.current) return
+    sending.current = true
     const answer = typed.trim()
     setTyped('')
     // Show it over my head on the same frame I press enter: the round trip is a
@@ -1413,8 +1423,10 @@ export function Butter() {
       setMySaid(null)
       setTyped(answer)
       setError(failure instanceof Error ? failure.message : 'That did not go through.')
+    } finally {
+      sending.current = false
     }
-  }, [code, pid, typed, snap?.round])
+  }, [code, pid, typed, snap])
 
   const sendChat = useCallback(async () => {
     const text = chatText.trim()
@@ -1551,7 +1563,7 @@ export function Butter() {
   const lastAge = Date.now() - lastSeenAt.current
   const lastLive = Boolean(last && lastSeenAt.current && lastAge < 2600)
   // A refused answer shakes for a beat, the way the shipped table jolts.
-  const rejectLive = Boolean(last?.kind === 'reject' && lastAge < 1300)
+  const rejectLive = Boolean(last?.kind === 'reject' && lastAge < 2200)
   // The rarity of a scored answer rises off the seat for 1.8s, the same beat
   // the shipped table gives its tier toast.
   const riseLive = Boolean((last?.kind === 'tier' || last?.kind === 'spare') && lastAge < 1800)
@@ -1559,34 +1571,16 @@ export function Butter() {
   // The character you picked, floating between the two door columns before a
   // table is dealt — the shipped gate does the same with the idle buddy.
 
-  // A seat wears its last answer over its head until it says another one: the
-  // chip is the seat's standing answer, not a 1.3s toast, so the table can see
-  // what everyone has already said without waiting for the next poll.
-  const saidSeen = useRef(new Map<number, number>())
-  const said = (() => {
-    const map = new Map<string, { text: string; tier?: TierId }>()
-    const at = Date.now()
-    const feed = snap?.feed ?? []
-    // The seat's own record is the durable one: it survives the feed scrolling,
-    // so a chip stays up from the answer until the next answer replaces it.
-    for (const player of snap?.players ?? []) {
-      const worn = player.lastAnswer
-      if (worn && typeof worn.text === 'string')
-        map.set(player.name, { text: worn.text.toLowerCase(), tier: worn.tier as TierId | undefined })
-    }
-    const live = new Set(feed.map((line) => line.id))
-    for (const line of feed) if (!saidSeen.current.has(line.id)) saidSeen.current.set(line.id, at)
-    for (const id of [...saidSeen.current.keys()]) if (!live.has(id)) saidSeen.current.delete(id)
-    for (const line of feed) {
-      const match = /^(.+?): (.+)$/.exec(line.text)
-      if (!match || /^(the|every)/i.test(match[1])) continue
-      map.set(match[1].trim(), { text: match[2].toLowerCase() })
-    }
-    // The echo outranks everything until the card turns over.
-    const mine = (snap?.players ?? []).find((player) => player.you)
-    if (mine && mySaid && mySaid.round === (snap?.round ?? 0)) map.set(mine.name, { text: mySaid.text })
-    return map
-  })()
+  // The shipped table flashes an answer over the head of the seat that said it
+  // and then lets it go: a chip reacts to one answer instead of staying on the
+  // seat, so an old answer never hangs over everyone at the ring.
+  const said =
+    last?.kind === 'tier' && last.name && last.answer && lastAge < 2200
+      ? { name: last.name, text: String(last.answer).toLowerCase() }
+      : null
+  // My own press shows on my seat before the round trip lands; the snapshot's
+  // event takes over from it.
+  const echo = mySaid && me && mySaid.round === (snap?.round ?? 0) ? { name: me.name, text: mySaid.text } : null
 
   // The chat docks against the right edge, and the seat that sits furthest right
   // wears its chip centred on itself: 230 wide at desktop sizes, so half of that
@@ -1632,7 +1626,7 @@ export function Butter() {
                     holding={snap?.status === 'playing' && snap.turn === player.pid}
                     status={snap?.status ?? 'lobby'}
                     winner={snap?.winner?.name === player.name}
-                    said={said.get(player.name)?.text}
+                    said={said?.name === player.name ? said.text : echo?.name === player.name ? echo.text : undefined}
                     reject={
                       rejectLive && last?.kind === 'reject' && last?.name === player.name ? last.answer : undefined
                     }
@@ -1887,7 +1881,12 @@ export function Butter() {
           <>
             {snap.status === 'playing' ? (
               <div className={`ds-card${newCat ? ' pf-newcat' : ''}`} ref={cardRef}>
-                <div className="rnd">CATEGORY {Math.min(snap.round + 1, 7)} OF 7</div>
+                {/* The shipped card counts the category, not a run of seven:
+                    a table keeps dealing until the lives run out. */}
+                <div className="rnd">
+                  <span>CATEGORY {snap.round + 1}</span>
+                  <span className={newCat ? 'pf-card-tag new' : undefined}>{newCat ? 'NEW' : ''}</span>
+                </div>
                 <div className="prompt">{snap.prompt}</div>
                 <div className="hint">
                   {yourTurn
@@ -1984,17 +1983,23 @@ export function Butter() {
                     <input
                       className="ds-input"
                       type="text"
-                      maxLength={256}
+                      maxLength={60}
                       autoComplete="off"
                       spellCheck={false}
                       enterKeyHint="go"
-                      placeholder={yourTurn ? 'type one answer…' : '…'}
+                      placeholder={
+                        !me || me.hearts <= 0
+                          ? 'you’re out · watching…'
+                          : yourTurn
+                            ? 'type one answer…'
+                            : 'type ahead — it sends on your turn'
+                      }
                       aria-label="Your answer"
                       autoFocus={yourTurn}
-                      disabled={!yourTurn}
+                      disabled={!me || me.hearts <= 0}
                       value={typed}
                       onChange={(event) => {
-                        const next = event.target.value.slice(0, 40)
+                        const next = event.target.value.slice(0, 60)
                         // Autocorrect lands on the space: a misspelt word is rewritten
                         // to the card's spelling as the next word starts, whichever way
                         // the space arrived (key, paste, or a phone keyboard).
@@ -2070,7 +2075,7 @@ export function Butter() {
                       <span style={{ color: '#ff9f43', textTransform: 'none' }}>
                         “{last.answer}” is not on that card
                       </span>
-                      <span style={{ color: '#7d93b8', textTransform: 'none' }}>try another</span>
+                      <span style={{ color: '#7d93b8', textTransform: 'none' }}>puffer moves on</span>
                     </>
                   ) : (
                     <>
@@ -2198,6 +2203,9 @@ export function Butter() {
               <h3 id="butter-howto">HOW TO PLAY</h3>
               <ol className="pf-rules">
                 <li>Answer the question before the puffer explodes on you.</li>
+                <li>A right answer passes the puffer on. A wrong one passes it on too.</li>
+                <li>Two wrong answers on a category and the next one is dealt.</li>
+                <li>If the fuse pops on you, you lose a heart.</li>
                 <li>Rarer answers get you closer to an extra heart.</li>
                 <li>No reusing answers for the current question.</li>
               </ol>
