@@ -2014,5 +2014,11 @@ export function renderProxyPage(
   const withStorage = nativeStorage ? addHistoryShim(withFullscreen, historyUrl) : addSandboxShims(withFullscreen, historyUrl)
   const withNetwork = addNetworkShim(withStorage, proxyUrl, origin)
   const withNav = addNavigation(withNetwork, origin, app.href, parentNavigation)
-  return addLoadingState(withNav, target.hostname.replace(/^www\./, ''))
+  // kiwi's game shell covers its own game with a loader that it only clears from
+  // the game frame's load event. In a proxied frame that event can be missed, and
+  // the shell then shows that cover forever, so the cover is never painted.
+  const ready = /id="kiwiLoading"/.test(withNav)
+    ? withNav.replace(/<\/head>/i, '<style>#kiwiLoading{display:none!important}</style></head>')
+    : withNav
+  return addLoadingState(ready, target.hostname.replace(/^www\./, ''))
 }
