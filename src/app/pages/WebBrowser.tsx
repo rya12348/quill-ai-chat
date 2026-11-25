@@ -2,6 +2,7 @@ import { Loader2, RotateCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router'
 
+import { contentOriginFor } from '../../shared/proxy-origin'
 import { siteUrlFromCode } from '../../shared/sites'
 
 /**
@@ -77,6 +78,27 @@ function normalize(raw: string): string | null {
 }
 
 /**
+ * The origin that serves the frame, when this deployment has one.
+ *
+ * A proxied page on Ink's own origin is sandboxed to an opaque origin, and
+ * Chrome refuses a camera or microphone there with `SecurityError: Invalid
+ * security origin` before any prompt can appear. The content origin is the same
+ * Worker and database on a second hostname, so the frame keeps a real origin to
+ * ask from and Ink's own origin stays out of its reach.
+ */
+const CONTENT_ORIGIN = contentOriginFor(window.location.origin)
+const FRAME_ORIGIN = CONTENT_ORIGIN ?? window.location.origin
+
+function frameUrl(path: string): string {
+  if (!CONTENT_ORIGIN) return path
+  try {
+    return new URL(path, CONTENT_ORIGIN).href
+  } catch {
+    return path
+  }
+}
+
+/**
  * Ink's browser: one proxied site served edge to edge by one proxy.
  *
  * There is no browser chrome — no address bar, no buttons. The page *is* the
@@ -125,13 +147,14 @@ export function WebBrowser() {
       if (message.type !== 'stet:preview-navigate' || typeof message.url !== 'string') return
       let next: URL
       try {
-        next = new URL(message.url, window.location.origin)
+        next = new URL(message.url, FRAME_ORIGIN)
       } catch {
         return
       }
-      // Only a capability route may take over the frame: that keeps the session
-      // token, and therefore the cookie jar, the same across the whole visit.
-      if (next.origin !== window.location.origin) return
+      // Only a capability route on the frame's own origin may take over the
+      // frame: that keeps the session token, and therefore the cookie jar, the
+      // same across the whole visit.
+      if (next.origin !== FRAME_ORIGIN) return
       if (!next.pathname.startsWith('/api/web-proxy/') && !next.pathname.startsWith('/api/poki-game/')) return
       setFrame(next.href)
     }
@@ -167,7 +190,7 @@ export function WebBrowser() {
         setError(body?.message || 'That page could not be opened.')
         return
       }
-      setFrame(path)
+      setFrame(frameUrl(path))
     } catch {
       setError('That page could not be opened.')
     }
@@ -203,7 +226,7 @@ export function WebBrowser() {
           src={frame}
           title="Browser"
           className="h-full w-full border-0 bg-white"
-          allow="fullscreen; autoplay; clipboard-write; gamepad"
+          allow="camera; microphone; fullscreen; autoplay; clipboard-read; clipboard-write; gamepad"
           allowFullScreen
         />
       ) : (

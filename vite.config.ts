@@ -92,7 +92,7 @@ export default defineConfig(({ mode }) => {
       host: codespaces ? '0.0.0.0' : '127.0.0.1',
       port: 5180,
       strictPort: true,
-      allowedHosts: ['.app.github.dev', '.githubpreview.dev'],
+      allowedHosts: ['.app.github.dev', '.githubpreview.dev', 'stet-preview.localhost'],
       // Codespaces serves port 5180 on HTTPS 443; point the HMR client there.
       ...(codespaces ? { hmr: { protocol: 'wss', clientPort: 443 } } : {}),
       // Benchmark runs update these artifacts; they must not reload the app
@@ -118,7 +118,7 @@ export default defineConfig(({ mode }) => {
       host: codespaces ? '0.0.0.0' : '127.0.0.1',
       port: 4173,
       strictPort: true,
-      allowedHosts: ['.app.github.dev', '.githubpreview.dev'],
+      allowedHosts: ['.app.github.dev', '.githubpreview.dev', 'stet-preview.localhost'],
     },
   }
 })

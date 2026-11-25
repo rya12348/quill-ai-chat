@@ -48,6 +48,7 @@ import { room } from './routes/room'
 import { settings } from './routes/settings'
 import { shares } from './routes/shares'
 import { traffic } from './routes/traffic'
+import { contentOriginFor, isContentHost } from '../shared/proxy-origin'
 
 const app = new Hono<AppContext>()
 
@@ -78,6 +79,29 @@ const APP_CSP = [
 // live-site previews, Poki assets, and the Pyodide runner pages.
 const SECURITY_EXEMPT_PREFIXES = ['/api/web-proxy/', '/api/poki-game/', '/api/poki-play/', '/api/poki-cdn/', '/analysis-runner.html', '/proof-runner.html']
 
+/**
+ * True when this request is being served on the host that carries proxied
+ * pages. Pages forwards the original host, so the request URL and the forwarded
+ * host are both checked.
+ */
+function contentHostRequest(request: Request): boolean {
+  const forwarded = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
+  return [new URL(request.url).hostname, forwarded].some((host) => (host ? isContentHost(host) : false))
+}
+
+/**
+ * Camera and microphone are delegated to the content origin, and only there.
+ * A proxied page on Ink's own origin is sandboxed to an opaque origin, which
+ * Chrome can never grant either permission to, so the app keeps them closed.
+ */
+function permissionsPolicy(env: Env, request: Request): string {
+  const closed = 'geolocation=(), payment=(), usb=()'
+  if (contentHostRequest(request)) return `camera=(self), microphone=(self), ${closed}`
+  const content = contentOriginFor(appOrigin(env, request))
+  if (!content) return `camera=(), microphone=(), ${closed}`
+  return `camera=(self "${content}"), microphone=(self "${content}"), ${closed}`
+}
+
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url)
   const path = url.pathname
@@ -87,7 +111,7 @@ app.use('*', async (c, next) => {
     'X-Download-Options': 'noopen',
     'Referrer-Policy': 'no-referrer',
     'Cross-Origin-Opener-Policy': 'same-origin',
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+    'Permissions-Policy': permissionsPolicy(c.env, c.req.raw),
     ...(url.protocol === 'https:' ? { 'Strict-Transport-Security': 'max-age=31536000' } : {}),
   }
   // Vite's development client uses its own inline bootstrap and HMR sockets;
@@ -137,11 +161,12 @@ app.use('*', async (c, next) => {
   }
 })
 
-// The loopback preview hostname exists only to isolate browsed sites from the
-// app origin. It must not serve Ink itself: development auth does not require
-// a cookie, so exposing app APIs there would defeat the isolation.
+// The content hostnames exist only to isolate browsed sites from the app
+// origin. They must not serve Ink itself: a proxied page that shared an origin
+// with the app document could read it, and development auth needs no cookie, so
+// exposing app APIs there would defeat the isolation.
 app.use('*', async (c, next) => {
-  if (!isIsolatedPreviewRequest(c.req.raw)) return next()
+  if (!isIsolatedPreviewRequest(c.req.raw) && !contentHostRequest(c.req.raw)) return next()
   const path = new URL(c.req.url).pathname
   if (path.startsWith('/api/web-proxy/') || path.startsWith('/api/poki-game/')) return next()
   return c.notFound()
@@ -464,7 +489,7 @@ function isIsolatedPreviewRequest(request: Request): boolean {
 }
 
 function proxyPageHeaders(request: Request): Record<string, string> {
-  if (!isIsolatedPreviewRequest(request)) return PROXY_HEADERS
+  if (!isIsolatedPreviewRequest(request) && !contentHostRequest(request)) return PROXY_HEADERS
   // The frame keeps its own sandbox. A CSP sandbox on top of it makes Chrome
   // leave requestFullscreen() pending forever, so the game's fullscreen button
   // never completes. The isolated host is still cross-origin from Ink and the
@@ -481,7 +506,11 @@ function proxyPageHeaders(request: Request): Record<string, string> {
 
 /** Keep every generated frame URL on the isolated host the browser visited. */
 function proxyOriginFor(env: Env, request: Request): string {
-  return isIsolatedPreviewRequest(request) ? new URL(request.url).origin : appOrigin(env, request)
+  // A request on either isolated host stays on the origin that answered it: the
+  // page it is serving lives there, and appOrigin would name the app instead.
+  return isIsolatedPreviewRequest(request) || contentHostRequest(request)
+    ? new URL(request.url).origin
+    : appOrigin(env, request)
 }
 
 /**
@@ -725,7 +754,7 @@ app.get('/api/web-proxy/:token', requireDb, async (c) => {
           })
         }
       }
-      return c.body(renderProxyPage(renderSearchResults(query, target, results), target, proxyUrl, parentNavigation, isIsolatedPreviewRequest(c.req.raw)), 200, proxyPageHeaders(c.req.raw))
+      return c.body(renderProxyPage(renderSearchResults(query, target, results), target, proxyUrl, parentNavigation, isIsolatedPreviewRequest(c.req.raw) || contentHostRequest(c.req.raw)), 200, proxyPageHeaders(c.req.raw))
     }
     const page = await fetchSitePage(target, c.req.raw.signal)
     // A page can name Poki hosts directly in its markup (thumbnails, fonts,
@@ -766,7 +795,7 @@ app.get('/api/web-proxy/:token', requireDb, async (c) => {
     // own origin and cookie. Say that, instead of framing a widget that will spin.
     if (isChallengeWall(page.html))
       return c.body(renderChallengePage(page.finalUrl), 200, proxyPageHeaders(c.req.raw))
-    return c.body(renderProxyPage(html, page.finalUrl, proxyUrl, parentNavigation, isIsolatedPreviewRequest(c.req.raw)), 200, proxyPageHeaders(c.req.raw))
+    return c.body(renderProxyPage(html, page.finalUrl, proxyUrl, parentNavigation, isIsolatedPreviewRequest(c.req.raw) || contentHostRequest(c.req.raw)), 200, proxyPageHeaders(c.req.raw))
   } catch (error) {
     if (!(error instanceof SiteError)) console.error(error)
     const failure = error instanceof SiteError ? error : new SiteError(502, 'The site could not be loaded.')
