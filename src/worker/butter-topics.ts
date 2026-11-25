@@ -12,7 +12,14 @@
  * scored.
  */
 
-export type ButterTopic = { prompt: string; answers: string[]; tiers?: ButterTier[] }
+export type ButterTopic = {
+  prompt: string
+  answers: string[]
+  tiers?: ButterTier[]
+  /** Aliases the answer sheet itself accepts: flattened spelling → index into
+   *  `answers`. Only a full card file carries these; see `butter-cards-full.ts`. */
+  aliasIndex?: Map<string, number>
+}
 
 
 import { BANK_CARDS } from './butter-cards'
@@ -29,6 +36,24 @@ export const BUTTER_TOPICS: ButterTopic[] = BANK_CARDS as unknown as ButterTopic
 export function flatAnswer(value: string): string {
   return String(value || '')
     .toLowerCase()
+    // A card writes its answers with the accent they belong to — "Rosé",
+    // "Grüner Veltliner", "Airén" — and a player types them without one. The
+    // marks used to be deleted with the punctuation, which turned "Rosé" into
+    // "ros": a three-letter word the typo rules refuse, so the card's own
+    // answer could not be said at all. Fold the marks off first instead.
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    // Letters NFD cannot split still have an ASCII reading.
+    .replace(/ø/g, 'o')
+    .replace(/ł/g, 'l')
+    .replace(/[đð]/g, 'd')
+    .replace(/þ/g, 'th')
+    .replace(/ß/g, 'ss')
+    .replace(/æ/g, 'ae')
+    .replace(/œ/g, 'oe')
+    // "Fish & chips" is how a card writes an answer and "fish and chips" is
+    // how it gets typed; the ampersand is that word, not punctuation.
+    .replace(/&/g, ' and ')
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -113,15 +138,21 @@ function swappedPair(left: string, right: string): boolean {
 function withinTypos(needle: string, target: string): boolean {
   if (!needle) return false
   if (needle === target) return true
-  // A town writes its answers long — "Talcott Mountain", "Newgate Prison",
-  // "Hopmeadow Street" — and the word everyone actually says has to count, or a
-  // local types the right thing and the card refuses it. One word of a short
-  // multi-word answer, five letters or more, is that answer. This is checked
-  // before the packed forms below, which would otherwise flatten
-  // "Talcott Mountain" into one word and lose it.
-  if (needle.length >= 5 && !needle.includes(' ')) {
+  // A card writes its answers long — "Talcott Mountain", "Red Rose", "Mars
+  // bar" — and the word everyone actually says has to count, or a player types
+  // the right thing and the card refuses it. One word of a short multi-word
+  // answer is that answer. This used to need five letters, which refused "red"
+  // for "Red Rose" and "mars" for "Mars bar": the shortest answers are the
+  // ones everybody says first, so the floor is three. It is checked before the
+  // packed forms below, which would otherwise flatten "Talcott Mountain" into
+  // one word and lose it.
+  if (needle.length >= 3 && !needle.includes(' ')) {
     const words = target.split(' ')
-    if (words.length > 1 && words.length <= 4 && words.includes(needle)) return true
+    // The flat copy has already dropped the plural 's' from the typed word
+    // ("mars" reads as "mar"), while a word inside the answer keeps its own.
+    if (words.length > 1 && words.length <= 4 && words.some((word) => word === needle || word === `${needle}s`)) {
+      return true
+    }
   }
   // "sweetcorn" for "sweet corn", "icecream" for "ice cream", "spiderman" for
   // "spider man": people run words together and split them apart, and neither is
@@ -207,6 +238,14 @@ function closestFor(needle: string, topic: ButterTopic): { index: number; value:
 export function closestAnswer(topic: ButterTopic, answer: string): { index: number; value: string } | null {
   const needle = flatAnswer(answer)
   if (!needle) return null
+  // A spelling the card holds outright is that answer, before anything else.
+  const exact = topic.answers.findIndex((value) => flatAnswer(value) === needle)
+  if (exact >= 0) return { index: exact, value: topic.answers[exact] }
+  // The sheet's own aliases come next: it accepts "NYC" for "New York City", and
+  // a fuzzy pass must never be given the chance to send that to a different card
+  // entry first.
+  const aliased = topic.aliasIndex?.get(needle)
+  if (aliased !== undefined) return { index: aliased, value: topic.answers[aliased] }
   const direct = closestFor(needle, topic)
   if (direct) return { index: direct.index, value: direct.value }
   const sheetAlias = CARD_ALIASES[topic.prompt]?.[needle]

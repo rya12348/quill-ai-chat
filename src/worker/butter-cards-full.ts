@@ -9,7 +9,9 @@
  *
  * The shape is the same `{ prompt, answers, tiers }` the bundled bank uses, so
  * every rating path treats a full card exactly like a sampled one — with the
- * real tier of every answer.
+ * real tier of every answer. A card may also carry `x`, the aliases its sheet
+ * accepts (flattened spelling → index into `a`), which is what stops a right
+ * answer being refused because the card holds it under another name.
  */
 
 import type { ButterTier, ButterTopic } from './butter-topics'
@@ -53,12 +55,21 @@ export async function fullCard(prompt: string, assets: Fetcher, origin: string):
     const url = new URL(`/puffer/cards/${cardSlug(prompt)}.json`, origin)
     const res = await assets.fetch(url.toString())
     if (!res.ok) return null
-    const body = (await res.json().catch(() => null)) as { a?: unknown; t?: unknown } | null
+    const body = (await res.json().catch(() => null)) as { a?: unknown; t?: unknown; x?: unknown } | null
     const answers = Array.isArray(body?.a) ? (body?.a as unknown[]).map(String) : []
     if (!answers.length) return null
     const codes = String(body?.t ?? '')
     const tiers = answers.map((_, index) => DIGITS[Number(codes[index] ?? 2)] ?? 'schooler')
     const card: ButterTopic = { prompt, answers, tiers }
+    if (body?.x && typeof body.x === 'object' && !Array.isArray(body.x)) {
+      const table = new Map<string, number>()
+      for (const [key, index] of Object.entries(body.x as Record<string, unknown>)) {
+        const at = Number(index)
+        if (!key || !Number.isInteger(at) || at < 0 || at >= answers.length) continue
+        table.set(key, at)
+      }
+      if (table.size) card.aliasIndex = table
+    }
     if (cache.size >= KEEP) {
       const oldest = cache.keys().next().value
       if (oldest) cache.delete(oldest)
