@@ -150,8 +150,13 @@ function withinTypos(needle: string, target: string): boolean {
     const words = target.split(' ')
     // The flat copy has already dropped the plural 's' from the typed word
     // ("mars" reads as "mar"), while a word inside the answer keeps its own.
-    if (words.length > 1 && words.length <= 4 && words.some((word) => word === needle || word === `${needle}s`)) {
-      return true
+    const hit = (word: string) => word === needle || word === `${needle}s`
+    if (words.length > 1 && words.length <= 4) {
+      // Short words only count as the answer's own head: "bar" is not "Mars
+      // bar" and "hat" is not "Bergère hat", but "red" is "Red Rose" and
+      // "mars" is "Mars bar".
+      if (hit(words[0] ?? '')) return true
+      if (needle.length >= 5 && words.some(hit)) return true
     }
   }
   // "sweetcorn" for "sweet corn", "icecream" for "ice cream", "spiderman" for
