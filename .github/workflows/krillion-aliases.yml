@@ -1,0 +1,65 @@
+name: Harvest Krillion aliases
+
+# Krillion publishes the answer sheet of the dive that is live, and only that
+# one: the moment their day rolls (05:00 UTC) every earlier date starts
+# answering 403 "That answer sheet is not publicly available." So the harvest
+# has to land inside the last hours of the live dive — 04:40 UTC is that window,
+# with a second attempt just after the roll for a run that started late or hit a
+# transient failure. Both runs are idempotent: a sheet already taken adds
+# nothing and the commit step exits early.
+on:
+  schedule:
+    - cron: '40 4 * * *'
+    - cron: '10 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: krillion-aliases
+  cancel-in-progress: false
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Take the sheet's aliases and cards
+        run: node scripts/harvest-krillion-aliases.mjs
+
+      - name: Commit the cards that changed
+        id: commit
+        run: |
+          if [ -z "$(git status --porcelain -- public/puffer/cards src/worker/butter-cards-daily.ts)" ]; then
+            echo "no new aliases or cards in this run"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          git config user.name "ink-alias-bot"
+          git config user.email "noreply@inkbrowser.dpdns.org"
+          git add public/puffer/cards src/worker/butter-cards-daily.ts
+          git commit -m "Harvest $(date -u +%F)'s Krillion aliases"
+          git push
+
+      # Cards only matter once the game can serve them. The site people are given
+      # is the ink-harbor-2f9 project, which the push-triggered deploy workflow
+      # does not touch, so this run ships them itself.
+      - name: Ship the new cards
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::warning::No Cloudflare credentials: the cards are in the repo but not on the site."
+            exit 0
+          fi
+          npm ci
+          PAGES_PROJECT=ink-harbor-2f9 npm run deploy:pages

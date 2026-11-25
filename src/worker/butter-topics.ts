@@ -23,12 +23,14 @@ export type ButterTopic = {
 
 
 import { BANK_CARDS } from './butter-cards'
+import { DAILY_CARDS } from './butter-cards-daily'
 
 /**
  * Every card the table can deal: the generated bank, one prompt per card with
- * the real tier of each accepted answer. See `butter-cards.ts`.
+ * the real tier of each accepted answer. See `butter-cards.ts`, plus the cards
+ * `scripts/harvest-krillion-aliases.mjs` adds as each dive closes.
  */
-export const BUTTER_TOPICS: ButterTopic[] = BANK_CARDS as unknown as ButterTopic[]
+export const BUTTER_TOPICS: ButterTopic[] = [...BANK_CARDS, ...DAILY_CARDS] as unknown as ButterTopic[]
 
 /** Case, punctuation, plurals and spacing are the four ways a right answer gets
  *  marked wrong, so the match is done on a flattened copy. A leading "a" or
