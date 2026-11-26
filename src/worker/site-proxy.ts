@@ -1466,6 +1466,17 @@ window.addEventListener('message',function(event){
   try{field.focus();if(typeof field.select==='function')field.select()}catch(error){}
 });
 ${navigate}
+// A frame nested inside this page (a game shell, a chat client) is same-origin
+// here, so a navigation it asks for would otherwise stop at this document.
+// Pass it up: the outermost frame's parent owns that frame's address.
+window.addEventListener('message',function(event){
+  var data=event.data;
+  if(!data||data.type!=='stet:preview-navigate'||typeof data.url!=='string')return;
+  var next;try{next=new URL(data.url,location.href)}catch(error){return}
+  if(next.origin!==location.origin)return;
+  if(next.pathname.indexOf('/api/web-proxy/')!==0&&next.pathname.indexOf('/api/poki-game/')!==0)return;
+  go(next.href);
+});
 function isHttp(url){return url.protocol==='http:'||url.protocol==='https:'}
 function isProxy(url){return url.href===proxy||url.href.indexOf(proxy+'?')===0}
 // Everything a page loads has to come back through the capability route. The
@@ -1498,7 +1509,10 @@ function patchProperty(ctor,prop){
 }
 patchProperty(window.HTMLScriptElement,'src');
 patchProperty(window.HTMLImageElement,'src');
-patchProperty(window.HTMLIFrameElement,'src');
+// A frame is the frame bridge's job (installFrameBridge): it points the child
+// at the document route, where it gets its own shims and keeps the content
+// host's real origin a camera chat needs. Rewriting it to an asset path here
+// would win the race and run the child as a bare file, without either.
 patchProperty(window.HTMLMediaElement,'src');
 patchProperty(window.HTMLSourceElement,'src');
 patchProperty(window.HTMLEmbedElement,'src');
@@ -1506,7 +1520,7 @@ patchProperty(window.HTMLLinkElement,'href');
 try{
   var nativeSetAttribute=Element.prototype.setAttribute;
   Element.prototype.setAttribute=function(name,value){
-    if(/^(?:src|href|data-src)$/i.test(name)&&typeof value==='string'){
+    if(/^(?:src|href|data-src)$/i.test(name)&&typeof value==='string'&&this.tagName!=='IFRAME'){
       var next=rewriteAsset(value);
       if(next!=null)value=next;
     }
@@ -1518,7 +1532,7 @@ try{
 // the document so those requests stay inside the proxy too.
 function rewriteTree(node){
   if(!node||node.nodeType!==1)return;
-  if(/^(?:IMG|SCRIPT|LINK|VIDEO|AUDIO|SOURCE|EMBED|IFRAME)$/.test(node.tagName)){
+  if(/^(?:IMG|SCRIPT|LINK|VIDEO|AUDIO|SOURCE|EMBED)$/.test(node.tagName)){
     ['src','href','data-src'].forEach(function(attr){
       if(!node.hasAttribute||!node.hasAttribute(attr))return;
       var next=rewriteAsset(node.getAttribute(attr));
@@ -1526,7 +1540,7 @@ function rewriteTree(node){
     });
   }
   if(node.querySelectorAll){
-    var list=node.querySelectorAll('img[src],script[src],link[href],video[src],audio[src],source[src],embed[src],iframe[src],[data-src]');
+    var list=node.querySelectorAll('img[src],script[src],link[href],video[src],audio[src],source[src],embed[src],[data-src]');
     for(var i=0;i<list.length;i++)rewriteTree(list[i]);
   }
 }
