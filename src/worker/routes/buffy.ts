@@ -1961,13 +1961,36 @@ buffy.post('/chat', async (c) => {
         : chatLanes
       const completion = publicComplete(orderedChatLanes, {
         ...completionInput,
-        // A lane that has not produced a token in three seconds is not a
-        // lightning chat lane; try the next healthy fallback immediately.
-        idleMs: 3_000,
-        timeoutMs: model === DENT_MODEL ? 30_000 : 60_000,
+        // A lane that has not produced a token in eight seconds is not going to
+        // make this turn feel quick; try the next healthy fallback. Three
+        // seconds used to be the bar, and most free reasoning lanes need longer
+        // than that to their first token, so the first good lane was dropped
+        // before it could answer.
+        idleMs: 8_000,
+        // The idle guard is what stops a silent lane. This ceiling only exists
+        // so a runaway stream ends: at sixty seconds it cut long answers off
+        // mid-sentence, which read as the model "not answering".
+        timeoutMs: model === DENT_MODEL ? 60_000 : 150_000,
       })
+      let lastBeat = Date.now()
       for await (const piece of completion) {
-        if (piece.type !== 'text') continue
+        if (piece.type !== 'text') {
+          // A reasoning model can think for a minute without emitting visible
+          // text. The browser watchdog counts silent bytes, not silence from the
+          // model, so keep the stream visibly alive or a working answer gets
+          // stopped before its first word arrives.
+          if (Date.now() - lastBeat > 10_000) {
+            lastBeat = Date.now()
+            await stream
+              .writeSSE({
+                event: 'status',
+                data: JSON.stringify({ type: 'status', text: 'Still thinking…' }),
+              })
+              .catch(() => {})
+          }
+          continue
+        }
+        lastBeat = Date.now()
         await stream.writeSSE({
           data: JSON.stringify({ choices: [{ delta: { content: piece.text } }] }),
         })

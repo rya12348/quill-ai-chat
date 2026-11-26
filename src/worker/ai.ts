@@ -278,8 +278,14 @@ export async function* readSse(response: Response, signals: { client?: AbortSign
   try {
     while (true) {
       const { value, done } = await reader.read()
-      if (done) break
-      buffer += value
+      if (done) {
+        // A gateway can end the body without the blank line that closes its last
+        // event. Close it here: an SSE body with no trailing blank line at all
+        // would otherwise parse as nothing and be reported as an empty reply.
+        if (buffer.trim()) buffer += '\n\n'
+      } else {
+        buffer += value
+      }
       let end: number
       while ((end = buffer.indexOf('\n\n')) !== -1) {
         const event = buffer.slice(0, end)
@@ -314,6 +320,7 @@ export async function* readSse(response: Response, signals: { client?: AbortSign
           if (split.text) yield { type: 'text', text: split.text }
         }
       }
+      if (done) break
     }
     const tail = splitter.flush()
     if (tail.reasoning) yield { type: 'reasoning', text: tail.reasoning }

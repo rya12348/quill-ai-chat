@@ -1268,7 +1268,13 @@ async function* streamLane(lane: PublicLane, input: LaneInput): AsyncGenerator<S
         yield { type: 'text', text: buffered }
       }
     } catch (error) {
-      if (!input.signal?.aborted) {
+      // Our own idle guard cutting a lane off is not evidence that the provider
+      // is broken. Resting it for two minutes on top of the cut-off removed
+      // healthy-but-slow models from the rotation, and after a couple of
+      // messages most lanes were cooling — which the chat surfaced as "the
+      // models are busy right now" on a deployment whose lanes were fine.
+      const idleCutoff = Boolean(idle?.signal.aborted) && !input.signal?.aborted
+      if (!input.signal?.aborted && !idleCutoff) {
         cool(lane, COOLDOWN_ERROR)
         input.onLaneResult?.(failureResult(lane, error, startedAt))
       }
