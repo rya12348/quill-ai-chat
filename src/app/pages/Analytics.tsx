@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { ArrowLeft, Eye, Info, RefreshCw, Users } from 'lucide-react'
+import { ArrowLeft, Eye, Info, RefreshCw, Repeat, Users } from 'lucide-react'
 import { Link } from 'react-router'
 
 import type { TrafficDay, TrafficPage } from '../../shared/types'
@@ -285,6 +285,15 @@ export function Analytics() {
         ) : data && hasTraffic ? (
           <>
             <div className="mt-7 grid gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <Metric
+                  label="Came back this week"
+                  value={data.last7Days.returning}
+                  detail={`Of ${number.format(data.last7Days.visitors)} unique visitors in the last 7 days. ${number.format(data.last7Days.retained)} of them were also here the week before.`}
+                  icon={<Repeat className="size-4" />}
+                  accent
+                />
+              </div>
               <Metric
                 label="Unique visitors today"
                 value={data.today.visitors}

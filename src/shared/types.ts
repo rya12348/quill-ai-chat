@@ -925,7 +925,12 @@ export interface TrafficPage {
 
 export interface TrafficSummary {
   today: { visitors: number; views: number }
-  last7Days: { visitors: number; views: number }
+  /**
+   * The last 7 UTC days. `returning` counts visitors in the window whose first
+   * visit predates it (they came back unprompted); `retained` counts those also
+   * seen in the 7 days before the window.
+   */
+  last7Days: { visitors: number; views: number; returning: number; retained: number }
   allTime: { visitors: number; views: number }
   days: TrafficDay[]
   topPages: TrafficPage[]
