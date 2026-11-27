@@ -1,9 +1,10 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { Menu as MenuIcon, Bot, ChevronDown, Code2, Eye, Fish, Globe2, Library as LibraryIcon, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PenLine, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, Users, X } from 'lucide-react'
+import { Menu as MenuIcon, Bot, ChevronDown, Code2, Eye, Fish, Gamepad2, Globe2, Library as LibraryIcon, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PenLine, Pencil, Plus, Search, Settings as SettingsIcon, Trash2, Users, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 
 import { BRAND } from '../../shared/config'
+import { INK_SITES, siteCode } from '../../shared/sites'
 import type { Conversation } from '../../shared/types'
 import { isLocalTunnelHost } from '../../shared/traffic'
 import { useConversations, useDeleteConversation, useMe, useRenameConversation } from '../lib/api'
@@ -35,6 +36,10 @@ export function Mark({ size = 28, className }: { size?: number; className?: stri
 }
 
 /** Lets the chat page own the mobile top bar instead of stacking a second header. */
+/** kiwi.college as the home grid offers it. The rail carries the same opaque
+ * handle, so the shortcut never puts the site's address in an Ink URL. */
+const KIWI_HANDLE = siteCode(INK_SITES.find((site) => site.id === 'kiwi')?.url ?? 'https://kiwi.college/')
+
 const MobileNavContext = createContext<() => void>(() => {})
 export const useMobileNav = () => useContext(MobileNavContext)
 
@@ -295,6 +300,15 @@ function Sidebar({ onClose, onCollapse }: { onClose?: () => void; onCollapse?: (
         >
           <Globe2 className="size-4" />
             Browser
+        </NavLink>
+        <NavLink
+          to={`/proxy?s=${KIWI_HANDLE}`}
+          className={({ isActive }) =>
+            cx('relative mt-0.5 flex h-9 items-center gap-2.5 rounded-control px-3 text-[14px] transition-colors', isActive ? 'bg-surface text-fg shadow-card before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent' : 'text-muted hover:bg-surface hover:text-fg')
+          }
+        >
+          <Gamepad2 className="size-4" />
+          kiwi
         </NavLink>
           </div>
         )}
